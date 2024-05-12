@@ -1,4 +1,4 @@
-package com.finxai
+package com.feyton.finxai
 
 import android.app.Application
 import com.facebook.react.PackageList
