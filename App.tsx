@@ -1,5 +1,5 @@
-import React from 'react';
-import {SafeAreaView, Text, View} from 'react-native';
+import React, {useEffect} from 'react';
+import {PermissionsAndroid, SafeAreaView, Text, View} from 'react-native';
 
 import {styled} from 'nativewind';
 import SMSRetriever from './src/Components/SMSRetriever';
@@ -9,6 +9,18 @@ const StyledText = styled(Text);
 const StyledView = styled(View);
 
 function App(): React.JSX.Element {
+  const requestSmsPermission = async () => {
+    try {
+      await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
+    } catch (err) {
+      console.log(err);
+    }
+  };
+
+  useEffect(() => {
+    requestSmsPermission();
+  }, []);
+
   return (
     <SafeAreaView style={{backgroundColor: '#1d2027', flex: 1}}>
       <StyledView className="pt-1 bg-primary">
