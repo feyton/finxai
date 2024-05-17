@@ -1,8 +1,10 @@
 import React, {useEffect, useState} from 'react';
 
+import {useQuery, useRealm} from '@realm/react';
 import {styled} from 'nativewind';
 import {Text, View} from 'react-native';
 import SmsAndroid from 'react-native-get-sms-android';
+import {SMSLog} from '../tools/Schema';
 
 interface Account {
   name: string;
@@ -10,11 +12,12 @@ interface Account {
 }
 
 const StyledText = styled(Text);
-
 const StyledView = styled(View);
 
 function SMSRetriever(): React.JSX.Element {
   const [sms, setSMS] = useState();
+  const realm = useRealm();
+  const smsLogger = useQuery(SMSLog);
   const accounts: Account[] = [
     {name: 'Mobile Money', number: 'M-Money'},
     {name: 'Equity', number: 'EQUITYBANK'},
