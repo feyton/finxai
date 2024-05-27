@@ -14,6 +14,7 @@ const CreateAccountScreen = () => {
   const [category, setCategory] = useState('');
   const [auto, setAuto] = useState(false);
   const [error, setError] = useState('');
+  const [address, setAddress] = useState('');
 
   const handleCreateAccount = () => {
     try {
@@ -26,6 +27,7 @@ const CreateAccountScreen = () => {
           initial_amount: parseFloat(amount),
           category,
           auto,
+          address,
         });
       });
       // Optional: Navigate to another screen or reset form fields
@@ -62,6 +64,12 @@ const CreateAccountScreen = () => {
         placeholder="Category (e.g., Personal, Work)"
         value={category}
         onChangeText={setCategory}
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Address (e.g., M-Money, BKeBANK)"
+        value={address}
+        onChangeText={setAddress}
       />
 
       <View style={styles.switchContainer}>

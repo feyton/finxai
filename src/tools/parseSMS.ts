@@ -1,5 +1,4 @@
 import nlp from 'compromise';
-import crypto from 'crypto';
 
 export function extractTransactionInfo(message: string) {
   let info: any = {};
@@ -106,10 +105,6 @@ export function extractTransactionInfo(message: string) {
       info.fees = parseFloat(regexFeesMatch[1].replace(',', ''));
     }
   }
-
+console.log(info)
   return info;
-}
-
-export function generateHash(sms: string) {
-  return crypto.createHash('sha256').update(sms).digest('hex');
 }

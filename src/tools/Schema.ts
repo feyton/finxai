@@ -1,34 +1,13 @@
 import {Realm} from '@realm/react';
 import {BSON, ObjectSchema} from 'realm';
 
-// export class Account extends Realm.Object {
-//   name!: string;
-//   amount!: number;
-//   color!: string;
-//   currency!: string;
-//   type!: string;
-//   initial_amount!: number;
-//   icon!: string;
-//   constructor(
-//     realm: Realm,
-//     name: string,
-//     amount: number,
-//     color: string,
-//     currency: string,
-//     type: string,
-//     initial_amount: string,
-//     icon: string,
-//   ) {
-//     super(realm, {amount, name, color, currency, type, initial_amount, icon});
-//   }
-// }
-// Define your object model
 export class Account extends Realm.Object<Account> {
   _id!: BSON.ObjectId;
   name!: string;
   type!: string;
   amount!: number;
   category!: string;
+  address?: string;
 
   static schema: ObjectSchema = {
     name: 'Account',
@@ -40,6 +19,7 @@ export class Account extends Realm.Object<Account> {
       initial_amount: {type: 'float'},
       category: {type: 'string'},
       auto: {type: 'bool'},
+      address: {type: 'string', default: ''},
     },
     primaryKey: '_id',
   };
@@ -47,26 +27,31 @@ export class Account extends Realm.Object<Account> {
 
 export class Transaction extends Realm.Object<Transaction> {
   _id!: BSON.ObjectId;
-  name!: string;
-  type!: string;
+  amount!: string;
   account?: Account;
   category!: string;
+  subcategory!: string;
   date_time!: string;
   sms?: string;
-  confirmed!: string;
+  confirmed!: boolean;
+  currency?: string;
+  payee?: string;
+  transaction_type?: string;
 
   static schema: ObjectSchema = {
     name: 'Transaction',
     properties: {
       _id: 'objectId',
-      name: {type: 'string', indexed: 'full-text'},
-      type: {type: 'string', indexed: 'full-text'},
       amount: 'float',
       category: 'string',
       confirmed: {type: 'bool'},
       date_time: {type: 'date'},
       sms: {type: 'string'},
       account: 'Account?',
+      payee: 'string',
+      transaction_type: 'string',
+      currency: 'string',
+      subcategory: 'string',
     },
     primaryKey: '_id',
   };
