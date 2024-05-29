@@ -1,7 +1,22 @@
 import nlp from 'compromise';
 
+interface ExtractInfo {
+  amount: number;
+  fees?: number;
+  currency: string;
+  date_time: Date;
+  payee: string;
+  transaction_type: string;
+}
+
 export function extractTransactionInfo(message: string) {
-  let info: any = {};
+  let info: ExtractInfo = {
+    date_time: new Date(),
+    payee: '',
+    transaction_type: '',
+    amount: 0,
+    currency: 'RWF',
+  };
 
   // Perform NLP analysis
   const doc = nlp(message);
@@ -105,6 +120,5 @@ export function extractTransactionInfo(message: string) {
       info.fees = parseFloat(regexFeesMatch[1].replace(',', ''));
     }
   }
-console.log(info)
   return info;
 }

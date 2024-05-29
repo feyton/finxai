@@ -1,20 +1,40 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import React, {useEffect, useState} from 'react';
 
 import {useQuery, useRealm} from '@realm/react';
 import {styled} from 'nativewind';
-import {Text, View} from 'react-native';
+import {Button, Text, View} from 'react-native';
+// @ts-ignore
 import SmsAndroid from 'react-native-get-sms-android';
 import {BSON} from 'realm';
-import {Account, SMSLog} from '../tools/Schema';
+import {Account} from '../tools/Schema';
 import {extractTransactionInfo} from '../tools/parseSMS';
 
-const StyledText = styled(Text);
+interface SMS {
+  body: string;
+  address: string;
+}
+
+interface Transaction {
+  _id?: BSON.ObjectID;
+  amount: number;
+}
+interface ExtractInfo {
+  amount?: number;
+  fees?: number;
+  currency?: string;
+  date_time: Date;
+  payee: string;
+  transaction_type: string;
+}
+
 const StyledView = styled(View);
 
 function SMSRetriever(): React.JSX.Element {
-  const [smsSummary, setSMSSummary] = useState(null);
+  const [smsSummary, setSMSSummary] = useState();
+  const [initialized, setInitialized] = useState(false);
+  const [loading, setLoading] = useState(false);
   const realm = useRealm();
-  const smsLogs = useQuery(SMSLog).sorted('date', true);
   const accounts = useQuery(Account).filtered('auto == true');
   const getFirstDayOfMonthEpoch = () => {
     const now = new Date();
@@ -22,87 +42,97 @@ function SMSRetriever(): React.JSX.Element {
     return firstDayOfMonth.getTime();
   };
 
-  const getLastSMSLogDate = () => {
-    if (smsLogs.length > 0) {
-      return smsLogs[0].date;
-    }
-    return getFirstDayOfMonthEpoch();
-  };
-
-  const fetchSMS = async (minDate, address) => {
+  const fetchSMS = async (account: Account) => {
     const getFilters = () => {
       return {
         box: 'inbox',
-        minDate: minDate,
-        address: address,
+        minDate: account?.logDate || getFirstDayOfMonthEpoch(),
+        address: account.address,
       };
     };
 
     SmsAndroid.list(
       JSON.stringify(getFilters()),
-      fail => {
+      (fail: string) => {
         console.log('Failed with this error: ' + fail);
       },
-      (count, smsList) => {
-        parseAndCreateTransactions(JSON.parse(smsList), address);
+      (count: any, smsList: string) => {
+        if (count > 0) {
+          parseAndCreateTransactions(JSON.parse(smsList), account);
+        }
+        setSMSSummary({lastChecked: new Date().getTime()});
+        return;
       },
     );
   };
 
-  const parseAndCreateTransactions = (smsList, account) => {
-    const transactions = [];
+  const parseAndCreateTransactions = (smsList: SMS[], account: Account) => {
+    const transactions: Transaction[] = [];
 
     realm.write(() => {
-      smsList.forEach((sms: string) => {
+      smsList.forEach((sms: SMS) => {
         const transactionData = extractTransactionInfo(sms.body);
-        const transaction = realm.create('Transaction', {
-          _id: new BSON.ObjectId(),
-          ...transactionData,
-        });
+        try {
+          const transaction: Transaction = realm.create('Transaction', {
+            _id: new BSON.ObjectId(),
+            ...transactionData,
+            sms: sms.body,
+            account: account,
+          });
 
-        transactions.push(transaction);
+          transactions.push(transaction);
+        } catch (error) {
+          console.log(error);
+        }
       });
-
-      const newSMSLog = realm.create(SMSLog, {
-        _id: new BSON.ObjectId(),
-        date: new Date().getTime(),
-        count: smsList.length,
-        smsData: JSON.stringify(smsList),
-      });
-
-      const summary = {
-        totalTransactions: transactions.length,
-        totalAmount: transactions.reduce((sum, txn) => sum + txn.amount, 0),
-      };
-
-      setSMSSummary((prevSummary: any) => ({
-        totalTransactions:
-          (prevSummary?.totalTransactions || 0) + summary.totalTransactions,
-        totalAmount: (prevSummary?.totalAmount || 0) + summary.totalAmount,
-      }));
     });
+    realm.write(() => {
+      account.logDate = new Date().getTime();
+    });
+    const summary: any = {
+      totalTransactions: transactions.length,
+      totalAmount: transactions.reduce((sum, txn) => sum + txn.amount, 0),
+      lastChecked: new Date().getTime(),
+    };
+
+    setSMSSummary(summary);
+  };
+
+  const recheckTransactions = () => {
+    setInitialized(false);
   };
 
   useEffect(() => {
-    const lastLogDate = getLastSMSLogDate();
-    accounts.forEach(account => {
-      fetchSMS(lastLogDate, account.address);
-    });
-  }, [accounts]);
+    if (!initialized) {
+      setLoading(true);
+      accounts.forEach(account => {
+        fetchSMS(account);
+      });
+      setInitialized(true);
+      setLoading(false); // Mark as initialized to prevent re-running
+    }
+  }, [initialized, accounts]);
 
   return (
     <StyledView className="py-5">
-      {}
-      {smsSummary && (
+      {loading && <Text>Loadinging</Text>}
+      {smsSummary ? (
         <View>
           <Text style={{color: 'white'}}>
-            Transactions Created: {smsSummary.totalTransactions}
+            Transactions Created: {smsSummary?.totalTransactions}
           </Text>
           <Text style={{color: 'white'}}>
-            Total Amount: {smsSummary.totalAmount}
+            Total Amount: {smsSummary?.totalAmount}
           </Text>
+          <Text>Last checked: {smsSummary?.lastChecked}</Text>
+        </View>
+      ) : (
+        <View>
+          <Text>All is caught up</Text>
         </View>
       )}
+
+      <Button onPress={recheckTransactions} title="Re-check" />
     </StyledView>
   );
 }

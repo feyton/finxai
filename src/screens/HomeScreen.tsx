@@ -1,78 +1,98 @@
-import React, {useState} from 'react';
+import {useQuery, useRealm} from '@realm/react';
+import {styled} from 'nativewind';
+import React, {useCallback, useState} from 'react';
 import {
   Button,
+  FlatList,
   Modal,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-
-import {useQuery, useRealm} from '@realm/react';
-import {styled} from 'nativewind';
+import Summary from '../Components/AccountsSummary';
 import SMSRetriever from '../Components/SMSRetriever';
-import {Account} from '../tools/Schema';
+import {Account, Transaction} from '../tools/Schema';
 
 const StyledText = styled(Text);
-
 const StyledView = styled(View);
 
-function HomeScreen({navigation}): React.JSX.Element {
+const HomeScreen = ({navigation}: any) => {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState(null);
   const realm = useRealm();
   const accounts = useQuery(Account);
-  const deleteAccount = () => {
+
+  const deleteAccount = useCallback(() => {
     realm.write(() => {
+      const transactionsToDelete = realm
+        .objects(Transaction)
+        .filtered('account == $0', selectedAccount);
+      realm.delete(transactionsToDelete);
       realm.delete(selectedAccount);
     });
     setModalVisible(false);
-  };
+  }, [realm, selectedAccount]);
 
-  const handleLongPress = account => {
+  const handleLongPress = useCallback((account: any) => {
     setSelectedAccount(account);
     setModalVisible(true);
-  };
+  }, []);
 
-  const handlePress = account => {
-    navigation.navigate('AccountDetails', {accountId: account._id});
-  };
+  const handlePress = useCallback(
+    (account: any) => {
+      navigation.navigate('Details', {accountId: account._id});
+    },
+    [navigation],
+  );
+
+  const renderAccount = useCallback(
+    ({item: account}: any) => (
+      <TouchableOpacity
+        key={account._id.toString()}
+        style={styles.card}
+        onPress={() => handlePress(account)}
+        onLongPress={() => handleLongPress(account)}>
+        <Text style={styles.cardText}>Name: {account.name}</Text>
+        <Text style={styles.cardText}>Category: {account.type}</Text>
+        <Text style={styles.cardText}>Number: {account.address}</Text>
+        <Text style={styles.cardText}>Total: {account.amount}</Text>
+      </TouchableOpacity>
+    ),
+    [handlePress, handleLongPress],
+  );
 
   return (
-    <View style={{backgroundColor: '#000'}}>
-      <StyledView className="pt-1 bg-primary">
-        <StyledText className="font-bold text-center text-white">
-          Hello Fabrice
-        </StyledText>
-      </StyledView>
+    <View style={styles.container}>
       <SMSRetriever />
+      <Summary />
       <StyledView className="px-2 py-1 bg-white rounded-lg shadow-lg">
         <StyledText className="text-black">All accounts</StyledText>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          {accounts.map(account => (
-            <TouchableOpacity
-              key={account._id.toHexString()}
-              style={styles.card}
-              onPress={() => handlePress(account)}
-              onLongPress={() => handleLongPress(account)}>
-              <Text style={styles.cardText}>Name: {account.name}</Text>
-              <Text style={styles.cardText}>Category: {account.type}</Text>
-              <Text style={styles.cardText}>Number: {account.address}</Text>
-              <Text style={styles.cardText}>Total: {account.amount}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <FlatList
+          horizontal
+          data={accounts}
+          renderItem={renderAccount}
+          keyExtractor={account => account._id.toString()}
+          showsHorizontalScrollIndicator={false}
+        />
       </StyledView>
       <Button
         title="Create Account"
         onPress={() => navigation.navigate('Account')}
       />
+      <Button
+        title="Confirm Transactions"
+        onPress={() => navigation.navigate('Confirm')}
+      />
+      <Button
+        title="Manage Categories"
+        onPress={() => navigation.navigate('ManageCategories')}
+      />
 
       {selectedAccount && (
         <Modal
           animationType="slide"
-          transparent={true}
+          transparent
           visible={modalVisible}
           onRequestClose={() => setModalVisible(false)}>
           <View style={styles.centeredView}>
@@ -88,9 +108,13 @@ function HomeScreen({navigation}): React.JSX.Element {
       )}
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#1d2027',
+  },
   card: {
     backgroundColor: '#000',
     borderRadius: 10,
@@ -135,4 +159,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default HomeScreen;
+export default React.memo(HomeScreen);

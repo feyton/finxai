@@ -1,11 +1,19 @@
 import {useRealm} from '@realm/react';
 import React, {useState} from 'react';
 import {Button, StyleSheet, Switch, Text, TextInput, View} from 'react-native';
+import SelectDropdown from 'react-native-select-dropdown';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {BSON} from 'realm';
 import {Account} from '../tools/Schema';
 // Assuming your schema is in this file
 
-const CreateAccountScreen = () => {
+/*
+
+BK : BKeBank
+MTN: M-Money 
+*/
+
+const CreateAccountScreen = ({navigation}) => {
   const realm: any = useRealm();
 
   const [name, setName] = useState('');
@@ -15,6 +23,8 @@ const CreateAccountScreen = () => {
   const [auto, setAuto] = useState(false);
   const [error, setError] = useState('');
   const [address, setAddress] = useState('');
+
+  const accountTypes: any[] = [{title: 'General'}, {title: 'Cash'}];
 
   const handleCreateAccount = () => {
     try {
@@ -30,6 +40,7 @@ const CreateAccountScreen = () => {
           address,
         });
       });
+      navigation.navigate('Home');
       // Optional: Navigate to another screen or reset form fields
     } catch (err: any) {
       setError('Error creating account: ' + err.message);
@@ -45,6 +56,38 @@ const CreateAccountScreen = () => {
         placeholder="Account Name"
         value={name}
         onChangeText={setName}
+      />
+      <SelectDropdown
+        data={accountTypes}
+        onSelect={selectedItem => {
+          setCategory(selectedItem.title);
+        }}
+        renderButton={(selectedItem, isOpened) => {
+          return (
+            <View style={styles.dropdownButtonStyle}>
+              <Text style={styles.dropdownButtonTxtStyle}>
+                {(selectedItem && selectedItem.title) || 'Select your mood'}
+              </Text>
+              <Icon
+                name={isOpened ? 'chevron-up' : 'chevron-down'}
+                style={styles.dropdownButtonArrowStyle}
+              />
+            </View>
+          );
+        }}
+        renderItem={(item, index, isSelected) => {
+          return (
+            <View
+              style={{
+                ...styles.dropdownItemStyle,
+                ...(isSelected && {backgroundColor: '#5182ad'}),
+              }}>
+              <Text style={styles.dropdownItemTxtStyle}>{item.title}</Text>
+            </View>
+          );
+        }}
+        showsVerticalScrollIndicator={false}
+        dropdownStyle={styles.dropdownMenuStyle}
       />
       <TextInput
         style={styles.input}
@@ -97,6 +140,51 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   errorText: {color: 'red', marginBottom: 10},
+  dropdownButtonStyle: {
+    width: 200,
+    height: 50,
+    backgroundColor: '#E9ECEF',
+    borderRadius: 12,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+  },
+  dropdownButtonTxtStyle: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '500',
+    color: '#151E26',
+  },
+  dropdownButtonArrowStyle: {
+    fontSize: 28,
+  },
+  dropdownButtonIconStyle: {
+    fontSize: 28,
+    marginRight: 8,
+  },
+  dropdownMenuStyle: {
+    backgroundColor: '#E9ECEF',
+    borderRadius: 8,
+  },
+  dropdownItemStyle: {
+    width: '100%',
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  dropdownItemTxtStyle: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '500',
+    color: '#151E26',
+  },
+  dropdownItemIconStyle: {
+    fontSize: 28,
+    marginRight: 8,
+  },
 });
 
 export default CreateAccountScreen;
