@@ -9,19 +9,21 @@ export class Account extends Realm.Object<Account> {
   category!: string;
   address?: string;
   logDate?: number;
+  initial_amount?: number;
 
   static schema: ObjectSchema = {
     name: 'Account',
     properties: {
       _id: {type: 'objectId', default: new BSON.ObjectID()},
       name: {type: 'string', indexed: 'full-text'},
-      type: {type: 'string', indexed: 'full-text'},
-      amount: {type: 'float'},
-      initial_amount: {type: 'float'},
-      category: {type: 'string'},
+      amount: {type: 'double'},
+      initial_amount: {type: 'double', default: 0},
       auto: {type: 'bool'},
       address: {type: 'string', default: ''},
       logDate: 'int?',
+      number: 'string?',
+      logo: 'string?',
+      providerName: 'string?',
     },
     primaryKey: '_id',
   };

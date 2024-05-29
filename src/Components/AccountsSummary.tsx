@@ -17,7 +17,7 @@ function Summary() {
     let totalExpenses = 0;
 
     accounts.forEach(account => {
-      let accountTotal = account.openingBalance || 0;
+      let accountTotal = account.initial_amount || 0;
 
       transactions.filtered('account == $0', account).forEach(transaction => {
         if (transaction.transaction_type === 'income') {

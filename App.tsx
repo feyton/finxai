@@ -8,7 +8,7 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {RealmProvider} from '@realm/react';
 import CustomHeader from './src/Components/Header';
 import MyTabs from './src/navigation/MainStack';
-import CreateAccountScreen from './src/screens/Account';
+import CreateAccountScreen from './src/screens/CreateAccount';
 import AccountDetails from './src/screens/AccountDetails';
 import CategoryManagementScreen from './src/screens/CategoryManagementScreen';
 import ConfirmTransactionsScreen from './src/screens/ConfirmTransactions';

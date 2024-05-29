@@ -1,107 +1,154 @@
-import React from 'react';
+import {useQuery, useRealm} from '@realm/react';
+import React, {useCallback, useState} from 'react';
 
-import {FlatList, StyleSheet, Text, View} from 'react-native';
-import TransactionItem from '../Components/Transaction';
+import {styled} from 'nativewind';
+import {
+  Button,
+  FlatList,
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import {Account, Transaction} from '../tools/Schema';
 
-export default function AccountsPage() {
-  const transactions = [
-    {
-      id: '1',
-      type: 'expense',
-      account: 'Momo Outw...',
-      amount: 1200,
-      date: '2024-05-30',
-      confirmed: true,
+interface Props {
+  navigation: any;
+}
+
+const StyledText = styled(Text);
+const StyledView = styled(View);
+
+const AccountsPage: React.FC<Props> = ({navigation}) => {
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState(null);
+  const realm = useRealm();
+  const accounts = useQuery(Account);
+
+  const deleteAccount = useCallback(() => {
+    realm.write(() => {
+      const transactionsToDelete = realm
+        .objects(Transaction)
+        .filtered('account == $0', selectedAccount);
+      realm.delete(transactionsToDelete);
+      realm.delete(selectedAccount);
+    });
+    setModalVisible(false);
+  }, [realm, selectedAccount]);
+
+  const handleLongPress = useCallback((account: any) => {
+    setSelectedAccount(account);
+    setModalVisible(true);
+  }, []);
+
+  const handlePress = useCallback(
+    (account: any) => {
+      navigation.navigate('Details', {accountId: account._id});
     },
-    {
-      id: '2',
-      type: 'expense',
-      account: 'Bill Payt EUCL...',
-      amount: 3000,
-      date: '2024-05-30',
-      confirmed: true,
-    },
-    {
-      id: '3',
-      type: 'expense',
-      account: 'BK-BK Acc...',
-      amount: 200000,
-      date: '2024-05-08',
-      confirmed: true,
-    },
-    {
-      id: '4',
-      type: 'income',
-      account: 'MTN Push to Bank',
-      amount: 10000,
-      date: '2024-05-08',
-      confirmed: false,
-    },
-    {
-      id: '5',
-      type: 'expense',
-      account: 'Momo Outw...',
-      amount: 10000,
-      date: '2024-05-08',
-      confirmed: true,
-    },
-  ];
+    [navigation],
+  );
+
+  const renderAccount = useCallback(
+    ({item: account}: any) => (
+      <TouchableOpacity
+        key={account._id.toString()}
+        style={styles.card}
+        onPress={() => handlePress(account)}
+        onLongPress={() => handleLongPress(account)}>
+        <Text style={styles.cardText}>Name: {account.name}</Text>
+        <Text style={styles.cardText}>Category: {account.type}</Text>
+        <Text style={styles.cardText}>Number: {account.address}</Text>
+        <Text style={styles.cardText}>Total: {account.amount}</Text>
+      </TouchableOpacity>
+    ),
+    [handlePress, handleLongPress],
+  );
   return (
     <View style={styles.container}>
       <Text>Accounts</Text>
-      <FlatList
-        data={transactions}
-        keyExtractor={item => item.id}
-        renderItem={({item}) => <TransactionItem transaction={item} />}
-        ListHeaderComponent={<Text style={styles.dateHeader}>TOMORROW</Text>}
-        ListHeaderComponentStyle={styles.listHeader}
+      <StyledView className="px-2 py-1 bg-white rounded-lg shadow-lg">
+        <StyledText className="text-black">All accounts</StyledText>
+        <FlatList
+          horizontal
+          data={accounts}
+          renderItem={renderAccount}
+          keyExtractor={account => account._id.toString()}
+          showsHorizontalScrollIndicator={false}
+        />
+      </StyledView>
+      <Button
+        title="Create Account"
+        onPress={() => navigation.navigate('Account')}
       />
+      {selectedAccount && (
+        <Modal
+          animationType="slide"
+          transparent
+          visible={modalVisible}
+          onRequestClose={() => setModalVisible(false)}>
+          <View style={styles.centeredView}>
+            <View style={styles.modalView}>
+              <Text style={styles.modalText}>
+                Do you want to delete this account?
+              </Text>
+              <Button title="Delete" onPress={deleteAccount} />
+              <Button title="Cancel" onPress={() => setModalVisible(false)} />
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1e1e1e',
-    paddingHorizontal: 16,
-    paddingTop: 48,
+    backgroundColor: '#1d2027',
   },
-  header: {
-    fontSize: 20,
-    color: 'white',
-    marginBottom: 16,
+  card: {
+    backgroundColor: '#000',
+    borderRadius: 10,
+    padding: 15,
+    margin: 10,
+    width: 200,
+    shadowColor: '#fff',
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.8,
+    shadowRadius: 2,
+    elevation: 5,
   },
-  listHeader: {
-    paddingBottom: 8,
-  },
-  dateHeader: {
-    color: '#888',
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  transactionItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#2e2e2e',
-    padding: 16,
-    marginBottom: 8,
-    borderRadius: 8,
-  },
-  transactionInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  transactionDetails: {
-    marginLeft: 16,
-  },
-  transactionText: {
-    color: 'white',
+  cardText: {
     fontSize: 16,
+    marginBottom: 5,
   },
-  transactionAmount: {
-    color: '#ff6347',
-    fontSize: 16,
+  centeredView: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 22,
+  },
+  modalView: {
+    margin: 20,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 35,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  modalText: {
+    marginBottom: 15,
+    textAlign: 'center',
+    fontSize: 18,
   },
 });
+
+export default AccountsPage;

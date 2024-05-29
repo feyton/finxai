@@ -1,11 +1,14 @@
+/* eslint-disable @typescript-eslint/no-shadow */
 import {useObject, useQuery} from '@realm/react';
 import React, {useMemo} from 'react';
 import {FlatList, StyleSheet, Text, View} from 'react-native';
+import {BSON} from 'realm';
+import TransactionItem from '../Components/Transaction';
 import {Account, Transaction} from '../tools/Schema';
 
-function AccountDetails({route}) {
+function AccountDetails({route}: any) {
   const {accountId} = route.params;
-  const account = useObject(Account, accountId);
+  const account = useObject(Account, new BSON.ObjectID(accountId));
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const currentMonth = today.getMonth();
@@ -13,7 +16,7 @@ function AccountDetails({route}) {
   const transactions = useQuery(Transaction).filtered('account == $0', account);
 
   const {totalAmount, monthlyIncome, monthlyExpenses} = useMemo(() => {
-    let totalAmount = account.openingBalance || 0;
+    let totalAmount = account?.initial_amount || 0;
     let monthlyIncome = 0;
     let monthlyExpenses = 0;
 
@@ -49,14 +52,8 @@ function AccountDetails({route}) {
     account,
   );
 
-  const renderTransaction = ({item}) => (
-    <View style={styles.transactionItem}>
-      <Text>Amount: {item.amount}</Text>
-      <Text>Category: {item.category}</Text>
-      <Text>Date: {item.date_time.toLocaleString()}</Text>
-      <Text>Payee: {item.payee}</Text>
-      <Text>Type: {item.transaction_type}</Text>
-    </View>
+  const renderTransaction = ({item}: any) => (
+    <TransactionItem transaction={item} />
   );
 
   if (!account) {

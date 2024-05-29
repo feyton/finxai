@@ -1,4 +1,4 @@
-import {useNavigation} from '@react-navigation/native';
+import {useNavigation, useRoute} from '@react-navigation/native';
 import React from 'react';
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {Circle, Path, Svg} from 'react-native-svg';
@@ -8,8 +8,13 @@ interface HeaderProps {
 }
 
 const CustomHeader: React.FC<HeaderProps> = ({showBackButton}) => {
-  const user: any = {name: 'Fabrice', photo: 'https://example.com/photo.jpg'}; // Replace with your user context or prop
+  const user: any = {
+    name: 'Fabrice',
+    photo:
+      'https://res.cloudinary.com/feyton/image/upload/v1704708292/logo_dkwxhb.png',
+  }; // Replace with your user context or prop
   const navigation: any = useNavigation();
+  const route: any = useRoute();
 
   const handleBackPress = () => {
     navigation.goBack();
@@ -39,10 +44,16 @@ const CustomHeader: React.FC<HeaderProps> = ({showBackButton}) => {
             </Svg>
           </View>
         )}
-        <View style={styles.welcomeContainer}>
-          <Text style={styles.hello}>Hello</Text>
-          <Text style={styles.name}>{user.name}</Text>
-        </View>
+        {showBackButton ? (
+          <View style={{alignItems: 'center', height: 30}}>
+            <Text style={styles.screenTitle}>{route.name}</Text>
+          </View>
+        ) : (
+          <View style={styles.welcomeContainer}>
+            <Text style={styles.hello}>Hello</Text>
+            <Text style={styles.name}>{user.name}</Text>
+          </View>
+        )}
       </View>
       <View style={styles.rightContainer}>
         <TouchableOpacity onPress={() => navigation.navigate('Notifications')}>
@@ -107,6 +118,12 @@ const styles = StyleSheet.create({
     width: 40,
     borderRadius: 20,
     marginLeft: 15,
+  },
+  screenTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 18,
+    color: 'white',
+    marginLeft: 10,
   },
 });
 

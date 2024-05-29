@@ -41,7 +41,7 @@ const HomeScreen = ({navigation}: any) => {
 
   const handlePress = useCallback(
     (account: any) => {
-      navigation.navigate('Details', {accountId: account._id});
+      navigation.navigate('Details', {accountId: account._id.toString()});
     },
     [navigation],
   );
@@ -76,14 +76,7 @@ const HomeScreen = ({navigation}: any) => {
           showsHorizontalScrollIndicator={false}
         />
       </StyledView>
-      <Button
-        title="Create Account"
-        onPress={() => navigation.navigate('Account')}
-      />
-      <Button
-        title="Confirm Transactions"
-        onPress={() => navigation.navigate('Confirm')}
-      />
+
       <Button
         title="Manage Categories"
         onPress={() => navigation.navigate('ManageCategories')}

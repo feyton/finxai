@@ -1,9 +1,9 @@
+import {Picker} from '@react-native-picker/picker';
 import {useRealm} from '@realm/react';
 import React, {useState} from 'react';
 import {Button, StyleSheet, Switch, Text, TextInput, View} from 'react-native';
-import SelectDropdown from 'react-native-select-dropdown';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {BSON} from 'realm';
+import IMAGES from '../assets/images';
 import {Account} from '../tools/Schema';
 // Assuming your schema is in this file
 
@@ -13,35 +13,52 @@ BK : BKeBank
 MTN: M-Money 
 */
 
-const CreateAccountScreen = ({navigation}) => {
+const CreateAccountScreen = ({navigation}: any) => {
+  const providers: any = [
+    {name: 'Bank of Kigali', logo: IMAGES.BK, address: 'BKeBANK', id: 'bk'},
+    {
+      name: 'MTN Mobile Money',
+      logo: IMAGES.MTN,
+      address: 'M-Money',
+      id: 'momo',
+    },
+    {
+      name: 'Equity Bank',
+      logo: IMAGES.MTN,
+      address: 'EQUITYBANK',
+      id: 'equity',
+    },
+    {name: 'Custom', logo: IMAGES.CUSTOM, address: '', id: 'custom'},
+  ];
   const realm: any = useRealm();
 
   const [name, setName] = useState('');
-  const [type, setType] = useState('');
+  const [number, setNumber] = useState('');
   const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState('');
-  const [auto, setAuto] = useState(false);
+  const [auto, setAuto] = useState(true);
   const [error, setError] = useState('');
-  const [address, setAddress] = useState('');
-
-  const accountTypes: any[] = [{title: 'General'}, {title: 'Cash'}];
+  const [provider, setProvider] = useState<any>('');
 
   const handleCreateAccount = () => {
+    if (!provider || !name || !number) {
+      setError('All fields are required ');
+      return;
+    }
+    const prov = providers.find((provi: {id: any}) => provi.id === provider);
     try {
       realm.write(() => {
         realm.create(Account, {
           _id: new BSON.ObjectId(),
           name,
-          type,
           amount: parseFloat(amount),
           initial_amount: parseFloat(amount),
-          category,
           auto,
-          address,
+          address: prov.address,
+          number,
+          providerName: prov.name,
         });
       });
-      navigation.navigate('Home');
-      // Optional: Navigate to another screen or reset form fields
+      navigation.back();
     } catch (err: any) {
       setError('Error creating account: ' + err.message);
     }
@@ -50,50 +67,17 @@ const CreateAccountScreen = ({navigation}) => {
   return (
     <View style={styles.container}>
       <Text style={styles.errorText}>{error}</Text>
-
       <TextInput
         style={styles.input}
         placeholder="Account Name"
         value={name}
         onChangeText={setName}
       />
-      <SelectDropdown
-        data={accountTypes}
-        onSelect={selectedItem => {
-          setCategory(selectedItem.title);
-        }}
-        renderButton={(selectedItem, isOpened) => {
-          return (
-            <View style={styles.dropdownButtonStyle}>
-              <Text style={styles.dropdownButtonTxtStyle}>
-                {(selectedItem && selectedItem.title) || 'Select your mood'}
-              </Text>
-              <Icon
-                name={isOpened ? 'chevron-up' : 'chevron-down'}
-                style={styles.dropdownButtonArrowStyle}
-              />
-            </View>
-          );
-        }}
-        renderItem={(item, index, isSelected) => {
-          return (
-            <View
-              style={{
-                ...styles.dropdownItemStyle,
-                ...(isSelected && {backgroundColor: '#5182ad'}),
-              }}>
-              <Text style={styles.dropdownItemTxtStyle}>{item.title}</Text>
-            </View>
-          );
-        }}
-        showsVerticalScrollIndicator={false}
-        dropdownStyle={styles.dropdownMenuStyle}
-      />
       <TextInput
         style={styles.input}
-        placeholder="Account Type (e.g., Savings, Checking)"
-        value={type}
-        onChangeText={setType}
+        placeholder="Account Number"
+        value={number}
+        onChangeText={setNumber}
       />
       <TextInput
         style={styles.input}
@@ -102,18 +86,16 @@ const CreateAccountScreen = ({navigation}) => {
         value={amount}
         onChangeText={setAmount}
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Category (e.g., Personal, Work)"
-        value={category}
-        onChangeText={setCategory}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Address (e.g., M-Money, BKeBANK)"
-        value={address}
-        onChangeText={setAddress}
-      />
+      <View style={styles.pickerContainer}>
+        <Picker
+          selectedValue={provider}
+          onValueChange={itemValue => setProvider(itemValue)}
+          style={styles.picker}>
+          {providers.map((prov: {name: string; id: any}) => (
+            <Picker.Item key={prov.id} label={prov.name} value={prov.id} />
+          ))}
+        </Picker>
+      </View>
 
       <View style={styles.switchContainer}>
         <Text>Automatic Tracking:</Text>
@@ -184,6 +166,15 @@ const styles = StyleSheet.create({
   dropdownItemIconStyle: {
     fontSize: 28,
     marginRight: 8,
+  },
+  pickerContainer: {
+    borderWidth: 1,
+    borderColor: '#333',
+    borderRadius: 10,
+    marginVertical: 8,
+  },
+  picker: {
+    color: '#fff',
   },
 });
 
