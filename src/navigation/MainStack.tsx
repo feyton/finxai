@@ -11,8 +11,8 @@ import RecordsPage from '../screens/RecordsPage';
 const Tab = createBottomTabNavigator();
 
 function MainStack() {
-  const focusedColor = '#5c8ce5';
-  const notFocusedColor = '#404c64';
+  const focusedColor = '#3b66b4';
+  const notFocusedColor = '#586172';
 
   return (
     <Tab.Navigator
@@ -136,14 +136,14 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   tabBarStyle: {
-    backgroundColor: 'white',
+    backgroundColor: '#252933',
     borderTopColor: 'transparent',
     height: 60,
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: 5,
-    borderRadius: 10,
-    marginBottom: 3,
+    borderTopEndRadius: 10,
+    borderTopRightRadius: 10,
+    marginBottom: 0,
     padding: 0,
     position: 'absolute',
   },

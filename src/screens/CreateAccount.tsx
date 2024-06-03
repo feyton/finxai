@@ -1,180 +1,166 @@
 import {Picker} from '@react-native-picker/picker';
 import {useRealm} from '@realm/react';
 import React, {useState} from 'react';
-import {Button, StyleSheet, Switch, Text, TextInput, View} from 'react-native';
+import {useForm} from 'react-hook-form';
+import {Button, StyleSheet, Switch, Text, View} from 'react-native';
+import {ScrollView} from 'react-native-gesture-handler';
 import {BSON} from 'realm';
-import IMAGES from '../assets/images';
+import FloatingLabelInput from '../Components/FloatingInput';
 import {Account} from '../tools/Schema';
-// Assuming your schema is in this file
 
-/*
+interface CreateAccountScreenProps {
+  navigation: any;
+}
 
-BK : BKeBank
-MTN: M-Money 
-*/
-
-const CreateAccountScreen = ({navigation}: any) => {
-  const providers: any = [
-    {name: 'Bank of Kigali', logo: IMAGES.BK, address: 'BKeBANK', id: 'bk'},
+const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
+  navigation,
+}) => {
+  const providers = [
+    {
+      name: 'Bank of Kigali',
+      logo: 'https://res.cloudinary.com/feyton/image/upload/v1717159585/bank_of_kigali_n0mezg.webp',
+      address: 'BKeBANK',
+      id: 'bk',
+    },
     {
       name: 'MTN Mobile Money',
-      logo: IMAGES.MTN,
+      logo: 'https://res.cloudinary.com/feyton/image/upload/v1717159585/mtn_momo_l1nzpn.png',
       address: 'M-Money',
       id: 'momo',
     },
     {
       name: 'Equity Bank',
-      logo: IMAGES.MTN,
+      logo: 'https://res.cloudinary.com/feyton/image/upload/v1717159585/equity_bank_rrkkh7.png',
       address: 'EQUITYBANK',
       id: 'equity',
     },
-    {name: 'Custom', logo: IMAGES.CUSTOM, address: '', id: 'custom'},
+    {
+      name: 'Custom',
+      logo: 'https://res.cloudinary.com/feyton/image/upload/v1717159585/custom_pncud4.png',
+      address: '',
+      id: 'custom',
+    },
   ];
-  const realm: any = useRealm();
 
-  const [name, setName] = useState('');
-  const [number, setNumber] = useState('');
-  const [amount, setAmount] = useState('');
+  const realm = useRealm();
   const [auto, setAuto] = useState(true);
   const [error, setError] = useState('');
-  const [provider, setProvider] = useState<any>('');
+  const {control, handleSubmit} = useForm();
+  const [provider, setProvider] = useState<string>('');
 
-  const handleCreateAccount = () => {
-    if (!provider || !name || !number) {
-      setError('All fields are required ');
+  const handleCreateAccount = (data: any) => {
+    if (!provider) {
+      setError('Provider is required');
       return;
     }
-    const prov = providers.find((provi: {id: any}) => provi.id === provider);
+    const prov: any = providers.find(provi => provi.id === provider);
     try {
       realm.write(() => {
         realm.create(Account, {
           _id: new BSON.ObjectId(),
-          name,
-          amount: parseFloat(amount),
-          initial_amount: parseFloat(amount),
+          ...data,
+          amount: parseFloat(data.amount),
+          initial_amount: parseFloat(data.amount),
           auto,
           address: prov.address,
-          number,
           providerName: prov.name,
+          logo: prov.logo,
         });
       });
-      navigation.back();
+      navigation.goBack();
     } catch (err: any) {
       setError('Error creating account: ' + err.message);
     }
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container}>
       <Text style={styles.errorText}>{error}</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Account Name"
-        value={name}
-        onChangeText={setName}
+
+      <FloatingLabelInput
+        control={control}
+        name="name"
+        label="Account Name"
+        rules={{required: 'Account Name is required'}}
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Account Number"
-        value={number}
-        onChangeText={setNumber}
+      <FloatingLabelInput
+        control={control}
+        name="number"
+        label="Account Number"
+        rules={{required: 'Account Number is required'}}
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Initial Amount"
+      <FloatingLabelInput
+        control={control}
+        name="amount"
+        label="Initial Amount"
         keyboardType="numeric"
-        value={amount}
-        onChangeText={setAmount}
+        rules={{required: 'Initial Amount is required'}}
       />
+
       <View style={styles.pickerContainer}>
         <Picker
           selectedValue={provider}
           onValueChange={itemValue => setProvider(itemValue)}
           style={styles.picker}>
-          {providers.map((prov: {name: string; id: any}) => (
-            <Picker.Item key={prov.id} label={prov.name} value={prov.id} />
+          {providers.map(prov => (
+            <Picker.Item
+              key={prov.id}
+              style={{
+                fontFamily: 'Poppins-Regular',
+                fontSize: 14,
+                paddingHorizontal: 15,
+              }}
+              label={prov.name}
+              value={prov.id}
+            />
           ))}
         </Picker>
       </View>
 
       <View style={styles.switchContainer}>
-        <Text>Automatic Tracking:</Text>
+        <Text style={styles.switchText}>Automatic Tracking:</Text>
         <Switch value={auto} onValueChange={setAuto} />
       </View>
 
-      <Button title="Create Account" onPress={handleCreateAccount} />
-    </View>
+      <Button
+        title="Create Account"
+        onPress={handleSubmit(handleCreateAccount)}
+      />
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {padding: 20, backgroundColor: '#001'},
-  input: {
-    height: 40,
-    borderColor: 'gray',
-    borderWidth: 1,
-    marginBottom: 10,
-    paddingHorizontal: 10,
-  },
-  switchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  errorText: {color: 'red', marginBottom: 10},
-  dropdownButtonStyle: {
-    width: 200,
-    height: 50,
-    backgroundColor: '#E9ECEF',
-    borderRadius: 12,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-  },
-  dropdownButtonTxtStyle: {
+  container: {
     flex: 1,
-    fontSize: 18,
-    fontWeight: '500',
-    color: '#151E26',
+    padding: 20,
+    backgroundColor: '#121212',
   },
-  dropdownButtonArrowStyle: {
-    fontSize: 28,
-  },
-  dropdownButtonIconStyle: {
-    fontSize: 28,
-    marginRight: 8,
-  },
-  dropdownMenuStyle: {
-    backgroundColor: '#E9ECEF',
-    borderRadius: 8,
-  },
-  dropdownItemStyle: {
-    width: '100%',
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  dropdownItemTxtStyle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '500',
-    color: '#151E26',
-  },
-  dropdownItemIconStyle: {
-    fontSize: 28,
-    marginRight: 8,
+  errorText: {
+    color: 'red',
+    marginBottom: 10,
   },
   pickerContainer: {
     borderWidth: 1,
     borderColor: '#333',
     borderRadius: 10,
     marginVertical: 8,
+    fontFamily: 'Poppins-Regular',
+    paddingHorizontal: 10,
   },
   picker: {
-    color: '#fff',
+    color: '#a19e9e',
+    fontFamily: 'Poppins-Regular',
+  },
+  switchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  switchText: {
+    color: '#000',
+    marginRight: 10,
+    fontFamily: 'Arial',
   },
 });
 

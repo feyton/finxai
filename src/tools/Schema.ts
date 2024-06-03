@@ -1,4 +1,6 @@
 import {Realm} from '@realm/react';
+import {ObjectId} from 'bson';
+import {Double} from 'react-native/Libraries/Types/CodegenTypes';
 import {BSON, ObjectSchema} from 'realm';
 
 export class Account extends Realm.Object<Account> {
@@ -31,8 +33,8 @@ export class Account extends Realm.Object<Account> {
 
 export class Transaction extends Realm.Object<Transaction> {
   _id!: BSON.ObjectId;
-  amount?: string;
-  account?: Account;
+  amount?: Double;
+  account!: Account;
   category?: string;
   subcategory?: string;
   date_time!: string;
@@ -41,6 +43,8 @@ export class Transaction extends Realm.Object<Transaction> {
   currency?: string;
   payee?: string;
   transaction_type?: string;
+  note?: string;
+  fees?: Double;
 
   static schema: ObjectSchema = {
     name: 'Transaction',
@@ -51,16 +55,23 @@ export class Transaction extends Realm.Object<Transaction> {
       confirmed: {type: 'bool', default: false},
       date_time: {type: 'date'},
       sms: {type: 'string', indexed: true},
-      account: 'Account?',
+      account: 'Account',
       payee: 'string?',
       transaction_type: 'string',
       currency: 'string',
       subcategory: 'string?',
       budget: 'Budget?', // Link to the parent Budget object
       budgetItemId: 'string?',
+      note: 'string?',
+      splitDetails: 'SplitDetail[]',
+      toAccount: 'string?',
+      fees: 'double?', // Only for transfer transactions
     },
     primaryKey: '_id',
   };
+  total() {
+    return this.amount + this.fees;
+  }
 }
 
 export class Budget extends Realm.Object<Budget> {
@@ -68,6 +79,7 @@ export class Budget extends Realm.Object<Budget> {
   period!: string;
   startDate?: Date;
   endDate?: Date;
+  items?: any;
 
   static schema: ObjectSchema = {
     name: 'Budget',
@@ -85,19 +97,28 @@ export class Budget extends Realm.Object<Budget> {
       amount: 'double',
     },
   };
+  name: ReactNode;
   getTotalAmount() {
-    return this.items.reduce((total, item) => total + item.amount, 0);
+    return this.items.reduce(
+      (total: any, item: {amount: any}) => total + item.amount,
+      0,
+    );
   }
-  getCurrentSpending(transactions) {
+  getCurrentSpending(transactions: any[]) {
     let totalSpending = 0;
-    transactions.forEach(transaction => {
-      if (transaction.budget && transaction.budget._id.equals(this._id)) {
-        totalSpending += transaction.amount;
-      }
-    });
+    transactions.forEach(
+      (transaction: {
+        budget: {_id: {equals: (arg0: ObjectId) => any}};
+        amount: number;
+      }) => {
+        if (transaction.budget && transaction.budget._id.equals(this._id)) {
+          totalSpending += transaction.amount;
+        }
+      },
+    );
     return totalSpending;
   }
-  getSpendingPercentage(transactions) {
+  getSpendingPercentage(transactions: any) {
     const currentSpending = this.getCurrentSpending(transactions);
     return (currentSpending / this.getTotalAmount()) * 100;
   }
@@ -112,6 +133,19 @@ export class BudgetItem extends Realm.Object<BudgetItem> {
       category: 'string',
       subcategory: 'string?',
       amount: 'double',
+    },
+  };
+}
+
+export class SplitDetail extends Realm.Object<SplitDetail> {
+  static schema: ObjectSchema = {
+    name: 'SplitDetail',
+    embedded: true,
+    properties: {
+      amount: 'double',
+      category: 'string',
+      subcategory: 'string?',
+      note: 'string?',
     },
   };
 }

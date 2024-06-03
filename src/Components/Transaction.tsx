@@ -2,14 +2,20 @@
 import React from 'react';
 import {Image, StyleSheet, Text, View} from 'react-native';
 import {Path, Svg} from 'react-native-svg';
-import IMAGES from '../assets/images';
 
+interface Account {
+  _id: 'string';
+  name: 'string';
+  logo: 'string';
+}
 interface Transaction {
-  account: 'object';
+  account: Account;
   amount: number;
   transaction_type: string;
   confirmed: boolean;
-  date: string;
+  date_time: string;
+  payee: string;
+  category: string;
 }
 
 interface Props {
@@ -21,7 +27,10 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
     <View style={styles.transactionItem}>
       <View style={styles.transactionInfo}>
         <View style={{position: 'relative'}}>
-          <Image source={IMAGES.MTN} style={styles.accountImage} />
+          <Image
+            source={{uri: transaction?.account.logo}}
+            style={styles.accountImage}
+          />
           <View
             style={{
               position: 'absolute',
@@ -62,9 +71,11 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
         </View>
 
         <View style={styles.transactionDetails}>
-          <Text style={styles.transactionText}>{transaction.account}</Text>
+          <Text style={styles.transactionText}>{transaction?.account?.name}</Text>
           <View style={styles.transactionAmountContainer}>
-            <Text style={styles.date}>{transaction.date}</Text>
+            <Text style={styles.date}>
+              {transaction.date_time.toLocaleString()}
+            </Text>
             <Text
               style={[
                 styles.transactionAmount,
@@ -72,10 +83,12 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
                   ? styles.income
                   : styles.expense,
               ]}>
-              RWF {transaction.amount.toLocaleString()}
+              RWF {transaction?.amount.toLocaleString()}
             </Text>
           </View>
-          <Text style={styles.payee}>Payee: Fabrice | Food</Text>
+          <Text style={styles.payee}>
+            {transaction?.payee} | {transaction?.category}
+          </Text>
         </View>
       </View>
       {transaction.confirmed ? (
@@ -131,7 +144,7 @@ const styles = StyleSheet.create({
   transactionAmountContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 50,
+    gap: 30,
   },
   transactionAmount: {
     fontSize: 14,
@@ -141,14 +154,16 @@ const styles = StyleSheet.create({
     color: 'green',
   },
   expense: {
-    color: 'red',
+    color: '#da3434',
   },
   date: {
     fontFamily: 'Poppins-Light',
+    fontSize: 10,
   },
   payee: {
     fontFamily: 'Poppins-Light',
-    fontSize: 10,
+    fontSize: 9,
+    color: 'white',
   },
   accountImage: {
     width: 40,

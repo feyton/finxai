@@ -1,6 +1,5 @@
-import React from 'react';
-
-import {styled} from 'nativewind';
+import {useQuery} from '@realm/react';
+import React, {useState} from 'react';
 import {
   FlatList,
   StyleSheet,
@@ -10,78 +9,89 @@ import {
   View,
 } from 'react-native';
 import TransactionItem from '../Components/Transaction';
+import {Transaction} from '../tools/Schema';
 
-const StyledView = styled(View);
-const StyledText = styled(Text);
+const RecordsPage = ({navigation}: any) => {
+  const transactionsQuery = useQuery(Transaction);
+  const [searchQuery, setSearchQuery] = useState('');
 
-export default function RecordsPage({navigation}: any) {
-  const transactions = [
-    {
-      id: '1',
-      type: 'expense',
-      account: 'Momo Outw...',
-      amount: 1200,
-      date: '2024-05-30',
-      confirmed: true,
-    },
-    {
-      id: '2',
-      type: 'expense',
-      account: 'Bill Payt EUCL...',
-      amount: 3000,
-      date: '2024-05-30',
-      confirmed: true,
-    },
-    {
-      id: '3',
-      type: 'expense',
-      account: 'BK-BK Acc...',
-      amount: 200000,
-      date: '2024-05-08',
-      confirmed: true,
-    },
-    {
-      id: '4',
-      transaction_type: 'income',
-      account: 'MTN Push to Bank',
-      amount: 10000,
-      date: '2024-05-08',
-      confirmed: false,
-    },
-    {
-      id: '5',
-      transaction_type: 'expense',
-      account: 'Momo Outw...',
-      amount: 10000,
-      date: '2024-05-08',
-      confirmed: true,
-    },
-  ];
+  const groupTransactionsByDate = (transactions: any) => {
+    const groupedTransactions: any = {};
+    transactions.forEach((transaction: any) => {
+      const date = new Date(transaction.date_time);
+      const today = new Date();
+      let dateLabel;
+
+      if (date.toDateString() === today.toDateString()) {
+        dateLabel = 'Today';
+      } else if (
+        date.toDateString() ===
+        new Date(today.setDate(today.getDate() - 1)).toDateString()
+      ) {
+        dateLabel = 'Yesterday';
+      } else if (date.getDay() === 5) {
+        dateLabel = 'Friday';
+      } else {
+        dateLabel = date.toDateString();
+      }
+
+      if (!groupedTransactions[dateLabel]) {
+        groupedTransactions[dateLabel] = [];
+      }
+
+      groupedTransactions[dateLabel].push(transaction);
+    });
+
+    return groupedTransactions;
+  };
+
+  const filteredTransactions = transactionsQuery.filter((transaction: any) =>
+    transaction.account.name.toLowerCase().includes(searchQuery.toLowerCase()),
+  );
+
+  const groupedTransactions = groupTransactionsByDate(filteredTransactions);
+  const sections = Object.keys(groupedTransactions).map(date => ({
+    title: date,
+    data: groupedTransactions[date],
+  }));
+
   return (
     <View style={styles.container}>
-      <View>
+      <View style={styles.headerView}>
         <TouchableOpacity
-          style={styles.categoryView}
+          style={styles.categoryButton}
           onPress={() => navigation.navigate('ManageCategories')}>
-          <StyledText className="font-bold font-poppins">Manage Categories</StyledText>
+          <Text style={styles.catStyle}>Manage Categories</Text>
         </TouchableOpacity>
       </View>
 
-      <View>
-        <TextInput placeholder="Search transaction" />
+      <View style={styles.searchView}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search transaction"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
       </View>
+
       <FlatList
-        data={transactions}
-        keyExtractor={item => item.id}
-        renderItem={({item}: any) => <TransactionItem transaction={item} />}
-        ListHeaderComponent={
-          <Text style={styles.dateHeader}>Recent Records</Text>
-        }
-        ListHeaderComponentStyle={styles.listHeader}
+        data={sections}
+        keyExtractor={item => item.title}
+        renderItem={({item: section}) => (
+          <View key={section.title} style={styles.sectionView}>
+            <Text style={styles.dateHeader}>{section.title}</Text>
+            <FlatList
+              data={section.data}
+              keyExtractor={item => item.id}
+              renderItem={({item}) => <TransactionItem transaction={item} />}
+              ListHeaderComponentStyle={styles.listHeader}
+            />
+          </View>
+        )}
       />
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -90,15 +100,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
   },
-  categoryView: {
-    backgroundColor: 'green',
-    padding: 5,
-    borderRadius: 10,
+  catStyle: {
     fontFamily: 'Poppins-Regular',
   },
-  header: {
-    fontSize: 20,
+  headerView: {
+    marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  categoryButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 5,
+    alignItems: 'center',
+  },
+  searchView: {
+    marginBottom: 5,
+  },
+  searchInput: {
+    backgroundColor: '#2e2e2e',
     color: 'white',
+    padding: 10,
+    borderRadius: 8,
+  },
+  sectionView: {
     marginBottom: 16,
   },
   listHeader: {
@@ -135,3 +161,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
+
+export default RecordsPage;

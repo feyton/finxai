@@ -1,4 +1,5 @@
 /* eslint-disable react-hooks/exhaustive-deps */
+import {useNavigation} from '@react-navigation/native';
 import {useQuery, useRealm} from '@realm/react';
 import React, {useEffect, useState} from 'react';
 import {
@@ -8,8 +9,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-
-import {useNavigation} from '@react-navigation/native';
 // @ts-ignore
 import SmsAndroid from 'react-native-get-sms-android';
 import {Path, Svg} from 'react-native-svg';
@@ -73,10 +72,9 @@ const SMSRetriever: React.FC<Props> = () => {
     realm.write(() => {
       smsList.forEach((sms: SMS) => {
         const transactionData = extractTransactionInfo(sms.body);
-        console.log(sms.body, transactionData);
         try {
           const transaction: Transaction = realm.create('Transaction', {
-            _id: new BSON.ObjectId(),
+            _id: new BSON.ObjectID(),
             ...transactionData,
             sms: sms.body,
             account: account,
@@ -141,22 +139,17 @@ const SMSRetriever: React.FC<Props> = () => {
         </View>
       )}
       {!loading && smsSummary?.lastChecked && (
-        <View
-          style={{
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignContent: 'center',
-            alignItems: 'center',
-          }}>
+        <View style={styles.summaryContainer}>
           <View>
-            <Text style={styles.congratsText}>All sorted! Congz!</Text>
-            <Text style={{fontFamily: 'Poppins-Light'}}>
+            <Text style={styles.congratsText}>All sorted! Congrats!</Text>
+            <Text style={styles.checkedText}>
               Checked: {new Date(smsSummary?.lastChecked).toLocaleString()}
             </Text>
           </View>
-
           <View style={styles.buttonContainer}>
-            <TouchableOpacity onPress={recheckTransactions}>
+            <TouchableOpacity
+              onPress={recheckTransactions}
+              style={styles.button}>
               <Svg width="40px" height="40px" viewBox="0 0 24 24" fill="none">
                 <Path
                   opacity="1"
@@ -169,7 +162,9 @@ const SMSRetriever: React.FC<Props> = () => {
                 />
               </Svg>
             </TouchableOpacity>
-            <TouchableOpacity onPress={navigateToConfirmations}>
+            <TouchableOpacity
+              onPress={navigateToConfirmations}
+              style={styles.button}>
               <Svg width="40px" height="40px" viewBox="0 0 24 24" fill="none">
                 <Path
                   opacity="0.9"
@@ -191,9 +186,9 @@ const SMSRetriever: React.FC<Props> = () => {
 
 const styles = StyleSheet.create({
   container: {
-    padding: 10,
+    padding: 16,
     backgroundColor: '#2e2e2e',
-    margin: 5,
+    margin: 10,
     borderRadius: 10,
   },
   loadingContainer: {
@@ -202,10 +197,15 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   loadingText: {
-    marginLeft: 8,
+    marginLeft: 10,
     color: '#ffffff',
     fontSize: 16,
     fontFamily: 'Poppins-Regular',
+  },
+  summaryContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   summaryText: {
     color: '#ffffff',
@@ -219,6 +219,11 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-Regular',
     marginBottom: 0,
   },
+  checkedText: {
+    fontFamily: 'Poppins-Light',
+    color: '#ffffff',
+    fontSize: 12,
+  },
   buttonContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -226,9 +231,6 @@ const styles = StyleSheet.create({
   button: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#5f7460',
-    borderRadius: 5,
-    marginRight: 10,
   },
   buttonText: {
     color: '#ffffff',

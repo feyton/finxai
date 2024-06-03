@@ -171,12 +171,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 8,
+    gap: 5,
   },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',
     padding: 8,
     marginVertical: 8,
+    borderRadius: 10,
   },
   modalView: {
     flex: 1,

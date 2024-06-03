@@ -6,18 +6,21 @@ import 'react-native-get-random-values';
 import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {RealmProvider} from '@realm/react';
+import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import CustomHeader from './src/Components/Header';
 import MyTabs from './src/navigation/MainStack';
-import CreateAccountScreen from './src/screens/CreateAccount';
 import AccountDetails from './src/screens/AccountDetails';
 import CategoryManagementScreen from './src/screens/CategoryManagementScreen';
 import ConfirmTransactionsScreen from './src/screens/ConfirmTransactions';
+import CreateAccountScreen from './src/screens/CreateAccount';
 import CreateBudgetScreen from './src/screens/CreateBudget';
+
 import {
   Account,
   Budget,
   BudgetItem,
   Category,
+  SplitDetail,
   Transaction,
 } from './src/tools/Schema';
 const Stack = createNativeStackNavigator();
@@ -36,29 +39,34 @@ function App(): React.JSX.Element {
   }, []);
 
   return (
-    <NavigationContainer>
-      <RealmProvider
-        schemaVersion={1}
-        deleteRealmIfMigrationNeeded={true}
-        schema={[Account, Transaction, Budget, BudgetItem, Category]}>
-        <Stack.Navigator
-          screenOptions={({route}) => ({
-            header: () => (
-              <CustomHeader showBackButton={route.name !== 'Home'} />
-            ),
-          })}>
-          <Stack.Screen name="Home" component={MyTabs} />
-          <Stack.Screen name="Account" component={CreateAccountScreen} />
-          <Stack.Screen name="Details" component={AccountDetails} />
-          <Stack.Screen name="Confirm" component={ConfirmTransactionsScreen} />
-          <Stack.Screen name="CreateBudget" component={CreateBudgetScreen} />
-          <Stack.Screen
-            name="ManageCategories"
-            component={CategoryManagementScreen}
-          />
-        </Stack.Navigator>
-      </RealmProvider>
-    </NavigationContainer>
+    <GestureHandlerRootView>
+      <NavigationContainer>
+        <RealmProvider
+          schemaVersion={1}
+          deleteRealmIfMigrationNeeded={true}
+          schema={[Account, Transaction, Budget, BudgetItem, Category, SplitDetail]}>
+          <Stack.Navigator
+            screenOptions={({route}) => ({
+              header: () => (
+                <CustomHeader showBackButton={route.name !== 'Home'} />
+              ),
+            })}>
+            <Stack.Screen name="Home" component={MyTabs} />
+            <Stack.Screen name="Account" component={CreateAccountScreen} />
+            <Stack.Screen name="Details" component={AccountDetails} />
+            <Stack.Screen
+              name="Confirm"
+              component={ConfirmTransactionsScreen}
+            />
+            <Stack.Screen name="CreateBudget" component={CreateBudgetScreen} />
+            <Stack.Screen
+              name="ManageCategories"
+              component={CategoryManagementScreen}
+            />
+          </Stack.Navigator>
+        </RealmProvider>
+      </NavigationContainer>
+    </GestureHandlerRootView>
   );
 }
 
