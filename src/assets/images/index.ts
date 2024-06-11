@@ -7,4 +7,18 @@ const IMAGES = {
   CUSTOM: require('./custom.png'),
 };
 
+export const COLORS = {
+  bgPrimary: '#1d2027',
+  bgSecondary: '#2e2e2e',
+  textPrimary: 'white',
+  buttonPrimary: '#375edf',
+  buttonSecondary: '#8d9e97',
+  buttonSuccess: '#1baa2e',
+};
+
+export const FONTS = {
+  bold: 'Poppins-Bold',
+  regular: 'Poppins-Regular',
+};
+
 export default IMAGES;

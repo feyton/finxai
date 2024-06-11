@@ -2,7 +2,7 @@ import {Picker} from '@react-native-picker/picker';
 import {useRealm} from '@realm/react';
 import React, {useState} from 'react';
 import {useForm} from 'react-hook-form';
-import {Button, StyleSheet, Switch, Text, View} from 'react-native';
+import {StyleSheet, Switch, Text, TouchableOpacity, View} from 'react-native';
 import {ScrollView} from 'react-native-gesture-handler';
 import {BSON} from 'realm';
 import FloatingLabelInput from '../Components/FloatingInput';
@@ -74,7 +74,17 @@ const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
+      <Text
+        style={{
+          textAlign: 'center',
+          fontFamily: 'Poppins-Bold',
+          color: 'white',
+          fontSize: 16,
+        }}>
+        Create Account
+      </Text>
+
       <Text style={styles.errorText}>{error}</Text>
 
       <FloatingLabelInput
@@ -102,6 +112,7 @@ const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
           selectedValue={provider}
           onValueChange={itemValue => setProvider(itemValue)}
           style={styles.picker}>
+          <Picker.Item label="Select Provider" value={''} />
           {providers.map(prov => (
             <Picker.Item
               key={prov.id}
@@ -121,11 +132,19 @@ const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
         <Text style={styles.switchText}>Automatic Tracking:</Text>
         <Switch value={auto} onValueChange={setAuto} />
       </View>
-
-      <Button
-        title="Create Account"
-        onPress={handleSubmit(handleCreateAccount)}
-      />
+      <TouchableOpacity
+        style={{
+          backgroundColor: '#1E90FF',
+          padding: 12,
+          borderRadius: 10,
+          alignItems: 'center',
+          marginVertical: 8,
+        }}
+        onPress={handleSubmit(handleCreateAccount)}>
+        <Text style={{fontFamily: 'Poppins-Regular', color: 'white'}}>
+          Create Account
+        </Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 };
@@ -156,11 +175,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 10,
+    marginHorizontal: 10,
+    marginTop: 10,
   },
   switchText: {
-    color: '#000',
+    color: 'white',
     marginRight: 10,
-    fontFamily: 'Arial',
+    fontFamily: 'Poppins-Regular',
   },
 });
 

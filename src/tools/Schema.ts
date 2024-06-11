@@ -11,7 +11,7 @@ export class Account extends Realm.Object<Account> {
   category!: string;
   address?: string;
   logDate?: number;
-  initial_amount?: number;
+  initial_amount!: number;
 
   static schema: ObjectSchema = {
     name: 'Account',
@@ -26,14 +26,54 @@ export class Account extends Realm.Object<Account> {
       number: 'string?',
       logo: 'string?',
       providerName: 'string?',
+      transactions: {type: 'list', objectType: 'Transaction'},
+      transfers: 'Transaction[]',
     },
     primaryKey: '_id',
   };
+  updateAvailableBalance(realm: Realm) {
+    realm.write(() => {
+      const linkedTransactions = realm
+        .objects('Transaction')
+        .filtered('account._id == $0', this._id);
+      const totalIncome = linkedTransactions
+        .filtered("transaction_type == 'income'")
+        .sum('amount');
+      const totalExpense = linkedTransactions
+        .filtered("transaction_type == 'expense'")
+        .sum('amount');
+      const totalFees = linkedTransactions
+        .filtered("transaction_type == 'expense'")
+        .sum('fees');
+      const incomingTransfers = realm
+        .objects('Transaction')
+        .filtered(
+          "toAccount._id == $0 AND transaction_type == 'transfer'",
+          this._id,
+        );
+      const outgoingTransfers = realm
+        .objects('Transaction')
+        .filtered(
+          "account._id == $0 AND transaction_type == 'transfer'",
+          this._id,
+        );
+      const totalIncoming = incomingTransfers.sum('amount');
+      const totalOutgoing = outgoingTransfers.sum('amount');
+
+      this.amount =
+        this.initial_amount +
+        totalIncome -
+        totalExpense -
+        totalFees +
+        totalIncoming -
+        totalOutgoing;
+    });
+  }
 }
 
 export class Transaction extends Realm.Object<Transaction> {
   _id!: BSON.ObjectId;
-  amount?: Double;
+  amount!: any;
   account!: Account;
   category?: string;
   subcategory?: string;
@@ -50,8 +90,7 @@ export class Transaction extends Realm.Object<Transaction> {
     name: 'Transaction',
     properties: {
       _id: {type: 'objectId', default: new BSON.ObjectID()},
-      amount: 'float?',
-      category: 'string?',
+      amount: 'double',
       confirmed: {type: 'bool', default: false},
       date_time: {type: 'date'},
       sms: {type: 'string', indexed: true},
@@ -59,18 +98,31 @@ export class Transaction extends Realm.Object<Transaction> {
       payee: 'string?',
       transaction_type: 'string',
       currency: 'string',
-      subcategory: 'string?',
+      category: 'Category?',
+      subcategory: 'Subcategory?',
       budget: 'Budget?', // Link to the parent Budget object
       budgetItemId: 'string?',
       note: 'string?',
       splitDetails: 'SplitDetail[]',
-      toAccount: 'string?',
-      fees: 'double?', // Only for transfer transactions
+      toAccount: {
+        type: 'linkingObjects',
+        objectType: 'Account',
+        property: 'transfers',
+      },
+      fees: {type: 'double', default: 0}, // Only for transfer transactions
     },
     primaryKey: '_id',
   };
-  total() {
-    return this.amount + this.fees;
+  get total() {
+    if (this.transaction_type === 'income') {
+      return this.amount;
+    }
+    if (this.transaction_type === 'expense') {
+      return -this.amount - this.fees;
+    }
+    if (this.transaction_type === 'transfer') {
+      return -this.amount - this.fees;
+    }
   }
 }
 
@@ -97,25 +149,16 @@ export class Budget extends Realm.Object<Budget> {
       amount: 'double',
     },
   };
-  name: ReactNode;
+  name!: string;
   getTotalAmount() {
     return this.items.reduce(
       (total: any, item: {amount: any}) => total + item.amount,
       0,
     );
   }
-  getCurrentSpending(transactions: any[]) {
+  getCurrentSpending() {
     let totalSpending = 0;
-    transactions.forEach(
-      (transaction: {
-        budget: {_id: {equals: (arg0: ObjectId) => any}};
-        amount: number;
-      }) => {
-        if (transaction.budget && transaction.budget._id.equals(this._id)) {
-          totalSpending += transaction.amount;
-        }
-      },
-    );
+
     return totalSpending;
   }
   getSpendingPercentage(transactions: any) {
@@ -130,8 +173,8 @@ export class BudgetItem extends Realm.Object<BudgetItem> {
     embedded: true, // Mark BudgetItem as embedded
     properties: {
       _id: {type: 'objectId', default: new BSON.ObjectID()},
-      category: 'string',
-      subcategory: 'string?',
+      category: 'Category?',
+      subcategory: 'Subcategory?',
       amount: 'double',
     },
   };
@@ -151,15 +194,41 @@ export class SplitDetail extends Realm.Object<SplitDetail> {
 }
 
 export class Category extends Realm.Object<Category> {
-  name!: 'string';
-  subcategories?: 'string[]';
+  _id!: BSON.ObjectId;
+  name!: string;
+  icon!: string;
+  type!: 'income' | 'expense'; // Add a type field
+  subcategories: Realm.List<Subcategory> | undefined;
+
   static schema: ObjectSchema = {
     name: 'Category',
     properties: {
-      _id: {type: 'objectId', default: new BSON.ObjectID()},
+      _id: {type: 'objectId', default: () => new ObjectId()},
       name: 'string',
-      subcategories: 'string[]',
+      icon: 'string',
+      type: {type: 'string', default: 'expense'}, // Default to 'expense'
+      subcategories: {type: 'list', objectType: 'Subcategory'},
+      transactions: {
+        objectType: 'Transaction',
+        type: 'list',
+      },
     },
     primaryKey: '_id',
+  };
+}
+
+export class Subcategory extends Realm.Object {
+  _id!: BSON.ObjectId;
+  name!: string;
+  icon!: string;
+
+  static schema: ObjectSchema = {
+    name: 'Subcategory',
+    embedded: true, // Make Subcategory embedded in Category
+    properties: {
+      _id: {type: 'objectId', default: () => new ObjectId()},
+      name: 'string',
+      icon: 'string',
+    },
   };
 }

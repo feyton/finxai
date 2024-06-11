@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
     color: 'red',
     fontSize: 12,
     marginTop: 5,
-    fontFamily: 'Arial',
+    fontFamily: 'Poppins-Regular',
   },
 });
 

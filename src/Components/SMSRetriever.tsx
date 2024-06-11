@@ -9,11 +9,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+
 // @ts-ignore
 import SmsAndroid from 'react-native-get-sms-android';
 import {Path, Svg} from 'react-native-svg';
 import {BSON} from 'realm';
-import {Account} from '../tools/Schema';
+import {Account, Transaction} from '../tools/Schema';
 import {extractTransactionInfo} from '../tools/parseSMS';
 
 interface SMS {
@@ -21,16 +22,9 @@ interface SMS {
   address: string;
 }
 
-interface Transaction {
-  _id?: BSON.ObjectID;
-  amount: number;
-}
-
-interface Props {}
-
-const SMSRetriever: React.FC<Props> = () => {
+const SMSRetriever: React.FC = () => {
   const navigation = useNavigation<any>();
-  const [smsSummary, setSMSSummary] = useState<any>();
+  const [smsSummary, setSMSSummary] = useState<any>({});
   const [initialized, setInitialized] = useState(false);
   const [loading, setLoading] = useState(false);
   const realm = useRealm();
@@ -42,59 +36,85 @@ const SMSRetriever: React.FC<Props> = () => {
     return firstDayOfMonth.getTime();
   };
 
-  const fetchSMS = async (account: Account) => {
-    const getFilters = () => {
-      return {
-        box: 'inbox',
-        minDate: account?.logDate || getFirstDayOfMonthEpoch(),
-        address: account.address,
-      };
-    };
-
-    SmsAndroid.list(
-      JSON.stringify(getFilters()),
-      (fail: string) => {
-        console.log('Failed with this error: ' + fail);
-      },
-      (count: any, smsList: string) => {
-        if (count > 0) {
-          parseAndCreateTransactions(JSON.parse(smsList), account);
+  const parseAndCreateTransactions = async (
+    smsList: SMS[],
+    account: Account,
+  ) => {
+    const accountToUpdate = realm.objectForPrimaryKey(Account, account._id);
+    const transactionsToCreate = smsList
+      .map(sms => {
+        let transactionData = extractTransactionInfo(sms.body);
+        if (Object.keys(transactionData).length === 0) {
+          console.warn(
+            'Skipping transaction creation for SMS:',
+            sms,
+            transactionData,
+          );
+          return null;
         }
-        setSMSSummary({lastChecked: new Date().getTime()});
-        return;
-      },
-    );
+        if (isNaN(transactionData.amount)) {
+          transactionData.amount = 0;
+        }
+        transactionData.date_time =
+          new Date(transactionData.date_time) || new Date();
+        return {
+          _id: new BSON.ObjectID(),
+          ...transactionData,
+          sms: sms.body,
+          account: accountToUpdate,
+        };
+      })
+      .filter(Boolean);
+
+    if (transactionsToCreate.length > 0) {
+      realm.write(() => {
+        transactionsToCreate.forEach(transaction => {
+          try {
+            realm.create('Transaction', transaction);
+          } catch (error) {
+            console.log(error, transaction);
+          }
+        });
+        account.logDate = new Date().getTime();
+      });
+    }
   };
 
-  const parseAndCreateTransactions = (smsList: SMS[], account: Account) => {
-    const transactions: Transaction[] = [];
-
-    realm.write(() => {
-      smsList.forEach((sms: SMS) => {
-        const transactionData = extractTransactionInfo(sms.body);
-        try {
-          const transaction: Transaction = realm.create('Transaction', {
-            _id: new BSON.ObjectID(),
-            ...transactionData,
-            sms: sms.body,
-            account: account,
-          });
-          transactions.push(transaction);
-        } catch (error) {
-          console.log(error);
-        }
-      });
-    });
-    realm.write(() => {
-      account.logDate = new Date().getTime();
-    });
-    const summary: any = {
-      totalTransactions: transactions.length,
-      totalAmount: transactions.reduce((sum, txn) => sum + txn.amount, 0),
-      lastChecked: new Date().getTime(),
+  const fetchSmsForAccount = async (account: Account) => {
+    const filters = {
+      box: 'inbox',
+      minDate: account?.logDate || getFirstDayOfMonthEpoch(),
+      address: account.address,
     };
 
-    setSMSSummary(summary);
+    return new Promise<void>((resolve, reject) => {
+      SmsAndroid.list(
+        JSON.stringify(filters),
+        (fail: string) => {
+          console.log('Failed with this error: ' + fail);
+          reject(fail);
+        },
+        async (count: any, smsList: string) => {
+          if (count > 0) {
+            await parseAndCreateTransactions(JSON.parse(smsList), account);
+          }
+          resolve();
+        },
+      );
+    });
+  };
+
+  const retrieveTransactions = async () => {
+    setLoading(true);
+    try {
+      await Promise.all(accounts.map(account => fetchSmsForAccount(account)));
+    } catch (error) {
+      console.error('Error retrieving transactions:', error);
+    } finally {
+      setSMSSummary({lastChecked: new Date()});
+      setInitialized(true);
+      setLoading(false);
+    }
   };
 
   const recheckTransactions = () => {
@@ -107,44 +127,29 @@ const SMSRetriever: React.FC<Props> = () => {
 
   useEffect(() => {
     if (!initialized) {
-      setLoading(true);
-      accounts.forEach(account => {
-        fetchSMS(account);
-      });
-      setInitialized(true);
-      setSMSSummary({...smsSummary, lastChecked: new Date()});
-      setLoading(false); // Mark as initialized to prevent re-running
+      retrieveTransactions();
     }
-  }, [initialized, accounts]);
+  }, [initialized, accounts, realm]);
+
+  const transactions = useQuery(Transaction).filtered('confirmed == false');
 
   return (
     <View style={styles.container}>
       {loading && (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#ffffff" />
-          <Text style={styles.loadingText}>Checking latest updates...</Text>
+          <Text style={styles.loadingText}>Getting updates...</Text>
         </View>
       )}
-      {!loading && smsSummary?.totalAmount && (
-        <View>
-          <Text style={styles.summaryText}>
-            Transactions Created: {smsSummary.totalTransactions}
-          </Text>
-          <Text style={styles.summaryText}>
-            Total Amount: {smsSummary.totalAmount}
-          </Text>
-          <Text style={styles.summaryText}>
-            Last checked: {new Date(smsSummary.lastChecked).toLocaleString()}
-          </Text>
-        </View>
-      )}
-      {!loading && smsSummary?.lastChecked && (
+      {!loading && (
         <View style={styles.summaryContainer}>
           <View>
-            <Text style={styles.congratsText}>All sorted! Congrats!</Text>
-            <Text style={styles.checkedText}>
-              Checked: {new Date(smsSummary?.lastChecked).toLocaleString()}
+            <Text style={styles.congratsText}>
+              {transactions.length === 0
+                ? 'All sorted. Congz!'
+                : 'Confirm ' + transactions.length + ' transactions'}
             </Text>
+            <Text style={styles.checkedText}>Checked:</Text>
           </View>
           <View style={styles.buttonContainer}>
             <TouchableOpacity
@@ -169,7 +174,7 @@ const SMSRetriever: React.FC<Props> = () => {
                 <Path
                   opacity="0.9"
                   d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z"
-                  fill="green"
+                  fill="#1baa2e"
                 />
                 <Path
                   d="M11.0303 8.46967C10.7374 8.17678 10.2626 8.17678 9.96967 8.46967C9.67678 8.76256 9.67678 9.23744 9.96967 9.53033L12.4393 12L9.96967 14.4697C9.67678 14.7626 9.67678 15.2374 9.96967 15.5303C10.2626 15.8232 10.7374 15.8232 11.0303 15.5303L14.0303 12.5303C14.3232 12.2374 14.3232 11.7626 14.0303 11.4697L11.0303 8.46967Z"
@@ -211,7 +216,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 14,
     fontFamily: 'Poppins-Regular',
-    marginBottom: 8,
+    marginBottom: 2,
   },
   congratsText: {
     color: '#ffffff',

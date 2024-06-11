@@ -15,12 +15,14 @@ import ConfirmTransactionsScreen from './src/screens/ConfirmTransactions';
 import CreateAccountScreen from './src/screens/CreateAccount';
 import CreateBudgetScreen from './src/screens/CreateBudget';
 
+import CreateRecord from './src/screens/CreateRecord';
 import {
   Account,
   Budget,
   BudgetItem,
   Category,
   SplitDetail,
+  Subcategory,
   Transaction,
 } from './src/tools/Schema';
 const Stack = createNativeStackNavigator();
@@ -44,7 +46,15 @@ function App(): React.JSX.Element {
         <RealmProvider
           schemaVersion={1}
           deleteRealmIfMigrationNeeded={true}
-          schema={[Account, Transaction, Budget, BudgetItem, Category, SplitDetail]}>
+          schema={[
+            Account,
+            Transaction,
+            Budget,
+            BudgetItem,
+            Category,
+            SplitDetail,
+            Subcategory,
+          ]}>
           <Stack.Navigator
             screenOptions={({route}) => ({
               header: () => (
@@ -54,6 +64,7 @@ function App(): React.JSX.Element {
             <Stack.Screen name="Home" component={MyTabs} />
             <Stack.Screen name="Account" component={CreateAccountScreen} />
             <Stack.Screen name="Details" component={AccountDetails} />
+            <Stack.Screen name="CreateRecord" component={CreateRecord} />
             <Stack.Screen
               name="Confirm"
               component={ConfirmTransactionsScreen}

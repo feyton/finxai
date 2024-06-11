@@ -1,4 +1,5 @@
 /* eslint-disable react-native/no-inline-styles */
+import {format} from 'date-fns';
 import React from 'react';
 import {Image, StyleSheet, Text, View} from 'react-native';
 import {Path, Svg} from 'react-native-svg';
@@ -28,7 +29,7 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
       <View style={styles.transactionInfo}>
         <View style={{position: 'relative'}}>
           <Image
-            source={{uri: transaction?.account.logo}}
+            source={{uri: transaction?.account?.logo}}
             style={styles.accountImage}
           />
           <View
@@ -71,10 +72,12 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
         </View>
 
         <View style={styles.transactionDetails}>
-          <Text style={styles.transactionText}>{transaction?.account?.name}</Text>
+          <Text style={styles.transactionText}>
+            {transaction?.account?.name}
+          </Text>
           <View style={styles.transactionAmountContainer}>
             <Text style={styles.date}>
-              {transaction.date_time.toLocaleString()}
+              {format(transaction?.date_time, 'dd-mm-yy hh:mm')}
             </Text>
             <Text
               style={[
@@ -87,7 +90,7 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
             </Text>
           </View>
           <Text style={styles.payee}>
-            {transaction?.payee} | {transaction?.category}
+            {transaction?.payee} | {transaction?.category?.name}
           </Text>
         </View>
       </View>

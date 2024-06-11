@@ -1,34 +1,39 @@
+/* eslint-disable react-native/no-inline-styles */
 import BottomSheet, {BottomSheetView} from '@gorhom/bottom-sheet';
 import {Picker} from '@react-native-picker/picker';
 import {useQuery, useRealm} from '@realm/react';
 import React, {useCallback, useState} from 'react';
 import {
-  Button,
   FlatList,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import {BSON} from 'realm';
+import FloatingLabelInputRegular from '../Components/FloatingInputRegular';
 import TransactionItem from '../Components/Transaction';
-import {Budget, Category, Transaction} from '../tools/Schema';
+import {COLORS, FONTS} from '../assets/images';
+import {Account, Budget, Category, Transaction} from '../tools/Schema';
 
 function ConfirmTransactionsScreen() {
   const transactionsQuery =
     useQuery(Transaction).filtered('confirmed == false');
   const categoriesQuery = useQuery(Category);
   const budgetsQuery = useQuery(Budget);
+  const accounts = useQuery(Account);
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
   const bottomSheetRef = React.useRef<BottomSheet>(null);
   const snapPoints = React.useMemo(() => ['25%', '50%', '90%'], []);
+  const [subcategories, setSubcategories] = useState<any[]>([]);
   const realm = useRealm();
 
   const handleTransactionClick = (transaction: any) => {
     setSelectedTransaction(transaction);
+    updateSubcategories(transaction?.category);
     bottomSheetRef.current?.snapToIndex(1); // Open the bottom sheet
   };
 
@@ -43,6 +48,13 @@ function ConfirmTransactionsScreen() {
   }, [realm, selectedTransaction]);
 
   const handleSave = () => {
+    const cat = realm.objectForPrimaryKey(
+      Category,
+      new BSON.ObjectID(selectedTransaction.category),
+    );
+    const subCat = cat?.subcategories.filter(
+      sub => sub._id == selectedTransaction?.subcategory,
+    )[0];
     if (selectedTransaction) {
       realm.write(() => {
         realm.create(
@@ -50,6 +62,8 @@ function ConfirmTransactionsScreen() {
           {
             ...selectedTransaction,
             confirmed: true,
+            category: cat,
+            subcategory: subCat,
           },
           'modified',
         );
@@ -70,6 +84,17 @@ function ConfirmTransactionsScreen() {
       <TransactionItem transaction={item} />
     </TouchableOpacity>
   );
+  const updateSubcategories = (categoryName: any) => {
+    const selectedCategory: any = realm.objectForPrimaryKey(
+      Category,
+      new BSON.ObjectID(categoryName),
+    );
+    if (selectedCategory) {
+      setSubcategories(selectedCategory.subcategories);
+    } else {
+      setSubcategories([]);
+    }
+  };
 
   const renderBottomSheetContent = () => {
     if (!selectedTransaction) {
@@ -77,127 +102,180 @@ function ConfirmTransactionsScreen() {
     }
 
     const handleFieldChange = (field: string, value: any) => {
+      if (field === 'category') {
+        updateSubcategories(value);
+      }
       setSelectedTransaction({...selectedTransaction, [field]: value});
-    };
-    const renderSplitDetails = () => {
-      if (selectedTransaction.transaction_type !== 'split') return null;
-
-      return selectedTransaction.splitDetails.map(
-        (splitDetail: any, index: number) => (
-          <View key={index} style={styles.splitDetailContainer}>
-            <TextInput
-              style={styles.input}
-              value={splitDetail.amount?.toString()}
-              onChangeText={text => {
-                const newSplitDetails = [...selectedTransaction.splitDetails];
-                newSplitDetails[index].amount = parseFloat(text);
-                handleFieldChange('splitDetails', newSplitDetails);
-              }}
-              placeholder="Amount"
-              keyboardType="numeric"
-            />
-            <Picker
-              selectedValue={splitDetail.category}
-              onValueChange={value => {
-                const newSplitDetails = [...selectedTransaction.splitDetails];
-                newSplitDetails[index].category = value;
-                handleFieldChange('splitDetails', newSplitDetails);
-              }}>
-              {categoriesQuery.map((category: any) => (
-                <Picker.Item
-                  key={category._id.toString()}
-                  label={category.name}
-                  value={category.name}
-                />
-              ))}
-            </Picker>
-            <TextInput
-              style={styles.input}
-              value={splitDetail.note}
-              onChangeText={text => {
-                const newSplitDetails = [...selectedTransaction.splitDetails];
-                newSplitDetails[index].note = text;
-                handleFieldChange('splitDetails', newSplitDetails);
-              }}
-              placeholder="Note"
-            />
-          </View>
-        ),
-      );
     };
 
     return (
       <KeyboardAvoidingView
+        keyboardVerticalOffset={150}
         style={styles.sheetContent}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView contentContainerStyle={styles.scrollViewContent}>
+        <ScrollView
+          keyboardShouldPersistTaps={'handled'}
+          contentContainerStyle={styles.scrollViewContent}>
           <Text style={styles.sheetTitle}>Edit Transaction</Text>
           <Text style={styles.sms}>{selectedTransaction.sms}</Text>
-          <TextInput
-            style={styles.input}
+          <FloatingLabelInputRegular
+            name="amount"
+            label="Amount"
             value={selectedTransaction.amount?.toString()}
             onChangeText={text => handleFieldChange('amount', parseFloat(text))}
-            placeholder="Amount"
             keyboardType="numeric"
           />
-          <Picker
-            selectedValue={selectedTransaction.transaction_type}
-            onValueChange={value =>
-              handleFieldChange('transaction_type', value)
-            }>
-            <Picker.Item label={'Income'} value={'income'} />
-            <Picker.Item label={'Expense'} value={'expense'} />
-            <Picker.Item label={'Transfer'} value={'transfer'} />
-            <Picker.Item label={'Split'} value={'split'} />
-          </Picker>
-          <Picker
-            selectedValue={selectedTransaction.category}
-            onValueChange={value => handleFieldChange('category', value)}>
-            {categoriesQuery.map((category: any) => (
-              <Picker.Item
-                key={category._id.toString()}
-                label={category.name}
-                value={category.name}
-              />
-            ))}
-          </Picker>
-          <TextInput
-            style={styles.input}
-            value={selectedTransaction.subcategory}
-            onChangeText={text => handleFieldChange('subcategory', text)}
-            placeholder="Subcategory"
-          />
-          <TextInput
-            style={styles.input}
+          <View style={styles.pickerContainer}>
+            <Picker
+              selectedValue={selectedTransaction.transaction_type}
+              onValueChange={value =>
+                handleFieldChange('transaction_type', value)
+              }>
+              <Picker.Item label={'Income'} value={'income'} />
+              <Picker.Item label={'Expense'} value={'expense'} />
+              <Picker.Item label={'Transfer'} value={'transfer'} />
+            </Picker>
+          </View>
+          {selectedTransaction.transaction_type === 'transfer' && (
+            <View style={styles.pickerContainer}>
+              <Picker
+                style={styles.picker}
+                selectedValue={selectedTransaction.category}
+                onValueChange={value => handleFieldChange('toAccount', value)}>
+                <Picker.Item label={'Select account'} value={''} />
+                {accounts.map((account: any) => (
+                  <Picker.Item
+                    key={account._id.toString()}
+                    label={account.name}
+                    value={account._id.toString()}
+                  />
+                ))}
+              </Picker>
+              {selectedTransaction?.category && (
+                <Picker
+                  selectedValue={selectedTransaction.category}
+                  onValueChange={value =>
+                    handleFieldChange('subcategory', value)
+                  }>
+                  <Picker.Item label={'Select subcategory'} value={''} />
+                  {subcategories.map((subcategory: any) => (
+                    <Picker.Item
+                      key={subcategory._id.toString()}
+                      label={subcategory.name}
+                      value={subcategory.name}
+                    />
+                  ))}
+                </Picker>
+              )}
+            </View>
+          )}
+
+          <View style={styles.pickerContainer}>
+            <Picker
+              style={styles.picker}
+              selectedValue={selectedTransaction.category}
+              onValueChange={value => handleFieldChange('category', value)}>
+              <Picker.Item label={'Select category'} value={''} />
+              {categoriesQuery.map((category: any) => (
+                <Picker.Item
+                  key={category._id.toString()}
+                  label={category.name}
+                  value={category._id.toString()}
+                />
+              ))}
+            </Picker>
+          </View>
+          <View style={styles.pickerContainer}>
+            {selectedTransaction?.category && (
+              <Picker
+                style={styles.picker}
+                selectedValue={selectedTransaction.subcategory}
+                onValueChange={value =>
+                  handleFieldChange('subcategory', value)
+                }>
+                <Picker.Item label={'Select subcategory'} value={''} />
+                {subcategories.map((subcategory: any) => (
+                  <Picker.Item
+                    key={subcategory._id.toString()}
+                    label={subcategory.name}
+                    value={subcategory._id.toString()}
+                  />
+                ))}
+              </Picker>
+            )}
+          </View>
+
+          <FloatingLabelInputRegular
             value={selectedTransaction.payee}
+            name="payee"
             onChangeText={text => handleFieldChange('payee', text)}
-            placeholder="Payee"
+            label="Payee"
           />
-          <TextInput
-            style={styles.input}
-            value={selectedTransaction.currency}
-            onChangeText={text => handleFieldChange('currency', text)}
-            placeholder="Currency"
+
+          <View style={styles.pickerContainer}>
+            <Picker
+              style={styles.picker}
+              selectedValue={selectedTransaction.budget?._id}
+              onValueChange={value =>
+                handleFieldChange(
+                  'budget',
+                  budgetsQuery.filtered(`_id == '${value}'`)[0],
+                )
+              }>
+              <Picker.Item label={'Select budget'} value={''} />
+              {budgetsQuery.map((budget: any) => (
+                <Picker.Item
+                  key={budget._id.toString()}
+                  label={budget.name}
+                  value={budget._id.toString()}
+                />
+              ))}
+            </Picker>
+          </View>
+          <FloatingLabelInputRegular
+            value={selectedTransaction.payee}
+            name="note"
+            onChangeText={text => handleFieldChange('note', text)}
+            label="Note"
           />
-          <Picker
-            selectedValue={selectedTransaction.budget?._id}
-            onValueChange={value =>
-              handleFieldChange(
-                'budget',
-                budgetsQuery.filtered(`_id == '${value}'`)[0],
-              )
-            }>
-            {budgetsQuery.map((budget: any) => (
-              <Picker.Item
-                key={budget._id.toString()}
-                label={budget.name}
-                value={budget._id.toString()}
-              />
-            ))}
-          </Picker>
-          {renderSplitDetails()}
-          <Button title="Delete" onPress={deleteTransaction} />
-          <Button title="Save" onPress={handleSave} />
+
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignContent: 'center',
+              marginVertical: 10,
+            }}>
+            <TouchableOpacity
+              onPress={deleteTransaction}
+              style={{
+                backgroundColor: COLORS.buttonSecondary,
+                paddingHorizontal: 30,
+                paddingVertical: 10,
+                borderRadius: 5,
+                alignContent: 'center',
+                justifyContent: 'center',
+              }}>
+              <Text style={{color: COLORS.textPrimary, fontFamily: FONTS.bold}}>
+                Delete
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={handleSave}
+              style={{
+                backgroundColor: COLORS.buttonPrimary,
+                paddingHorizontal: 30,
+                borderRadius: 5,
+                alignContent: 'center',
+                justifyContent: 'center',
+                paddingVertical: 10,
+              }}>
+              <Text style={{color: COLORS.textPrimary, fontFamily: FONTS.bold}}>
+                Save
+              </Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     );
@@ -205,7 +283,6 @@ function ConfirmTransactionsScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Confirm Transactions</Text>
       <FlatList
         data={transactionsQuery}
         keyExtractor={item => item._id.toString()}
@@ -222,6 +299,7 @@ function ConfirmTransactionsScreen() {
         onChange={handleSheetChanges}
         enablePanDownToClose={true}
         backgroundStyle={styles.sheetContent}
+        keyboardBehavior="extend"
         handleIndicatorStyle={styles.sheetHandle}>
         <BottomSheetView>{renderBottomSheetContent()}</BottomSheetView>
       </BottomSheet>
@@ -234,6 +312,7 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
     backgroundColor: '#1d2027',
+    paddingBottom: 20,
   },
   title: {
     color: 'white',
@@ -247,7 +326,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#ccc',
   },
   sheetContent: {
-    backgroundColor: '#1d2027',
+    backgroundColor: COLORS.bgSecondary,
     paddingHorizontal: 16,
   },
   sheetTitle: {
@@ -260,6 +339,7 @@ const styles = StyleSheet.create({
   scrollViewContent: {
     flexGrow: 1,
   },
+
   sms: {
     fontSize: 11,
     marginBottom: 16,
@@ -285,6 +365,19 @@ const styles = StyleSheet.create({
   },
   splitDetailContainer: {
     marginBottom: 16,
+  },
+  pickerContainer: {
+    borderWidth: 1,
+    borderColor: '#bdb7b7',
+    borderRadius: 10,
+    marginVertical: 8,
+    fontFamily: 'Poppins-Regular',
+    paddingHorizontal: 10,
+  },
+
+  picker: {
+    color: '#ffffff',
+    fontFamily: 'Poppins-Regular',
   },
 });
 

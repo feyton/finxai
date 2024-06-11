@@ -2,7 +2,7 @@ import {Picker} from '@react-native-picker/picker';
 import {useQuery, useRealm} from '@realm/react';
 import React, {useState} from 'react';
 import {
-  FlatList,
+  Alert,
   KeyboardAvoidingView,
   ScrollView,
   StyleSheet,
@@ -36,27 +36,36 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
   const [budgetPeriod, setBudgetPeriod] = useState<string>('Monthly');
   const [items, setItems] = useState<BudgetItem[]>([]);
   const [budgetAmount, setBudgetAmount] = useState<string>('');
-  const [currentCategory, setCurrentCategory] = useState<string>('');
-  const [currentSubcategory, setCurrentSubcategory] = useState<string>('');
+  const [currentCategory, setCurrentCategory] = useState<string>();
+  const [currentSubcategory, setCurrentSubcategory] = useState<string>();
   const [currentAmount, setCurrentAmount] = useState<string>('');
 
   const addItem = () => {
     if (currentCategory && currentAmount) {
+      const cat = categories.find(cat => cat._id.toString() == currentCategory);
       setItems([
         ...items,
         {
-          category: currentCategory,
-          subcategory: currentSubcategory,
+          category: cat,
+          subcategory: cat?.subcategories.find(
+            sub => sub._id.toString() == currentSubcategory,
+          ),
           amount: parseFloat(currentAmount),
         },
       ]);
+
       setCurrentCategory('');
       setCurrentSubcategory('');
       setCurrentAmount('');
     }
+    console.log(items);
   };
 
   const createBudget = () => {
+    if (!name || items.length == 0) {
+      Alert.alert('A budget Need A name');
+      return;
+    }
     realm.write(() => {
       realm.create('Budget', {
         _id: new BSON.ObjectID(),
@@ -79,7 +88,9 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior="padding">
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.scrollContainer}>
         <Text style={styles.header}>Create Budget</Text>
         <TextInput
           placeholder="Budget Name"
@@ -137,18 +148,16 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
           style={styles.input}
         />
         {items.length > 0 && (
-          <FlatList
-            data={items}
-            keyExtractor={(item, index) => `${item.category}-${index}`}
-            renderItem={({item}) => (
+          <>
+            {items.map(item => (
               <View style={styles.budgetItem}>
                 <Text style={styles.budgetItemText}>
-                  {item.category} - {item.subcategory || 'No Subcategory'}: $
-                  {item.amount}
+                  {item.category.name} -{' '}
+                  {item.subcategory?.name || 'No Subcategory'}: ${item.amount}
                 </Text>
               </View>
-            )}
-          />
+            ))}
+          </>
         )}
         <View style={styles.budgetItemContainer}>
           <View style={styles.pickerContainer}>
@@ -156,8 +165,13 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
               selectedValue={currentCategory}
               onValueChange={itemValue => setCurrentCategory(itemValue)}
               style={styles.picker}>
+              <Picker.Item label="Select Category" value="" />
               {categories.map(cat => (
-                <Picker.Item key={cat.name} label={cat.name} value={cat.name} />
+                <Picker.Item
+                  key={cat._id.toString()}
+                  label={cat.name}
+                  value={cat._id.toString()}
+                />
               ))}
             </Picker>
           </View>
@@ -169,9 +183,13 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
                 style={styles.picker}>
                 <Picker.Item label="Select Subcategory" value="" />
                 {categories
-                  .find(cat => cat.name === currentCategory)
+                  .find(cat => cat._id.toString() === currentCategory)
                   ?.subcategories.map(subcat => (
-                    <Picker.Item key={subcat} label={subcat} value={subcat} />
+                    <Picker.Item
+                      key={subcat._id.toString()}
+                      label={subcat.name}
+                      value={subcat._id.toString()}
+                    />
                   ))}
               </Picker>
             </View>

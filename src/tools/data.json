@@ -1,0 +1,152 @@
+{
+  "categories": [
+    {
+      "name": "Housing",
+      "icon": "🏠",
+      "type": "expense",
+      "subcategories": [
+        {"name": "Rent/Mortgage", "icon": "💰"},
+        {"name": "Utilities", "icon": "💡"},
+        {"name": "Repairs & Maintenance", "icon": "🛠️"},
+        {"name": "Property Taxes", "icon": "🧾"},
+        {"name": "Home Insurance", "icon": "🛡️"}
+      ]
+    },
+    {
+      "name": "Transportation",
+      "icon": "🚗",
+      "type": "expense",
+      "subcategories": [
+        {"name": "Fuel", "icon": "⛽"},
+        {"name": "Public Transport", "icon": "🚌"},
+        {"name": "Parking", "icon": "🅿️"},
+        {"name": "Vehicle Maintenance", "icon": "🔧"},
+        {"name": "Car Insurance", "icon": "🚗"}
+      ]
+    },
+    {
+      "name": "Food & Dining",
+      "icon": "🍔",
+      "type": "expense",
+      "subcategories": [
+        {"name": "Groceries", "icon": "🛒"},
+        {"name": "Restaurants", "icon": "🍽️"},
+        {"name": "Takeout/Delivery", "icon": "🥡"},
+        {"name": "Coffee & Snacks", "icon": "☕"}
+      ]
+    },
+    {
+      "name": "Health & Fitness",
+      "icon": "💪",
+      "type": "expense",
+      "subcategories": [
+        {"name": "Doctor Visits", "icon": "🩺"},
+        {"name": "Medication", "icon": "💊"},
+        {"name": "Dental Care", "icon": "🦷"},
+        {"name": "Health Insurance", "icon": "🏥"},
+        {"name": "Gym Membership", "icon": "🏋️"}
+      ]
+    },
+    {
+      "name": "Personal Care",
+      "icon": "💆",
+      "type": "expense",
+      "subcategories": [
+        {"name": "Hair & Beauty", "icon": "💇"},
+        {"name": "Clothes", "icon": "👚"},
+        {"name": "Shoes", "icon": "👟"},
+        {"name": "Personal Products", "icon": "🧴"}
+      ]
+    },
+    {
+      "name": "Entertainment",
+      "icon": "🍿",
+      "type": "expense",
+      "subcategories": [
+        {"name": "Movies & Streaming", "icon": "🎬"},
+        {"name": "Music & Concerts", "icon": "🎵"},
+        {"name": "Books & Magazines", "icon": "📖"},
+        {"name": "Hobbies", "icon": "🎨"},
+        {"name": "Video Games", "icon": "🎮"}
+      ]
+    },
+    {
+      "name": "Education",
+      "icon": "🎓",
+      "type": "expense",
+      "subcategories": [
+        {"name": "Tuition & Fees", "icon": "🏫"},
+        {"name": "Books & Supplies", "icon": "📚"},
+        {"name": "Online Courses", "icon": "💻"}
+      ]
+    },
+    {
+      "name": "Debt Payments",
+      "icon": "💳",
+      "type": "expense",
+      "subcategories": [
+        {"name": "Student Loans", "icon": "🎓"},
+        {"name": "Credit Cards", "icon": "💳"},
+        {"name": "Personal Loans", "icon": "🤝"}
+      ]
+    },
+    {
+      "name": "Savings & Investments",
+      "icon": "📈",
+      "type": "expense",
+      "subcategories": [
+        {"name": "Emergency Fund", "icon": "🚨"},
+        {"name": "Retirement", "icon": "🏝️"},
+        {"name": "Investments", "icon": "💰"}
+      ]
+    },
+    {
+      "name": "Gifts & Donations",
+      "icon": "🎁",
+      "type": "expense",
+      "subcategories": [
+        {"name": "Gifts", "icon": "🎁"},
+        {"name": "Charity", "icon": "❤️"}
+      ]
+    },
+    {
+      "name": "Miscellaneous",
+      "icon": "❓",
+      "type": "expense",
+      "subcategories": []
+    },
+
+    {
+      "name": "Salary",
+      "icon": "💼",
+      "type": "income",
+      "subcategories": []
+    },
+    {
+      "name": "Freelance/Side Hustle",
+      "icon": "💻",
+      "type": "income",
+      "subcategories": []
+    },
+    {
+      "name": "Investments",
+      "icon": "📈",
+      "type": "income",
+      "subcategories": [
+        {"name": "Dividends", "icon": "💰"},
+        {"name": "Interest", "icon": "🏦"},
+        {"name": "Rental Income", "icon": "🏠"}
+      ]
+    },
+    {
+      "name": "Other Income",
+      "icon": "💰",
+      "type": "income",
+      "subcategories": [
+        {"name": "Gifts", "icon": "🎁"},
+        {"name": "Refunds", "icon": "🔙"},
+        {"name": "Tax Returns", "icon": "🧾"}
+      ]
+    }
+  ]
+}

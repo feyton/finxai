@@ -1,7 +1,7 @@
 // CategoryManagementScreen.js
 
 import {useQuery, useRealm} from '@realm/react';
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   Button,
   FlatList,
@@ -11,16 +11,24 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {BSON} from 'realm';
 import {Category} from '../tools/Schema';
+import categoriesData from '../tools/data.json';
 
 function CategoryManagementScreen() {
+  const incomeCategories = useQuery(Category).filtered('type == $0', 'income');
+  const expenseCategories = useQuery(Category).filtered(
+    'type == $0',
+    'expense',
+  );
+  console.log(incomeCategories);
   const realm = useRealm();
-  const categories = useQuery(Category);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [categoryName, setCategoryName] = useState('');
+  const [categoryType, setCategoryType] = useState('expense');
   const [subcategory, setSubcategory] = useState('');
 
   const handleAddCategory = () => {
@@ -44,13 +52,34 @@ function CategoryManagementScreen() {
     });
   };
 
+  useEffect(() => {
+    // Prepopulate categories on initial render if needed
+    if (incomeCategories.length === 0 && expenseCategories.length === 0) {
+      realm.write(() => {
+        categoriesData.categories.forEach(catData => {
+          const newCategory: Category = realm.create('Category', {
+            _id: new BSON.ObjectId(),
+            name: catData.name,
+            icon: catData.icon,
+            type: catData.type,
+            subcategories: catData.subcategories.map(subcat => ({
+              _id: new BSON.ObjectId(),
+              name: subcat.name,
+              icon: subcat.icon,
+            })),
+          });
+        });
+      });
+    }
+  }, []);
+
   const handleSaveCategory = () => {
     realm.write(() => {
       if (isEditing) {
         selectedCategory.name = categoryName;
       } else {
         realm.create('Category', {
-          _id: new Realm.BSON.ObjectID(),
+          _id: new BSON.ObjectID(),
           name: categoryName,
           subcategories: [],
         });
@@ -80,7 +109,7 @@ function CategoryManagementScreen() {
     <View style={styles.container}>
       <Button title="Add Category" onPress={handleAddCategory} />
       <FlatList
-        data={categories}
+        data={expenseCategories}
         keyExtractor={item => item._id.toString()}
         renderItem={({item}) => (
           <View style={styles.categoryItem}>
@@ -97,7 +126,7 @@ function CategoryManagementScreen() {
               keyExtractor={(subcat, index) => index.toString()}
               renderItem={({item: subcat}) => (
                 <View style={styles.subcategoryItem}>
-                  <Text style={styles.subcategoryText}>{subcat}</Text>
+                  <Text style={styles.subcategoryText}>{subcat.name}</Text>
                   <Button
                     title="Delete"
                     onPress={() => handleDeleteSubcategory(item, subcat)}

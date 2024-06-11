@@ -5,7 +5,6 @@ import React, {useCallback, useState} from 'react';
 import Clipboard from '@react-native-clipboard/clipboard';
 import {styled} from 'nativewind';
 import {
-  Button,
   FlatList,
   Image,
   ImageBackground,
@@ -169,8 +168,41 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
               <Text style={styles.modalText}>
                 Do you want to delete this account?
               </Text>
-              <Button title="Delete" onPress={deleteAccount} />
-              <Button title="Cancel" onPress={() => setModalVisible(false)} />
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-around',
+                  alignItems: 'center',
+                }}>
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: '#1E90FF',
+                    padding: 12,
+                    borderRadius: 10,
+                    alignItems: 'center',
+                    marginVertical: 8,
+                    marginHorizontal: 10,
+                  }}
+                  onPress={() => setModalVisible(false)}>
+                  <Text style={{fontFamily: 'Poppins-Regular', color: 'white'}}>
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: '#7c1616',
+                    padding: 12,
+                    borderRadius: 10,
+                    alignItems: 'center',
+                    marginVertical: 8,
+                    marginHorizontal: 10,
+                  }}
+                  onPress={deleteAccount}>
+                  <Text style={{fontFamily: 'Poppins-Regular', color: 'white'}}>
+                    Delete
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>
@@ -211,7 +243,7 @@ const styles = StyleSheet.create({
   },
   modalView: {
     margin: 20,
-    backgroundColor: 'white',
+    backgroundColor: '#2e2e2e',
     borderRadius: 20,
     padding: 35,
     alignItems: 'center',
@@ -227,7 +259,9 @@ const styles = StyleSheet.create({
   modalText: {
     marginBottom: 15,
     textAlign: 'center',
-    fontSize: 18,
+    fontSize: 14,
+    color: 'white',
+    fontFamily: 'Poppins-Regular',
   },
 });
 

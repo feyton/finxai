@@ -1,41 +1,35 @@
 import React, {useEffect, useState} from 'react';
-import {Control, Controller, useWatch} from 'react-hook-form';
 import {
   Animated,
   StyleSheet,
-  Text,
   TextInput,
   TextInputProps,
   View,
 } from 'react-native';
+import {COLORS} from '../assets/images';
 
 interface FloatingLabelInputProps extends TextInputProps {
-  control: Control<any>;
   name: string;
   label: string;
-  rules?: any;
 }
 
-const FloatingLabelInput: React.FC<FloatingLabelInputProps> = ({
-  control,
+const FloatingLabelInputRegular: React.FC<FloatingLabelInputProps> = ({
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   name,
   label,
-  rules,
   ...inputProps
 }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [labelPosition] = useState(new Animated.Value(0));
 
- 
-
   useEffect(() => {
-    const shouldFloatLabel = !!inputProps.value|| isFocused;
+    const shouldFloatLabel = !!inputProps.value || isFocused;
     Animated.timing(labelPosition, {
       toValue: shouldFloatLabel ? 1 : 0,
       duration: 200,
       useNativeDriver: false,
     }).start();
-  }, [isFocused, labelPosition, fieldValue]);
+  }, [isFocused, labelPosition, inputProps.value]);
 
   const labelStyle = {
     top: labelPosition.interpolate({
@@ -53,30 +47,17 @@ const FloatingLabelInput: React.FC<FloatingLabelInputProps> = ({
   };
 
   return (
-    <Controller
-      control={control}
-      name={name}
-      rules={rules}
-      render={({field: {onChange, onBlur, value}, fieldState: {error}}) => (
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={[styles.input, error && styles.errorInput]}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => {
-              setIsFocused(false);
-              onBlur();
-            }}
-            onChangeText={onChange}
-            value={value}
-            {...inputProps}
-          />
-          <Animated.Text style={[styles.label, labelStyle]}>
-            {label}
-          </Animated.Text>
-          {error && <Text style={styles.errorText}>{error.message}</Text>}
-        </View>
-      )}
-    />
+    <View style={styles.inputContainer}>
+      <TextInput
+        style={[styles.input]}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => {
+          setIsFocused(false);
+        }}
+        {...inputProps}
+      />
+      <Animated.Text style={[styles.label, labelStyle]}>{label}</Animated.Text>
+    </View>
   );
 };
 
@@ -91,7 +72,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 10,
     borderRadius: 5,
-    fontFamily: 'Arial',
+    fontFamily: 'Poppins-Bold',
   },
   errorInput: {
     borderColor: 'red',
@@ -99,7 +80,7 @@ const styles = StyleSheet.create({
   label: {
     position: 'absolute',
     left: 15,
-    backgroundColor: '#121212',
+    backgroundColor: COLORS.bgSecondary,
     paddingHorizontal: 5,
     fontFamily: 'Poppins-Regular',
     color: 'white',
@@ -113,4 +94,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default FloatingLabelInput;
+export default FloatingLabelInputRegular;
