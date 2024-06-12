@@ -1,3 +1,4 @@
+/* eslint-disable react-native/no-inline-styles */
 import BottomSheet, {BottomSheetView} from '@gorhom/bottom-sheet';
 import {useQuery, useRealm} from '@realm/react';
 import {format} from 'date-fns/format';
@@ -124,7 +125,7 @@ const RecordsPage = ({navigation}: any) => {
         <TouchableOpacity
           style={styles.categoryButton}
           onPress={() => navigation.navigate('ManageCategories')}>
-          <Text style={styles.catStyle}>Manage Categories</Text>
+          <Text style={styles.catStyle}>Categories</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={{
@@ -200,11 +201,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#1d2027',
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 0,
     paddingBottom: 60,
   },
   catStyle: {
-    fontFamily: 'Poppins-Regular',
+    fontFamily: 'Poppins-Bold',
+    color: 'white',
   },
   headerView: {
     marginBottom: 10,
@@ -234,10 +236,10 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   dateHeader: {
-    color: '#888',
-    fontSize: 16,
+    fontSize: 14,
     marginBottom: 4,
     fontFamily: 'Poppins-Bold',
+    color: 'white',
   },
   transactionItem: {
     flexDirection: 'row',

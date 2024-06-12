@@ -1,3 +1,4 @@
+/* eslint-disable react-native/no-inline-styles */
 import {Picker} from '@react-native-picker/picker';
 import {useRealm} from '@realm/react';
 import React, {useState} from 'react';
@@ -30,7 +31,7 @@ const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
     },
     {
       name: 'Equity Bank',
-      logo: 'https://res.cloudinary.com/feyton/image/upload/v1717159585/equity_bank_rrkkh7.png',
+      logo: 'https://res.cloudinary.com/feyton/image/upload/v1718221618/images_vkxrs9.png',
       address: 'EQUITYBANK',
       id: 'equity',
     },

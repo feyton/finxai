@@ -22,10 +22,10 @@ interface SMS {
   address: string;
 }
 
-const SMSRetriever: React.FC = () => {
+const SMSRetriever: React.FC = ({refreshing}: any) => {
   const navigation = useNavigation<any>();
   const [smsSummary, setSMSSummary] = useState<any>({});
-  const [initialized, setInitialized] = useState(false);
+  const [initialized, setInitialized] = useState(refreshing);
   const [loading, setLoading] = useState(false);
   const realm = useRealm();
   const accounts = useQuery(Account).filtered('auto == true');
@@ -43,7 +43,7 @@ const SMSRetriever: React.FC = () => {
     const accountToUpdate = realm.objectForPrimaryKey(Account, account._id);
     const transactionsToCreate = smsList
       .map(sms => {
-        let transactionData = extractTransactionInfo(sms.body);
+        let transactionData = extractTransactionInfo(sms.body, account.address);
         if (Object.keys(transactionData).length === 0) {
           console.warn(
             'Skipping transaction creation for SMS:',
@@ -72,7 +72,7 @@ const SMSRetriever: React.FC = () => {
           try {
             realm.create('Transaction', transaction);
           } catch (error) {
-            console.log(error, transaction);
+            console.log('Error parsing sms', error);
           }
         });
         account.logDate = new Date().getTime();

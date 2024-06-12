@@ -77,7 +77,7 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
           </Text>
           <View style={styles.transactionAmountContainer}>
             <Text style={styles.date}>
-              {format(transaction?.date_time, 'dd-mm-yy hh:mm')}
+              {format(transaction?.date_time, 'dd-MM-yyyy hh:mm')}
             </Text>
             <Text
               style={[

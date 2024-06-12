@@ -6,7 +6,6 @@
       "type": "expense",
       "subcategories": [
         {"name": "Rent/Mortgage", "icon": "💰"},
-        {"name": "Utilities", "icon": "💡"},
         {"name": "Repairs & Maintenance", "icon": "🛠️"},
         {"name": "Property Taxes", "icon": "🧾"},
         {"name": "Home Insurance", "icon": "🛡️"}
@@ -17,6 +16,7 @@
       "icon": "🚗",
       "type": "expense",
       "subcategories": [
+        {"name": "Moto Transport", "icon": "🏍️"},
         {"name": "Fuel", "icon": "⛽"},
         {"name": "Public Transport", "icon": "🚌"},
         {"name": "Parking", "icon": "🅿️"},
@@ -78,6 +78,17 @@
         {"name": "Tuition & Fees", "icon": "🏫"},
         {"name": "Books & Supplies", "icon": "📚"},
         {"name": "Online Courses", "icon": "💻"}
+      ]
+    },
+    {
+      "name": "Utilities",
+      "icon": "⚙️",
+      "type": "expense",
+      "subcategories": [
+        {"name": "Electricity", "icon": "💡"},
+        {"name": "Water", "icon": "🚰"},
+        {"name": "Trash", "icon": "🗑️"},
+        {"name": "Security", "icon": "🔐"}
       ]
     },
     {

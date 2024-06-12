@@ -32,7 +32,8 @@
     "react-native-select-dropdown": "^4.0.1",
     "react-native-svg": "^15.3.0",
     "react-native-vector-icons": "^10.1.0",
-    "realm": "^12.8.0"
+    "realm": "^12.8.0",
+    "rn-emoji-picker": "^1.1.6"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

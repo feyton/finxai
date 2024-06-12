@@ -233,7 +233,7 @@ function ConfirmTransactionsScreen() {
             </Picker>
           </View>
           <FloatingLabelInputRegular
-            value={selectedTransaction.payee}
+            value={selectedTransaction.note}
             name="note"
             onChangeText={text => handleFieldChange('note', text)}
             label="Note"

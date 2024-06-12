@@ -9,7 +9,14 @@ interface ExtractInfo {
   transaction_type?: string;
 }
 
-export function extractTransactionInfo(message: string) {
+function convertToDate(dateString: string) {
+  const [month, day, year] = dateString.split('/').map(Number);
+  // In JavaScript, the Date constructor expects the year in full (e.g., 2024)
+  const fullYear = year + 2000; // Adjust for the year format
+  return new Date(fullYear, month - 1, day); // Months are zero-indexed in JS
+}
+
+export function extractTransactionInfo(message: string, address = '') {
   let info: ExtractInfo = {};
 
   // Perform NLP analysis
@@ -120,7 +127,9 @@ export function extractTransactionInfo(message: string) {
     if (amountMatch) {
       info.amount = parseFloat(amountMatch[2].replace(',', ''));
       info.currency = amountMatch[1];
+      info.date_time = convertToDate(info.date_time);
     }
   }
+  info.date_time = info.date_time?.replaceAll('/', '-');
   return info;
 }

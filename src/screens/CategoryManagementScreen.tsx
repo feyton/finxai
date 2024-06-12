@@ -12,6 +12,8 @@ import {
   View,
 } from 'react-native';
 import {BSON} from 'realm';
+import EmojiPicker from 'rn-emoji-picker';
+import {emojis} from 'rn-emoji-picker/dist/data';
 import {Category} from '../tools/Schema';
 import categoriesData from '../tools/data.json';
 
@@ -21,13 +23,13 @@ function CategoryManagementScreen() {
     'type == $0',
     'expense',
   );
-  console.log(incomeCategories);
   const realm = useRealm();
 
   const [modalVisible, setModalVisible] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [categoryName, setCategoryName] = useState('');
+  const [categoryIcon, setCategoryIcon] = useState('');
   const [categoryType, setCategoryType] = useState('expense');
   const [subcategory, setSubcategory] = useState('');
 
@@ -81,6 +83,7 @@ function CategoryManagementScreen() {
         realm.create('Category', {
           _id: new BSON.ObjectID(),
           name: categoryName,
+          icon: categoryIcon,
           subcategories: [],
         });
       }
@@ -113,7 +116,9 @@ function CategoryManagementScreen() {
         keyExtractor={item => item._id.toString()}
         renderItem={({item}) => (
           <View style={styles.categoryItem}>
-            <Text style={styles.categoryText}>{item.name}</Text>
+            <Text style={styles.categoryText}>
+              {item.icon} {item.name}
+            </Text>
             <View style={styles.categoryActions}>
               <Button title="Edit" onPress={() => handleEditCategory(item)} />
               <Button
@@ -126,7 +131,9 @@ function CategoryManagementScreen() {
               keyExtractor={(subcat, index) => index.toString()}
               renderItem={({item: subcat}) => (
                 <View style={styles.subcategoryItem}>
-                  <Text style={styles.subcategoryText}>{subcat.name}</Text>
+                  <Text style={styles.subcategoryText}>
+                    {subcat.icon} {subcat.name}
+                  </Text>
                   <Button
                     title="Delete"
                     onPress={() => handleDeleteSubcategory(item, subcat)}
@@ -149,10 +156,27 @@ function CategoryManagementScreen() {
 
       <Modal
         animationType="slide"
-        transparent={false}
         visible={modalVisible}
         onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalView}>
+          <EmojiPicker
+            emojis={emojis} // emojis data source see data/emojis
+            autoFocus={false} // autofocus search input
+            loading={false} // spinner for if your emoji data or recent store is async
+            darkMode={true} // to be or not to be, that is the question
+            perLine={10} // # of emoji's per line
+            onSelect={data => setCategoryIcon(data.emoji)} // callback when user selects emoji - returns emoji obj
+            // enabledCategories={[
+            //   // optional list of enabled category keys
+            //   'emojis',
+            //   'activities',
+            //   'food',
+            //   'places',
+            //   'nature',
+            // ]}
+            defaultCategory={'activities'} // optional default category key
+          />
+
           <TextInput
             placeholder="Category Name"
             value={categoryName}
@@ -210,10 +234,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   modalView: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.5)',
+    flex: 1,
+    padding: 16,
+    flexDirection: 'column',
   },
 });
 

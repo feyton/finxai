@@ -5834,6 +5834,7 @@ __metadata:
     react-native-vector-icons: ^10.1.0
     react-test-renderer: 18.2.0
     realm: ^12.8.0
+    rn-emoji-picker: ^1.1.6
     tailwindcss: 3.3.2
     typescript: 5.0.4
   languageName: unknown
@@ -9787,6 +9788,13 @@ __metadata:
   bin:
     rimraf: ./bin.js
   checksum: 3ea587b981a19016297edb96d1ffe48af7e6af69660e3b371dbfc73722a73a0b0e9be5c88089fbeeb866c389c1098e07f64929c7414290504b855f54f901ab10
+  languageName: node
+  linkType: hard
+
+"rn-emoji-picker@npm:^1.1.6":
+  version: 1.1.6
+  resolution: "rn-emoji-picker@npm:1.1.6"
+  checksum: 1c2222fcf2aa092a0b87c88e7a5ef3418863810ddf2a2463eb392448b1987794ccdacc24c24ea04a98d6d8b22425b40538d831e004801dd53c1a36e1b0518148
   languageName: node
   linkType: hard
 

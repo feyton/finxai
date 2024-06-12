@@ -58,7 +58,6 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
       setCurrentSubcategory('');
       setCurrentAmount('');
     }
-    console.log(items);
   };
 
   const createBudget = () => {

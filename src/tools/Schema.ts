@@ -97,7 +97,7 @@ export class Transaction extends Realm.Object<Transaction> {
       account: 'Account',
       payee: 'string?',
       transaction_type: 'string',
-      currency: 'string',
+      currency: {type: 'string', default: 'RWF'},
       category: 'Category?',
       subcategory: 'Subcategory?',
       budget: 'Budget?', // Link to the parent Budget object
@@ -161,8 +161,8 @@ export class Budget extends Realm.Object<Budget> {
 
     return totalSpending;
   }
-  getSpendingPercentage(transactions: any) {
-    const currentSpending = this.getCurrentSpending(transactions);
+  getSpendingPercentage() {
+    const currentSpending = this.getCurrentSpending();
     return (currentSpending / this.getTotalAmount()) * 100;
   }
 }
@@ -215,6 +215,7 @@ export class Category extends Realm.Object<Category> {
     },
     primaryKey: '_id',
   };
+  category: Subcategory[];
 }
 
 export class Subcategory extends Realm.Object {

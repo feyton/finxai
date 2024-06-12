@@ -30,7 +30,7 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
   const {control, handleSubmit, setValue} = useForm();
   const [record, setRecord] = useState({});
 
-  const createRecord = data => {
+  const createRecord = (data: any) => {
     console.log(data);
   };
 

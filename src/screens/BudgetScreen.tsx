@@ -9,17 +9,15 @@ import {
   View,
 } from 'react-native';
 import {COLORS, FONTS} from '../assets/images';
-import {Budget, Transaction} from '../tools/Schema';
+import {Budget} from '../tools/Schema';
 
 export default function BudgetScreen({navigation}: any) {
   const budgets = useQuery(Budget);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedBudget, setSelectedBudget] = useState(null);
-  const transactions = useQuery(Transaction);
   const realm = useRealm();
 
   const handleDeleteBudget = useCallback(() => {
-    console.log(selectedBudget);
     realm.write(() => {
       realm.delete(selectedBudget);
       setModalVisible(false);

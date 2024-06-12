@@ -135,7 +135,7 @@ const HomeScreen = ({navigation}: any) => {
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
       }
       style={styles.container}>
-      <SMSRetriever />
+      <SMSRetriever refreshing={refreshing} />
       <Summary />
       <View style={{marginTop: 20}}>
         <FlatList
