@@ -28,15 +28,18 @@ const HomeScreen = ({navigation}: any) => {
 
   const handlePress = useCallback(
     (account: any) => {
-      navigation.navigate('Details', {accountId: account._id.toString()});
+      navigation.navigate('Details', {accountId: account.id.toString()});
     },
     [navigation],
   );
 
   const onRefresh = () => {
-    accounts.forEach(account => {
-      account.updateAvailableBalance(realm);
+    realm.write(() => {
+      accounts.forEach(account => {
+        account.updateAvailableBalance();
+      });
     });
+
     setRefreshing(true);
     setTimeout(() => {
       setRefreshing(false);
@@ -49,7 +52,7 @@ const HomeScreen = ({navigation}: any) => {
   const renderAccount = useCallback(
     ({item: account}: any) => (
       <TouchableWithoutFeedback
-        key={account._id.toString()}
+        key={account.id.toString()}
         style={styles.card}
         onPress={() => handlePress(account)}>
         <ImageBackground
@@ -81,7 +84,7 @@ const HomeScreen = ({navigation}: any) => {
                   fontSize: 16,
                   color: 'black',
                 }}>
-                RWF: {account.amount}
+                RWF: {account.available_balance}
               </Text>
             </View>
             <View style={{marginTop: 40, flexDirection: 'row', gap: 3}}>
@@ -135,14 +138,14 @@ const HomeScreen = ({navigation}: any) => {
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
       }
       style={styles.container}>
-      <SMSRetriever refreshing={refreshing} />
+      <SMSRetriever />
       <Summary />
       <View style={{marginTop: 20}}>
         <FlatList
           horizontal
           data={accounts}
           renderItem={renderAccount}
-          keyExtractor={account => account._id.toString()}
+          keyExtractor={account => account.id.toString()}
           showsHorizontalScrollIndicator={false}
         />
         {accounts.length === 0 && (

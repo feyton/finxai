@@ -14,6 +14,7 @@ import {
 import {BSON} from 'realm';
 import EmojiPicker from 'rn-emoji-picker';
 import {emojis} from 'rn-emoji-picker/dist/data';
+import {COLORS, FONTS} from '../assets/images';
 import {Category} from '../tools/Schema';
 import categoriesData from '../tools/data.json';
 
@@ -60,12 +61,12 @@ function CategoryManagementScreen() {
       realm.write(() => {
         categoriesData.categories.forEach(catData => {
           const newCategory: Category = realm.create('Category', {
-            _id: new BSON.ObjectId(),
+            id: new BSON.ObjectId(),
             name: catData.name,
             icon: catData.icon,
             type: catData.type,
             subcategories: catData.subcategories.map(subcat => ({
-              _id: new BSON.ObjectId(),
+              id: new BSON.ObjectId(),
               name: subcat.name,
               icon: subcat.icon,
             })),
@@ -81,7 +82,7 @@ function CategoryManagementScreen() {
         selectedCategory.name = categoryName;
       } else {
         realm.create('Category', {
-          _id: new BSON.ObjectID(),
+          id: new BSON.ObjectID(),
           name: categoryName,
           icon: categoryIcon,
           subcategories: [],
@@ -113,19 +114,13 @@ function CategoryManagementScreen() {
       <Button title="Add Category" onPress={handleAddCategory} />
       <FlatList
         data={expenseCategories}
-        keyExtractor={item => item._id.toString()}
+        keyExtractor={item => item.id.toString()}
         renderItem={({item}) => (
           <View style={styles.categoryItem}>
             <Text style={styles.categoryText}>
               {item.icon} {item.name}
             </Text>
-            <View style={styles.categoryActions}>
-              <Button title="Edit" onPress={() => handleEditCategory(item)} />
-              <Button
-                title="Delete"
-                onPress={() => handleDeleteCategory(item)}
-              />
-            </View>
+
             <FlatList
               data={item.subcategories}
               keyExtractor={(subcat, index) => index.toString()}
@@ -134,22 +129,9 @@ function CategoryManagementScreen() {
                   <Text style={styles.subcategoryText}>
                     {subcat.icon} {subcat.name}
                   </Text>
-                  <Button
-                    title="Delete"
-                    onPress={() => handleDeleteSubcategory(item, subcat)}
-                  />
                 </View>
               )}
             />
-            <View style={styles.addSubcategory}>
-              <TextInput
-                placeholder="Add Subcategory"
-                value={subcategory}
-                onChangeText={setSubcategory}
-                style={styles.input}
-              />
-              <Button title="Add" onPress={() => handleAddSubcategory(item)} />
-            </View>
           </View>
         )}
       />
@@ -197,16 +179,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.bgPrimary,
   },
   categoryItem: {
     padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ccc',
+    backgroundColor: COLORS.bgSecondary,
+    marginVertical: 5,
+    borderRadius: 10,
   },
   categoryText: {
     fontSize: 18,
     marginBottom: 8,
+    fontFamily: FONTS.bold,
   },
   categoryActions: {
     flexDirection: 'row',
@@ -216,9 +200,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingLeft: 16,
+    
   },
   subcategoryText: {
-    fontSize: 16,
+    fontSize: 15,
+    fontFamily: FONTS.regular,
   },
   addSubcategory: {
     flexDirection: 'row',

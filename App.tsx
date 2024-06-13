@@ -18,12 +18,14 @@ import CreateBudgetScreen from './src/screens/CreateBudget';
 import CreateRecord from './src/screens/CreateRecord';
 import {
   Account,
+  AutoRecord,
   Budget,
   BudgetItem,
   Category,
   SplitDetail,
   Subcategory,
   Transaction,
+  Transfer,
 } from './src/tools/Schema';
 const Stack = createNativeStackNavigator();
 
@@ -54,6 +56,8 @@ function App(): React.JSX.Element {
             Category,
             SplitDetail,
             Subcategory,
+            AutoRecord,
+            Transfer,
           ]}>
           <Stack.Navigator
             screenOptions={({route}) => ({

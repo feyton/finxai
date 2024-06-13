@@ -48,7 +48,7 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
 
   const handlePress = useCallback(
     (account: any) => {
-      navigation.navigate('Details', {accountId: account._id});
+      navigation.navigate('Details', {accountId: account.id});
     },
     [navigation],
   );
@@ -56,7 +56,7 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
   const renderAccount = useCallback(
     ({item: account}: any) => (
       <TouchableOpacity
-        key={account._id.toString()}
+        key={account.id.toString()}
         style={styles.card}
         onPress={() => handlePress(account)}
         onLongPress={() => handleLongPress(account)}>
@@ -89,7 +89,7 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
                   fontSize: 16,
                   color: 'black',
                 }}>
-                RWF: {account.getTotalAmount}
+                RWF: {account.available_balance}
               </Text>
             </View>
             <View style={{marginTop: 40, flexDirection: 'row', gap: 3}}>
@@ -152,7 +152,7 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
           horizontal
           data={accounts}
           renderItem={renderAccount}
-          keyExtractor={account => account._id.toString()}
+          keyExtractor={account => account.id.toString()}
           showsHorizontalScrollIndicator={false}
         />
       </View>

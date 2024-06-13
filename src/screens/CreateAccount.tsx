@@ -5,7 +5,6 @@ import React, {useState} from 'react';
 import {useForm} from 'react-hook-form';
 import {StyleSheet, Switch, Text, TouchableOpacity, View} from 'react-native';
 import {ScrollView} from 'react-native-gesture-handler';
-import {BSON} from 'realm';
 import FloatingLabelInput from '../Components/FloatingInput';
 import {Account} from '../tools/Schema';
 
@@ -58,7 +57,6 @@ const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
     try {
       realm.write(() => {
         realm.create(Account, {
-          _id: new BSON.ObjectId(),
           ...data,
           amount: parseFloat(data.amount),
           initial_amount: parseFloat(data.amount),

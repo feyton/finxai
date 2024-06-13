@@ -4,7 +4,7 @@ interface ExtractInfo {
   amount?: any;
   fees?: number;
   currency?: string;
-  date_time?: Date;
+  date_time?: Date | string;
   payee?: string;
   transaction_type?: string;
 }
@@ -16,7 +16,7 @@ function convertToDate(dateString: string) {
   return new Date(fullYear, month - 1, day); // Months are zero-indexed in JS
 }
 
-export function extractTransactionInfo(message: string, address = '') {
+export function extractTransactionInfo(message: string) {
   let info: ExtractInfo = {};
 
   // Perform NLP analysis

@@ -17,11 +17,10 @@ import {BSON} from 'realm';
 import FloatingLabelInputRegular from '../Components/FloatingInputRegular';
 import TransactionItem from '../Components/Transaction';
 import {COLORS, FONTS} from '../assets/images';
-import {Account, Budget, Category, Transaction} from '../tools/Schema';
+import {Account, AutoRecord, Budget, Category, Transfer} from '../tools/Schema';
 
 function ConfirmTransactionsScreen() {
-  const transactionsQuery =
-    useQuery(Transaction).filtered('confirmed == false');
+  const transactionsQuery = useQuery(AutoRecord);
   const categoriesQuery = useQuery(Category);
   const budgetsQuery = useQuery(Budget);
   const accounts = useQuery(Account);
@@ -53,20 +52,35 @@ function ConfirmTransactionsScreen() {
       new BSON.ObjectID(selectedTransaction.category),
     );
     const subCat = cat?.subcategories.filter(
-      sub => sub._id == selectedTransaction?.subcategory,
+      sub => sub.id == selectedTransaction?.subcategory,
     )[0];
+    const budget = realm.objectForPrimaryKey(
+      Budget,
+      selectedTransaction.budget,
+    );
+    if (selectedTransaction.transaction_type === 'transfer') {
+      realm.write(() => {
+        const transfer: Transfer = realm.create('Transfer', {
+          ...selectedTransaction,
+          fromAccount: selectedTransaction.acount,
+        });
+        transfer.afterSave();
+        realm.delete(selectedTransaction);
+      });
+      setSelectedTransaction(null);
+      bottomSheetRef.current?.close();
+      return;
+    }
     if (selectedTransaction) {
       realm.write(() => {
-        realm.create(
-          'Transaction',
-          {
-            ...selectedTransaction,
-            confirmed: true,
-            category: cat,
-            subcategory: subCat,
-          },
-          'modified',
-        );
+        realm.create('Transaction', {
+          ...selectedTransaction,
+          confirmed: true,
+          category: cat,
+          subcategory: subCat,
+          budget,
+        });
+        realm.delete(selectedTransaction);
       });
       setSelectedTransaction(null);
       bottomSheetRef.current?.close(); // Close the bottom sheet
@@ -136,37 +150,36 @@ function ConfirmTransactionsScreen() {
               <Picker.Item label={'Transfer'} value={'transfer'} />
             </Picker>
           </View>
+          <View style={styles.pickerContainer}>
+            <Picker
+              style={styles.picker}
+              selectedValue={selectedTransaction.account.id.toString()}
+              onValueChange={value => handleFieldChange('Account', value)}>
+              <Picker.Item label={'Select account'} value={''} />
+              {accounts.map((account: any) => (
+                <Picker.Item
+                  key={account.id.toString()}
+                  label={account.name}
+                  value={account.id.toString()}
+                />
+              ))}
+            </Picker>
+          </View>
           {selectedTransaction.transaction_type === 'transfer' && (
             <View style={styles.pickerContainer}>
               <Picker
                 style={styles.picker}
-                selectedValue={selectedTransaction.category}
+                selectedValue={selectedTransaction.toAccount}
                 onValueChange={value => handleFieldChange('toAccount', value)}>
-                <Picker.Item label={'Select account'} value={''} />
+                <Picker.Item label={'To account'} value={''} />
                 {accounts.map((account: any) => (
                   <Picker.Item
-                    key={account._id.toString()}
+                    key={account.id.toString()}
                     label={account.name}
-                    value={account._id.toString()}
+                    value={account.id.toString()}
                   />
                 ))}
               </Picker>
-              {selectedTransaction?.category && (
-                <Picker
-                  selectedValue={selectedTransaction.category}
-                  onValueChange={value =>
-                    handleFieldChange('subcategory', value)
-                  }>
-                  <Picker.Item label={'Select subcategory'} value={''} />
-                  {subcategories.map((subcategory: any) => (
-                    <Picker.Item
-                      key={subcategory._id.toString()}
-                      label={subcategory.name}
-                      value={subcategory.name}
-                    />
-                  ))}
-                </Picker>
-              )}
             </View>
           )}
 
@@ -178,9 +191,9 @@ function ConfirmTransactionsScreen() {
               <Picker.Item label={'Select category'} value={''} />
               {categoriesQuery.map((category: any) => (
                 <Picker.Item
-                  key={category._id.toString()}
+                  key={category.id.toString()}
                   label={category.name}
-                  value={category._id.toString()}
+                  value={category.id.toString()}
                 />
               ))}
             </Picker>
@@ -196,9 +209,9 @@ function ConfirmTransactionsScreen() {
                 <Picker.Item label={'Select subcategory'} value={''} />
                 {subcategories.map((subcategory: any) => (
                   <Picker.Item
-                    key={subcategory._id.toString()}
+                    key={subcategory.id.toString()}
                     label={subcategory.name}
-                    value={subcategory._id.toString()}
+                    value={subcategory.id.toString()}
                   />
                 ))}
               </Picker>
@@ -215,19 +228,19 @@ function ConfirmTransactionsScreen() {
           <View style={styles.pickerContainer}>
             <Picker
               style={styles.picker}
-              selectedValue={selectedTransaction.budget?._id}
+              selectedValue={selectedTransaction.budget?.id}
               onValueChange={value =>
                 handleFieldChange(
                   'budget',
-                  budgetsQuery.filtered(`_id == '${value}'`)[0],
+                  budgetsQuery.filtered(`id == '${value}'`)[0],
                 )
               }>
               <Picker.Item label={'Select budget'} value={''} />
               {budgetsQuery.map((budget: any) => (
                 <Picker.Item
-                  key={budget._id.toString()}
+                  key={budget.id.toString()}
                   label={budget.name}
-                  value={budget._id.toString()}
+                  value={budget.id.toString()}
                 />
               ))}
             </Picker>
@@ -283,15 +296,26 @@ function ConfirmTransactionsScreen() {
 
   return (
     <View style={styles.container}>
+      {transactionsQuery.length === 0 && (
+        <View style={{marginTop: 20}}>
+          <Text style={{fontFamily: FONTS.bold, textAlign: 'center'}}>
+            Congz. All is cleared up now!
+          </Text>
+          <Text style={{fontFamily: FONTS.bold, textAlign: 'center'}}>
+            No Transactions
+          </Text>
+        </View>
+      )}
       <FlatList
         data={transactionsQuery}
-        keyExtractor={item => item._id.toString()}
+        keyExtractor={item => item.id.toString()}
         renderItem={renderTransaction}
         removeClippedSubviews
         maxToRenderPerBatch={20}
         initialNumToRender={10}
         windowSize={5}
       />
+
       <BottomSheet
         ref={bottomSheetRef}
         index={-1} // Start the sheet closed

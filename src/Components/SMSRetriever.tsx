@@ -10,11 +10,12 @@ import {
   View,
 } from 'react-native';
 
+import {formatDistanceToNow} from 'date-fns';
 // @ts-ignore
 import SmsAndroid from 'react-native-get-sms-android';
 import {Path, Svg} from 'react-native-svg';
-import {BSON} from 'realm';
-import {Account, Transaction} from '../tools/Schema';
+import {FONTS} from '../assets/images';
+import {Account, AutoRecord} from '../tools/Schema';
 import {extractTransactionInfo} from '../tools/parseSMS';
 
 interface SMS {
@@ -24,9 +25,9 @@ interface SMS {
 
 const SMSRetriever: React.FC = ({refreshing}: any) => {
   const navigation = useNavigation<any>();
-  const [smsSummary, setSMSSummary] = useState<any>({});
   const [initialized, setInitialized] = useState(refreshing);
   const [loading, setLoading] = useState(false);
+  const [lastChecked, setlastChecked] = useState<Date>(new Date());
   const realm = useRealm();
   const accounts = useQuery(Account).filtered('auto == true');
 
@@ -40,44 +41,31 @@ const SMSRetriever: React.FC = ({refreshing}: any) => {
     smsList: SMS[],
     account: Account,
   ) => {
-    const accountToUpdate = realm.objectForPrimaryKey(Account, account._id);
-    const transactionsToCreate = smsList
-      .map(sms => {
-        let transactionData = extractTransactionInfo(sms.body, account.address);
-        if (Object.keys(transactionData).length === 0) {
-          console.warn(
-            'Skipping transaction creation for SMS:',
-            sms,
-            transactionData,
-          );
-          return null;
-        }
-        if (isNaN(transactionData.amount)) {
-          transactionData.amount = 0;
-        }
-        transactionData.date_time =
-          new Date(transactionData.date_time) || new Date();
-        return {
-          _id: new BSON.ObjectID(),
-          ...transactionData,
-          sms: sms.body,
-          account: accountToUpdate,
-        };
-      })
-      .filter(Boolean);
-
-    if (transactionsToCreate.length > 0) {
-      realm.write(() => {
-        transactionsToCreate.forEach(transaction => {
+    const accountToUpdate = realm.objectForPrimaryKey(Account, account.id);
+    realm.write(() => {
+      account.logDate = new Date().getTime();
+      smsList.map(sms => {
+        let transactionData = extractTransactionInfo(sms.body);
+        if (!transactionData || isNaN(transactionData.amount)) {
+          transactionData = {amount: 0, date_time: new Date()};
+        } else {
           try {
-            realm.create('Transaction', transaction);
+            transactionData.date_time = new Date(transactionData.date_time);
           } catch (error) {
-            console.log('Error parsing sms', error);
+            transactionData.date_time = new Date();
           }
-        });
-        account.logDate = new Date().getTime();
+        }
+        try {
+          realm.create('AutoRecord', {
+            ...transactionData,
+            sms: sms.body,
+            account: accountToUpdate,
+          });
+        } catch (error) {
+          console.log('Error parsing sms', error);
+        }
       });
-    }
+    });
   };
 
   const fetchSmsForAccount = async (account: Account) => {
@@ -111,7 +99,7 @@ const SMSRetriever: React.FC = ({refreshing}: any) => {
     } catch (error) {
       console.error('Error retrieving transactions:', error);
     } finally {
-      setSMSSummary({lastChecked: new Date()});
+      setlastChecked(new Date());
       setInitialized(true);
       setLoading(false);
     }
@@ -129,9 +117,9 @@ const SMSRetriever: React.FC = ({refreshing}: any) => {
     if (!initialized) {
       retrieveTransactions();
     }
-  }, [initialized, accounts, realm]);
+  }, [initialized]);
 
-  const transactions = useQuery(Transaction).filtered('confirmed == false');
+  const transactions = useQuery(AutoRecord);
 
   return (
     <View style={styles.container}>
@@ -149,7 +137,14 @@ const SMSRetriever: React.FC = ({refreshing}: any) => {
                 ? 'All sorted. Congz!'
                 : 'Confirm ' + transactions.length + ' transactions'}
             </Text>
-            <Text style={styles.checkedText}>Checked:</Text>
+            <Text style={styles.checkedText}>
+              Checked:{' '}
+              <Text style={{fontFamily: FONTS.bold}}>
+                {formatDistanceToNow(lastChecked, {
+                  addSuffix: true,
+                })}
+              </Text>
+            </Text>
           </View>
           <View style={styles.buttonContainer}>
             <TouchableOpacity
