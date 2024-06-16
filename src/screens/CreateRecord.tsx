@@ -1,7 +1,7 @@
 import {Picker} from '@react-native-picker/picker';
 import {useQuery, useRealm} from '@realm/react';
 import React, {useState} from 'react';
-import {Controller, useForm} from 'react-hook-form';
+import {Controller, useForm, useWatch} from 'react-hook-form';
 import {
   KeyboardAvoidingView,
   ScrollView,
@@ -12,7 +12,8 @@ import {
 } from 'react-native';
 
 import FloatingLabelInput from '../Components/FloatingInput';
-import {Category} from '../tools/Schema';
+import {COLORS} from '../assets/images';
+import {Account, Budget, Category} from '../tools/Schema';
 
 interface BudgetItem {
   category: string;
@@ -27,9 +28,18 @@ interface Props {
 const CreateRecord: React.FC<Props> = ({navigation}) => {
   const realm = useRealm();
   const categories = useQuery(Category);
-  const {control, handleSubmit, setValue} = useForm();
+  const accounts = useQuery(Account);
+  const budgets = useQuery(Budget);
+  const {
+    control,
+    handleSubmit,
+    setValue,
+    formState: {errors},
+  } = useForm();
   const [record, setRecord] = useState({});
+  const [subcategories, setSubcategories] = useState<any[]>([]);
 
+  const categoryChange = useWatch({control, name: 'category'});
   const createRecord = (data: any) => {
     console.log(data);
   };
@@ -40,28 +50,122 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.scrollContainer}>
         <Text style={styles.header}>Create Record</Text>
-        <FloatingLabelInput control={control} name="note" label="Note" />
+        <FloatingLabelInput control={control} name="amount" label="Amount" />
         <Controller
-          name="category"
+          name="transaction_type"
           control={control}
-          rules={{required: 'Category is required'}}
+          rules={{required: 'Transaction type is required'}}
+          render={({field: {onChange, onBlur, value, ref}}: any) => (
+            <View style={styles.pickerContainer}>
+              <Picker
+                selectedValue={value}
+                onValueChange={onChange}
+                style={styles.picker}>
+                <Picker.Item label={'Select type'} value={''} />
+                <Picker.Item label={'Income'} value={'income'} />
+                <Picker.Item label={'Expense'} value={'expense'} />
+                <Picker.Item label={'Transfer'} value={'transfer'} />
+              </Picker>
+              <Text>{errors.transaction_type?.message}</Text>
+            </View>
+          )}
+        />
+        <Controller
+          name="account"
+          control={control}
+          rules={{required: 'Account is required'}}
           render={({value}: any) => (
             <View style={styles.pickerContainer}>
               <Picker
                 selectedValue={value}
-                onValueChange={itemValue => setValue('category', itemValue)}
+                onValueChange={itemValue => setValue('account', itemValue)}
                 style={styles.picker}>
-                {categories.map((category: any) => (
+                {accounts.map((account: any) => (
                   <Picker.Item
-                    key={category._id.toString()}
-                    label={category.name}
-                    value={category.name}
+                    key={account.id.toString()}
+                    label={account.name}
+                    value={account.id.toString()}
                   />
                 ))}
               </Picker>
+              <Text>{errors.account?.message}</Text>
             </View>
           )}
         />
+        <Controller
+          name="category"
+          control={control}
+          rules={{required: 'Category is required'}}
+          render={({field: {onChange, onBlur, value, ref}}: any) => (
+            <View style={styles.pickerContainer}>
+              <Picker
+                selectedValue={value}
+                onValueChange={onChange}
+                style={styles.picker}>
+                <Picker.Item value="" label="Select Category" />
+                {categories.map((category: any) => (
+                  <Picker.Item
+                    key={category.id.toString()}
+                    label={category.name}
+                    value={category.id.toString()}
+                  />
+                ))}
+              </Picker>
+              <Text>{errors.category?.message}</Text>
+            </View>
+          )}
+        />
+        {categoryChange && (
+          <Controller
+            name="subcategory"
+            control={control}
+            rules={{}}
+            render={({field: {onChange, onBlur, value, ref}}: any) => (
+              <View style={styles.pickerContainer}>
+                <Picker
+                  selectedValue={value}
+                  onValueChange={onChange}
+                  style={styles.picker}>
+                  <Picker.Item value={''} label="Select Subcategory" />
+                  {categories
+                    .find(cat => cat.id == categoryChange)
+                    .subcategories.map((subcategory: any) => (
+                      <Picker.Item
+                        key={subcategory.id.toString()}
+                        label={subcategory.name}
+                        value={subcategory.id.toString()}
+                      />
+                    ))}
+                </Picker>
+              </View>
+            )}
+          />
+        )}
+
+        <FloatingLabelInput control={control} name="payee" label="Payee" />
+        <Controller
+          name="budget"
+          control={control}
+          rules={{}}
+          render={({field: {onChange, onBlur, value, ref}}: any) => (
+            <View style={styles.pickerContainer}>
+              <Picker
+                selectedValue={value}
+                onValueChange={onChange}
+                style={styles.picker}>
+                {budgets.map((budget: any) => (
+                  <Picker.Item
+                    key={budget.id.toString()}
+                    label={budget.name}
+                    value={budget.id.toString()}
+                  />
+                ))}
+              </Picker>
+              <Text>{errors.budget?.message}</Text>
+            </View>
+          )}
+        />
+        <FloatingLabelInput control={control} name="note" label="Note" />
         <TouchableOpacity
           style={styles.saveButton}
           onPress={handleSubmit(createRecord)}>
@@ -75,7 +179,7 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: COLORS.bgPrimary,
   },
   scrollContainer: {
     padding: 16,
