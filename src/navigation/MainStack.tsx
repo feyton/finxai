@@ -3,10 +3,10 @@ import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {Path, Svg} from 'react-native-svg';
-import AccountsPage from '../screens/AccountsPage';
 import BudgetScreen from '../screens/BudgetScreen';
 import HomeScreen from '../screens/HomeScreen';
 import RecordsPage from '../screens/RecordsPage';
+import AccountScreenStack from './AccountNavigationStack';
 
 const Tab = createBottomTabNavigator();
 
@@ -21,6 +21,7 @@ function MainStack() {
         tabBarStyle: styles.tabBarStyle,
         tabBarShowLabel: false,
         headerShown: false,
+        tabBarHideOnKeyboard: true,
       }}>
       <Tab.Screen
         name="HomePage"
@@ -46,8 +47,8 @@ function MainStack() {
         }}
       />
       <Tab.Screen
-        name="AccountsPage"
-        component={AccountsPage}
+        name="AccountsStack"
+        component={AccountScreenStack}
         options={{
           tabBarIcon: ({focused}) => (
             <View style={styles.iconContainer}>

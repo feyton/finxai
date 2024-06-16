@@ -7,12 +7,12 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import {ScrollView} from 'react-native-gesture-handler';
 import {BSON} from 'realm';
 import FloatingLabelInputRegular from '../Components/FloatingInputRegular';
 import TransactionItem from '../Components/Transaction';
@@ -20,18 +20,18 @@ import {COLORS, FONTS} from '../assets/images';
 import {Account, AutoRecord, Budget, Category, Transfer} from '../tools/Schema';
 
 function ConfirmTransactionsScreen() {
-  const transactionsQuery = useQuery(AutoRecord);
+  const transactionsQuery = useQuery(AutoRecord).sorted('date_time', true);
   const categoriesQuery = useQuery(Category);
   const budgetsQuery = useQuery(Budget);
   const accounts = useQuery(Account);
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
   const bottomSheetRef = React.useRef<BottomSheet>(null);
-  const snapPoints = React.useMemo(() => ['25%', '50%', '90%'], []);
+  const snapPoints = React.useMemo(() => ['25%', '80%'], []);
   const [subcategories, setSubcategories] = useState<any[]>([]);
   const realm = useRealm();
 
   const handleTransactionClick = (transaction: any) => {
-    setSelectedTransaction(transaction);
+    setSelectedTransaction(transaction.toJSON());
     updateSubcategories(transaction?.category);
     bottomSheetRef.current?.snapToIndex(1); // Open the bottom sheet
   };
@@ -54,36 +54,64 @@ function ConfirmTransactionsScreen() {
     const subCat = cat?.subcategories.filter(
       sub => sub.id == selectedTransaction?.subcategory,
     )[0];
-    const budget = realm.objectForPrimaryKey(
-      Budget,
-      selectedTransaction.budget,
-    );
+    if (selectedTransaction.budget) {
+      selectedTransaction.budget = realm.objectForPrimaryKey(
+        Budget,
+        new BSON.ObjectID(selectedTransaction.budget),
+      );
+    }
+
     if (selectedTransaction.transaction_type === 'transfer') {
+      const toAccount = realm.objectForPrimaryKey(
+        'Account',
+        new BSON.ObjectID(selectedTransaction.toAccount),
+      );
+
+      const account = realm.objectForPrimaryKey(
+        'Account',
+        new BSON.ObjectID(selectedTransaction.account),
+      );
+      console.log('here ');
       realm.write(() => {
         const transfer: Transfer = realm.create('Transfer', {
           ...selectedTransaction,
-          fromAccount: selectedTransaction.acount,
+          toAccount: toAccount,
+          fromAccount: account,
+          id: new BSON.ObjectID(),
+          amount: parseFloat(selectedTransaction.amount),
         });
+        console.log(transfer);
         transfer.afterSave();
-        realm.delete(selectedTransaction);
+        realm.delete(
+          realm.objectForPrimaryKey('AutoRecord', selectedTransaction.id),
+        );
       });
       setSelectedTransaction(null);
       bottomSheetRef.current?.close();
       return;
     }
     if (selectedTransaction) {
+      const account = realm.objectForPrimaryKey(
+        'Account',
+        new BSON.ObjectID(selectedTransaction.account),
+      );
       realm.write(() => {
-        realm.create('Transaction', {
-          ...selectedTransaction,
+        const {id, ...transaction} = selectedTransaction;
+
+        const tx = realm.create('Transaction', {
+          ...transaction,
           confirmed: true,
           category: cat,
           subcategory: subCat,
-          budget,
+          id: new BSON.ObjectId(),
+          account: account,
+          amount: parseFloat(selectedTransaction.amount),
         });
-        realm.delete(selectedTransaction);
+        tx.setTotalAmount();
+        realm.delete(realm.objectForPrimaryKey('AutoRecord', id));
+        setSelectedTransaction(null);
+        bottomSheetRef.current?.close();
       });
-      setSelectedTransaction(null);
-      bottomSheetRef.current?.close(); // Close the bottom sheet
     }
   };
 
@@ -135,8 +163,8 @@ function ConfirmTransactionsScreen() {
           <FloatingLabelInputRegular
             name="amount"
             label="Amount"
-            value={selectedTransaction.amount?.toString()}
-            onChangeText={text => handleFieldChange('amount', parseFloat(text))}
+            value={selectedTransaction?.amount.toString()}
+            onChangeText={text => handleFieldChange('amount', text)}
             keyboardType="numeric"
           />
           <View style={styles.pickerContainer}>
@@ -153,8 +181,8 @@ function ConfirmTransactionsScreen() {
           <View style={styles.pickerContainer}>
             <Picker
               style={styles.picker}
-              selectedValue={selectedTransaction.account.id.toString()}
-              onValueChange={value => handleFieldChange('Account', value)}>
+              selectedValue={selectedTransaction?.account?.id?.toString()|| selectedTransaction.account}
+              onValueChange={value => handleFieldChange('account', value)}>
               <Picker.Item label={'Select account'} value={''} />
               {accounts.map((account: any) => (
                 <Picker.Item
@@ -228,13 +256,8 @@ function ConfirmTransactionsScreen() {
           <View style={styles.pickerContainer}>
             <Picker
               style={styles.picker}
-              selectedValue={selectedTransaction.budget?.id}
-              onValueChange={value =>
-                handleFieldChange(
-                  'budget',
-                  budgetsQuery.filtered(`id == '${value}'`)[0],
-                )
-              }>
+              selectedValue={selectedTransaction.budget}
+              onValueChange={value => handleFieldChange('budget', value)}>
               <Picker.Item label={'Select budget'} value={''} />
               {budgetsQuery.map((budget: any) => (
                 <Picker.Item
@@ -362,6 +385,7 @@ const styles = StyleSheet.create({
   },
   scrollViewContent: {
     flexGrow: 1,
+    paddingBottom: 50,
   },
 
   sms: {

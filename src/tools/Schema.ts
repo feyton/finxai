@@ -12,6 +12,10 @@ export class Account extends Realm.Object<Account> {
   address?: string;
   logDate?: number;
   initial_amount!: number;
+  transactions!: Realm.List<Transaction>;
+  available_balance!: number;
+  transfer!: number;
+  opening_balance!: number;
 
   static schema: ObjectSchema = {
     name: 'Account',
@@ -32,60 +36,13 @@ export class Account extends Realm.Object<Account> {
     },
     primaryKey: 'id',
   };
-  transactions: Transaction[] | any;
-  available_balance!: number;
-  transfer!: number;
-  opening_balance!: number;
 
-  updateAvailableBalance() {
-    if (this.transactions) {
-      const income = this.transactions
-        .filtered('transaction_type == $0', 'income')
-        .sum('amount');
-      const expense = this.transactions
-        .filtered('transaction_type == $0', 'expense')
-        .sum('amount');
-      this.available_balance =
-        this.transfer + income - expense + this.opening_balance;
-    } else {
-      this.available_balance = this.transfer + this.opening_balance;
-    }
-    // realm.write(() => {
-    //   const linkedTransactions = realm
-    //     .objects('Transaction')
-    //     .filtered('account._id == $0', this._id);
-    //   const totalIncome = linkedTransactions
-    //     .filtered("transaction_type == 'income'")
-    //     .sum('amount');
-    //   const totalExpense = linkedTransactions
-    //     .filtered("transaction_type == 'expense'")
-    //     .sum('amount');
-    //   const totalFees = linkedTransactions
-    //     .filtered("transaction_type == 'expense'")
-    //     .sum('fees');
-    //   const incomingTransfers = realm
-    //     .objects('Transaction')
-    //     .filtered(
-    //       "toAccount._id == $0 AND transaction_type == 'transfer'",
-    //       this._id,
-    //     );
-    //   const outgoingTransfers = realm
-    //     .objects('Transaction')
-    //     .filtered(
-    //       "account._id == $0 AND transaction_type == 'transfer'",
-    //       this._id,
-    //     );
-    //   const totalIncoming = incomingTransfers.sum('amount');
-    //   const totalOutgoing = outgoingTransfers.sum('amount');
-
-    //   this.amount =
-    //     this.initial_amount +
-    //     totalIncome -
-    //     totalExpense -
-    //     totalFees +
-    //     totalIncoming -
-    //     totalOutgoing;
-    // });
+  updateAvailableBalance(realm: Realm) {
+    const amount = realm
+      .objects('Transaction')
+      .filtered('account == $0', this)
+      .sum('amount');
+    this.available_balance = this.transfer + amount + this.opening_balance;
   }
 }
 
@@ -125,8 +82,14 @@ export class Transaction extends Realm.Object<Transaction> {
     },
     primaryKey: 'id',
   };
-  get total() {
-    return this.amount + this.fees;
+
+  setTotalAmount() {
+    if (this.transaction_type === 'income') {
+      return;
+    }
+    if (this.transaction_type === 'expense') {
+      this.amount = -this.amount - this.fees;
+    }
   }
 }
 
@@ -194,7 +157,7 @@ export class Transfer extends Realm.Object<Transfer> {
 
   afterSave() {
     this.fromAccount.transfer -= this.total();
-    this.toAccount += this.amount;
+    this.toAccount.transfer += this.amount;
   }
   addListener(
     _callback: Realm.ObjectChangeCallback<Transfer>,
@@ -294,10 +257,9 @@ export class Category extends Realm.Object<Category> {
     },
     primaryKey: 'id',
   };
-  category: Subcategory[];
 }
 
-export class Subcategory extends Realm.Object {
+export class Subcategory extends Realm.Object<Subcategory> {
   id!: BSON.ObjectId;
   name!: string;
   icon!: string;
@@ -309,6 +271,58 @@ export class Subcategory extends Realm.Object {
       id: {type: 'objectId', default: () => new ObjectId()},
       name: 'string',
       icon: 'string',
+    },
+  };
+}
+
+export class ScheduledPayment extends Realm.Object {
+  id!: BSON.ObjectId;
+  name!: string;
+  amount!: number;
+  frequency!: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  startDate!: Date;
+  nextReminderDate!: Date;
+  lastPaidDate?: Date;
+  isRecurring!: boolean;
+
+  static schema: ObjectSchema = {
+    name: 'ScheduledPayment',
+    primaryKey: 'id',
+    properties: {
+      id: {type: 'objectId', default: () => new BSON.ObjectID()},
+      name: 'string',
+      amount: 'double',
+      account: 'Account',
+      toAccount: 'Account',
+      payee: 'string',
+      frequency: 'string',
+      transaction_type: 'string',
+      startDate: 'date',
+      lastPaidDate: 'date?',
+      isRecurring: {type: 'bool', default: true},
+      note: 'string',
+      labels: 'string[]',
+    },
+  };
+}
+
+export class Subscription extends Realm.Object<Subscription> {
+  amount!: number;
+  frequency!: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  static schema: ObjectSchema = {
+    name: 'Subscription',
+    primaryKey: 'id',
+    properties: {
+      id: {type: 'objectId', default: () => new BSON.ObjectID()},
+      providerName: 'string',
+      amount: 'double',
+      account: 'Account',
+      frequency: 'string',
+      dueDate: 'date',
+      isRecurring: {type: 'bool', default: true},
+      note: 'string',
+      labels: 'string[]',
+      active: 'bool',
     },
   };
 }

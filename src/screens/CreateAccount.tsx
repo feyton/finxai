@@ -6,6 +6,7 @@ import {useForm} from 'react-hook-form';
 import {StyleSheet, Switch, Text, TouchableOpacity, View} from 'react-native';
 import {ScrollView} from 'react-native-gesture-handler';
 import FloatingLabelInput from '../Components/FloatingInput';
+import {COLORS} from '../assets/images';
 import {Account} from '../tools/Schema';
 
 interface CreateAccountScreenProps {
@@ -58,8 +59,7 @@ const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
       realm.write(() => {
         realm.create(Account, {
           ...data,
-          amount: parseFloat(data.amount),
-          initial_amount: parseFloat(data.amount),
+          opening_balance: parseFloat(data.opening_balance),
           auto,
           address: prov.address,
           providerName: prov.name,
@@ -100,8 +100,8 @@ const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
       />
       <FloatingLabelInput
         control={control}
-        name="amount"
-        label="Initial Amount"
+        name="opening_balance"
+        label="Opening Balance"
         keyboardType="numeric"
         rules={{required: 'Initial Amount is required'}}
       />
@@ -152,7 +152,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
-    backgroundColor: '#121212',
+    backgroundColor: COLORS.bgPrimary,
+    paddingBottom: 50,
   },
   errorText: {
     color: 'red',

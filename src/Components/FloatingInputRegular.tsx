@@ -80,7 +80,7 @@ const styles = StyleSheet.create({
   label: {
     position: 'absolute',
     left: 15,
-    backgroundColor: COLORS.bgSecondary,
+    backgroundColor: COLORS.bgPrimary,
     paddingHorizontal: 5,
     fontFamily: 'Poppins-Regular',
     color: 'white',

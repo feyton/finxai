@@ -9,21 +9,23 @@ import {RealmProvider} from '@realm/react';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import CustomHeader from './src/Components/Header';
 import MyTabs from './src/navigation/MainStack';
-import AccountDetails from './src/screens/AccountDetails';
 import CategoryManagementScreen from './src/screens/CategoryManagementScreen';
 import ConfirmTransactionsScreen from './src/screens/ConfirmTransactions';
-import CreateAccountScreen from './src/screens/CreateAccount';
 import CreateBudgetScreen from './src/screens/CreateBudget';
 
+import AddPlannedPaymentScreen from './src/screens/AddPlannedPayment';
 import CreateRecord from './src/screens/CreateRecord';
+import ScheduledPaymentsScreen from './src/screens/PlannedPaymentsScreen';
 import {
   Account,
   AutoRecord,
   Budget,
   BudgetItem,
   Category,
+  ScheduledPayment,
   SplitDetail,
   Subcategory,
+  Subscription,
   Transaction,
   Transfer,
 } from './src/tools/Schema';
@@ -58,6 +60,8 @@ function App(): React.JSX.Element {
             Subcategory,
             AutoRecord,
             Transfer,
+            ScheduledPayment,
+            Subscription,
           ]}>
           <Stack.Navigator
             screenOptions={({route}) => ({
@@ -66,8 +70,6 @@ function App(): React.JSX.Element {
               ),
             })}>
             <Stack.Screen name="Home" component={MyTabs} />
-            <Stack.Screen name="Account" component={CreateAccountScreen} />
-            <Stack.Screen name="Details" component={AccountDetails} />
             <Stack.Screen name="CreateRecord" component={CreateRecord} />
             <Stack.Screen
               name="Confirm"
@@ -77,6 +79,14 @@ function App(): React.JSX.Element {
             <Stack.Screen
               name="ManageCategories"
               component={CategoryManagementScreen}
+            />
+            <Stack.Screen
+              name="ScheduledPayment"
+              component={ScheduledPaymentsScreen}
+            />
+            <Stack.Screen
+              name="AddPlannedPayment"
+              component={AddPlannedPaymentScreen}
             />
           </Stack.Navigator>
         </RealmProvider>

@@ -28,7 +28,10 @@ const HomeScreen = ({navigation}: any) => {
 
   const handlePress = useCallback(
     (account: any) => {
-      navigation.navigate('Details', {accountId: account.id.toString()});
+      navigation.navigate('AccountsStack', {
+        screen: 'AccountDetails',
+        params: {accountId: account.id.toString()},
+      });
     },
     [navigation],
   );
@@ -36,7 +39,7 @@ const HomeScreen = ({navigation}: any) => {
   const onRefresh = () => {
     realm.write(() => {
       accounts.forEach(account => {
-        account.updateAvailableBalance();
+        account.updateAvailableBalance(realm);
       });
     });
 
@@ -47,11 +50,12 @@ const HomeScreen = ({navigation}: any) => {
   };
   useEffect(() => {
     onRefresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const renderAccount = useCallback(
     ({item: account}: any) => (
-      <TouchableWithoutFeedback
+      <TouchableOpacity
         key={account.id.toString()}
         style={styles.card}
         onPress={() => handlePress(account)}>
@@ -127,7 +131,7 @@ const HomeScreen = ({navigation}: any) => {
             />
           </View>
         </ImageBackground>
-      </TouchableWithoutFeedback>
+      </TouchableOpacity>
     ),
     [handlePress],
   );
@@ -151,7 +155,7 @@ const HomeScreen = ({navigation}: any) => {
         {accounts.length === 0 && (
           <TouchableWithoutFeedback
             onPress={() => {
-              navigation.navigate('Account');
+              navigation.navigate('CreateAccount');
             }}>
             <View
               style={{

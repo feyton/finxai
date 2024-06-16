@@ -3,6 +3,7 @@ import {format} from 'date-fns';
 import React from 'react';
 import {Image, StyleSheet, Text, View} from 'react-native';
 import {Path, Svg} from 'react-native-svg';
+import {Category} from '../tools/Schema';
 
 interface Account {
   _id: 'string';
@@ -16,7 +17,7 @@ interface Transaction {
   confirmed: boolean;
   date_time: string;
   payee: string;
-  category: string;
+  category: Category;
 }
 
 interface Props {
@@ -90,7 +91,8 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
             </Text>
           </View>
           <Text style={styles.payee}>
-            {transaction?.payee} | {transaction?.category?.name}
+            {transaction?.payee} | {transaction?.category?.icon}{' '}
+            {transaction?.category?.name}
           </Text>
         </View>
       </View>

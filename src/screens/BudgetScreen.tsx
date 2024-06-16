@@ -1,3 +1,4 @@
+/* eslint-disable react-native/no-inline-styles */
 import {useQuery, useRealm} from '@realm/react';
 import React, {useCallback, useState} from 'react';
 import {
@@ -44,12 +45,14 @@ export default function BudgetScreen({navigation}: any) {
               margin: 10,
               padding: 16,
             }}>
-            <Text>{budget.name}</Text>
-            <Text style={{fontFamily: FONTS.regular}}>
-              {budget.getTotalAmount()}
+            <Text style={{color: 'white', fontFamily: FONTS.bold}}>
+              {budget.name}
             </Text>
-            <Text style={{fontFamily: FONTS.regular}}>
-              {budget.getCurrentSpending()}
+            <Text style={{fontFamily: FONTS.regular, color: 'white'}}>
+              RWF: {budget.getTotalAmount().toLocaleString()}
+            </Text>
+            <Text style={{fontFamily: FONTS.regular, color: 'white'}}>
+              Current Spending: {budget.getCurrentSpending()}
             </Text>
           </View>
         </TouchableOpacity>

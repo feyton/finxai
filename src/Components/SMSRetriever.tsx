@@ -96,6 +96,10 @@ const SMSRetriever: React.FC = ({refreshing}: any) => {
     setLoading(true);
     try {
       await Promise.all(accounts.map(account => fetchSmsForAccount(account)));
+      const tx = realm.objects('AutoRecord').filtered('account == null');
+      realm.write(() => {
+        realm.delete(tx);
+      });
     } catch (error) {
       console.error('Error retrieving transactions:', error);
     } finally {

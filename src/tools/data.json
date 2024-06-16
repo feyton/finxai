@@ -36,6 +36,16 @@
       ]
     },
     {
+      "name": "Technology",
+      "icon": "⚙️",
+      "type": "expense",
+      "subcategories": [
+        {"name": "Devices", "icon": "🖥️"},
+        {"name": "Cloud", "icon": "🌥️"},
+        {"name": "Software", "icon": "👨‍💻"}
+      ]
+    },
+    {
       "name": "Health & Fitness",
       "icon": "💪",
       "type": "expense",
@@ -87,8 +97,10 @@
       "subcategories": [
         {"name": "Electricity", "icon": "💡"},
         {"name": "Water", "icon": "🚰"},
-        {"name": "Trash", "icon": "🗑️"},
-        {"name": "Security", "icon": "🔐"}
+        {"name": "Trash Collection", "icon": "🗑️"},
+        {"name": "Security", "icon": "🔐"},
+        {"name": "Internet", "icon": "🛜"},
+        {"name": "Gas", "icon": "⛽"}
       ]
     },
     {

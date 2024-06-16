@@ -1,3 +1,4 @@
+/* eslint-disable react-native/no-inline-styles */
 /* eslint-disable @typescript-eslint/no-shadow */
 import {useObject, useQuery} from '@realm/react';
 import React, {useMemo} from 'react';
@@ -5,9 +6,14 @@ import {SectionList, StyleSheet, Text, View} from 'react-native';
 import {Path, Svg} from 'react-native-svg';
 import {BSON} from 'realm';
 import TransactionItem from '../Components/Transaction';
-import {Account, Transaction} from '../tools/Schema';
+import {COLORS} from '../assets/images';
+import {Account, AutoRecord, Transaction} from '../tools/Schema';
 
-function AccountDetails({route}: any) {
+interface AccountDetailsProps {
+  route: any;
+}
+
+const AccountDetails: React.FC<AccountDetailsProps> = ({route}) => {
   const {accountId} = route.params;
   const account = useObject(Account, new BSON.ObjectID(accountId));
   const today = new Date();
@@ -15,8 +21,12 @@ function AccountDetails({route}: any) {
   const currentYear = today.getFullYear();
 
   const transactions = useQuery(Transaction).filtered(
-    'account._id == $0 OR toAccount._id == $0',
-    account?._id,
+    'account.id == $0',
+    account?.id,
+  );
+  const unconfirmedTransactions = useQuery(AutoRecord).filtered(
+    'account.id == $0',
+    account.id,
   );
 
   const {totalAmount, monthlyIncome, monthlyExpenses} = useMemo(() => {
@@ -47,16 +57,9 @@ function AccountDetails({route}: any) {
     return {totalAmount, monthlyIncome, monthlyExpenses};
   }, [transactions, account, currentMonth, currentYear]);
 
-  const latestConfirmedTransactions = transactions.filtered(
-    'account._id == $0 AND confirmed == true AND date_time >= $1',
-    account?._id,
-    new Date(today.getFullYear(), today.getMonth(), today.getDate()),
-  );
-
-  const unconfirmedTransactions = transactions.filtered(
-    'account._id == $0 AND confirmed == false',
-    account?._id,
-  );
+  const latestConfirmedTransactions = transactions
+    .filtered('account.id == $0', account?.id)
+    .sorted('date_time');
 
   const renderTransaction = ({item}: any) => (
     <TransactionItem transaction={item} />
@@ -179,20 +182,20 @@ function AccountDetails({route}: any) {
 
       <SectionList
         sections={combinedTransactions}
-        keyExtractor={(item, index) => item._id.toString()}
+        keyExtractor={(item, index) => item.id.toString()}
         renderItem={renderTransaction}
         renderSectionHeader={renderSectionHeader}
         renderSectionFooter={renderSectionFooter}
       />
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
-    backgroundColor: '#001',
+    backgroundColor: COLORS.bgPrimary,
   },
   totalText: {
     fontSize: 24,

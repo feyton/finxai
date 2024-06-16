@@ -2741,6 +2741,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@react-native-community/datetimepicker@npm:^8.1.0":
+  version: 8.1.0
+  resolution: "@react-native-community/datetimepicker@npm:8.1.0"
+  dependencies:
+    invariant: ^2.2.4
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+    react-native-windows: "*"
+  peerDependenciesMeta:
+    react-native-windows:
+      optional: true
+  checksum: f8b9018560a755b5f8644818533f60b2ff6f3226af075db8dcfaf7b596b39580524c462baecc5765cd237a8b7984d49596ba4c7b179faef8b247f608b52bb06d
+  languageName: node
+  linkType: hard
+
 "@react-native-picker/picker@npm:^2.7.6":
   version: 2.7.6
   resolution: "@react-native-picker/picker@npm:2.7.6"
@@ -5801,6 +5817,7 @@ __metadata:
     "@babel/runtime": ^7.20.0
     "@gorhom/bottom-sheet": ^4
     "@react-native-clipboard/clipboard": ^1.14.1
+    "@react-native-community/datetimepicker": ^8.1.0
     "@react-native-picker/picker": ^2.7.6
     "@react-native/babel-preset": 0.74.83
     "@react-native/eslint-config": 0.74.83
@@ -5823,6 +5840,7 @@ __metadata:
     react: 18.2.0
     react-hook-form: ^7.51.5
     react-native: 0.74.1
+    react-native-date-picker: ^5.0.4
     react-native-gesture-handler: ^2.16.2
     react-native-get-random-values: ^1.11.0
     react-native-get-sms-android: ^2.1.0
@@ -9257,6 +9275,16 @@ __metadata:
   version: 17.0.2
   resolution: "react-is@npm:17.0.2"
   checksum: 9d6d111d8990dc98bc5402c1266a808b0459b5d54830bbea24c12d908b536df7883f268a7868cfaedde3dd9d4e0d574db456f84d2e6df9c4526f99bb4b5344d8
+  languageName: node
+  linkType: hard
+
+"react-native-date-picker@npm:^5.0.4":
+  version: 5.0.4
+  resolution: "react-native-date-picker@npm:5.0.4"
+  peerDependencies:
+    react: ">= 17.0.1"
+    react-native: ">= 0.64.3"
+  checksum: 67db7fba5de613c61a70b5b9274daef8c7d3b6f6cdc5a6063eb61126d4df43252c501c2cb78ebda37fb0997ccb0994e949976d0fb395453580019923100e03ad
   languageName: node
   linkType: hard
 

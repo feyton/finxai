@@ -8,6 +8,7 @@ import {
   TextInputProps,
   View,
 } from 'react-native';
+import {COLORS} from '../assets/images';
 
 interface FloatingLabelInputProps extends TextInputProps {
   control: Control<any>;
@@ -102,7 +103,7 @@ const styles = StyleSheet.create({
   label: {
     position: 'absolute',
     left: 15,
-    backgroundColor: '#121212',
+    backgroundColor: COLORS.bgPrimary,
     paddingHorizontal: 5,
     fontFamily: 'Poppins-Regular',
     color: 'white',

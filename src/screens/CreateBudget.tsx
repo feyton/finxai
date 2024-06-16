@@ -42,13 +42,13 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
 
   const addItem = () => {
     if (currentCategory && currentAmount) {
-      const cat = categories.find(cat => cat._id.toString() == currentCategory);
+      const cat = categories.find(cat => cat.id.toString() == currentCategory);
       setItems([
         ...items,
         {
           category: cat,
           subcategory: cat?.subcategories.find(
-            sub => sub._id.toString() == currentSubcategory,
+            sub => sub.id.toString() == currentSubcategory,
           ),
           amount: parseFloat(currentAmount),
         },
@@ -67,7 +67,7 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
     }
     realm.write(() => {
       realm.create('Budget', {
-        _id: new BSON.ObjectID(),
+        id: new BSON.ObjectID(),
         name,
         amount: parseFloat(budgetAmount),
         event,
@@ -167,9 +167,9 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
               <Picker.Item label="Select Category" value="" />
               {categories.map(cat => (
                 <Picker.Item
-                  key={cat._id.toString()}
+                  key={cat.id.toString()}
                   label={cat.name}
-                  value={cat._id.toString()}
+                  value={cat.id.toString()}
                 />
               ))}
             </Picker>
@@ -182,12 +182,12 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
                 style={styles.picker}>
                 <Picker.Item label="Select Subcategory" value="" />
                 {categories
-                  .find(cat => cat._id.toString() === currentCategory)
-                  ?.subcategories.map(subcat => (
+                  .find((cat: any) => cat.id.toString() === currentCategory)
+                  ?.subcategories.map((subcat: any) => (
                     <Picker.Item
-                      key={subcat._id.toString()}
+                      key={subcat.id.toString()}
                       label={subcat.name}
-                      value={subcat._id.toString()}
+                      value={subcat.id.toString()}
                     />
                   ))}
               </Picker>

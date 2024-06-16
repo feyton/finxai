@@ -1,5 +1,6 @@
 /* eslint-disable react-native/no-inline-styles */
 import {useQuery} from '@realm/react';
+import {startOfMonth} from 'date-fns';
 import React, {useMemo} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {Path, Svg} from 'react-native-svg';
@@ -10,42 +11,26 @@ function Summary() {
   const transactions = useQuery<any>(Transaction);
 
   const today = new Date();
-  const currentMonth = today.getMonth();
-  const currentYear = today.getFullYear();
+  const currentMonthStart = startOfMonth(today);
 
   const summary = useMemo(() => {
-    let totalAvailable: number = 0;
-    let totalIncome: number = 0;
-    let totalExpenses: number = 0;
+    const totalAvailable = accounts.sum('available_balance');
+    const totalExpense = transactions
+      .filtered(
+        'transaction_type == "expense" AND date_time > $0',
+        currentMonthStart,
+      )
+      .sum('amount');
+    const totalIncome = transactions
+      .filtered(
+        'transaction_type == "income" AND date_time > $0',
+        currentMonthStart,
+      )
+      .sum('amount');
 
-    accounts.forEach(account => {
-      let accountTotal: number = account.initial_amount || 0;
-
-      transactions.filtered('account == $0', account).forEach(transaction => {
-        if (transaction.transaction_type === 'income') {
-          accountTotal += transaction.amount;
-          if (
-            transaction.date_time.getMonth() === currentMonth &&
-            transaction.date_time.getFullYear() === currentYear
-          ) {
-            totalIncome += transaction.amount;
-          }
-        } else if (transaction.transaction_type === 'expense') {
-          accountTotal -= transaction.amount;
-          if (
-            transaction.date_time.getMonth() === currentMonth &&
-            transaction.date_time.getFullYear() === currentYear
-          ) {
-            totalExpenses += transaction.amount;
-          }
-        }
-      });
-
-      totalAvailable += accountTotal;
-    });
-
-    return {totalAvailable, totalIncome, totalExpenses};
-  }, [accounts, transactions, currentMonth, currentYear]);
+    return {totalAvailable, totalIncome, totalExpense};
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts, transactions]);
 
   return (
     <View style={styles.container}>
@@ -110,7 +95,7 @@ function Summary() {
                 marginBottom: -8,
                 color: 'red',
               }}>
-              {summary.totalExpenses.toLocaleString()}
+              {summary.totalExpense.toLocaleString()}
             </Text>
             <Text
               style={{

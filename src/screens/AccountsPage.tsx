@@ -21,8 +21,7 @@ interface Props {
   navigation: any;
 }
 
-const StyledText = styled(Text);
-const StyledView = styled(View);
+
 
 const AccountsPage: React.FC<Props> = ({navigation}) => {
   const [modalVisible, setModalVisible] = useState(false);
@@ -48,7 +47,7 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
 
   const handlePress = useCallback(
     (account: any) => {
-      navigation.navigate('Details', {accountId: account.id});
+      navigation.navigate('AccountDetails', {accountId: account.id});
     },
     [navigation],
   );
@@ -210,7 +209,7 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
 
       <TouchableOpacity
         style={{position: 'absolute', bottom: 90, right: 30}}
-        onPress={() => navigation.navigate('Account')}>
+        onPress={() => navigation.navigate('CreateAccount')}>
         <Svg width="50px" height="50px" viewBox="0 0 24 24" fill="white">
           <Path
             fill-rule="evenodd"
