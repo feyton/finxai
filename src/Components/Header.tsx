@@ -1,13 +1,21 @@
 import {useNavigation, useRoute} from '@react-navigation/native';
+import {useUser} from '@realm/react';
 import React from 'react';
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {Circle, Path, Svg} from 'react-native-svg';
+import {COLORS} from '../assets/images';
 
 interface HeaderProps {
   showBackButton?: boolean;
+  goName?: string | null;
 }
 
-const CustomHeader: React.FC<HeaderProps> = ({showBackButton}) => {
+const CustomHeader: React.FC<HeaderProps> = ({
+  showBackButton,
+  goName = null,
+}) => {
+  const userData = useUser();
+  console.log(userData);
   const user: any = {
     name: 'Fabrice',
     photo:
@@ -17,6 +25,9 @@ const CustomHeader: React.FC<HeaderProps> = ({showBackButton}) => {
   const route: any = useRoute();
 
   const handleBackPress = () => {
+    if (goName) {
+      navigation.navigate(goName);
+    }
     navigation.goBack();
   };
 
@@ -67,7 +78,7 @@ const CustomHeader: React.FC<HeaderProps> = ({showBackButton}) => {
             />
           </Svg>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+        <TouchableOpacity onPress={() => navigation.navigate('UserProfile')}>
           <Image source={{uri: user.photo}} style={styles.profileImage} />
         </TouchableOpacity>
       </View>
@@ -85,9 +96,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     borderBottomColor: 'gray',
     borderBottomWidth: 0.5,
-    marginBottom: 10,
-    marginTop: 5,
-    paddingBottom: 5,
+    paddingTop: 10,
+    paddingBottom: 15,
+    backgroundColor: COLORS.bgPrimary,
   },
   leftContainer: {
     flexDirection: 'row',

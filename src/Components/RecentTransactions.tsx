@@ -13,7 +13,7 @@ function RecentTransactions() {
     <View style={styles.container}>
       <Text style={styles.title}>Recent Transactions</Text>
       {transactions.map((transaction: any) => (
-        <TransactionItem key={transaction.id} transaction={transaction} />
+        <TransactionItem key={transaction._id} transaction={transaction} />
       ))}
     </View>
   );

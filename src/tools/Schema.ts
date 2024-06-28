@@ -4,7 +4,7 @@ import {Double} from 'react-native/Libraries/Types/CodegenTypes';
 import {BSON, ObjectSchema} from 'realm';
 
 export class Account extends Realm.Object<Account> {
-  id!: BSON.ObjectId;
+  _id!: BSON.ObjectId;
   name!: string;
   type!: string;
   amount!: number;
@@ -20,7 +20,7 @@ export class Account extends Realm.Object<Account> {
   static schema: ObjectSchema = {
     name: 'Account',
     properties: {
-      id: {type: 'objectId', default: () => new BSON.ObjectID()},
+      _id: {type: 'objectId', default: () => new BSON.ObjectID()},
       name: {type: 'string', indexed: 'full-text'},
       available_balance: {type: 'double', default: 0},
       opening_balance: {type: 'double', default: 0},
@@ -34,7 +34,7 @@ export class Account extends Realm.Object<Account> {
       transfers: {type: 'list', objectType: 'Transfer'},
       transfer: {type: 'double', default: 0},
     },
-    primaryKey: 'id',
+    primaryKey: '_id',
   };
 
   updateAvailableBalance(realm: Realm) {
@@ -42,12 +42,13 @@ export class Account extends Realm.Object<Account> {
       .objects('Transaction')
       .filtered('account == $0', this)
       .sum('amount');
+      console.log({amount})
     this.available_balance = this.transfer + amount + this.opening_balance;
   }
 }
 
 export class Transaction extends Realm.Object<Transaction> {
-  id!: BSON.ObjectId;
+  _id!: BSON.ObjectId;
   amount!: any;
   account!: Account;
   category?: string;
@@ -64,7 +65,7 @@ export class Transaction extends Realm.Object<Transaction> {
   static schema: ObjectSchema = {
     name: 'Transaction',
     properties: {
-      id: {type: 'objectId', default: new BSON.ObjectID()},
+      _id: {type: 'objectId', default: new BSON.ObjectID()},
       amount: 'double',
       confirmed: {type: 'bool', default: false},
       date_time: {type: 'date'},
@@ -80,7 +81,7 @@ export class Transaction extends Realm.Object<Transaction> {
       splitDetails: 'SplitDetail[]',
       fees: {type: 'double', default: 0}, // Only for transfer transactions
     },
-    primaryKey: 'id',
+    primaryKey: '_id',
   };
 
   setTotalAmount() {
@@ -94,7 +95,7 @@ export class Transaction extends Realm.Object<Transaction> {
 }
 
 export class AutoRecord extends Realm.Object<AutoRecord> {
-  id!: BSON.ObjectId;
+  _id!: BSON.ObjectId;
   amount?: any;
   account!: Account;
   category?: string;
@@ -111,7 +112,7 @@ export class AutoRecord extends Realm.Object<AutoRecord> {
   static schema: ObjectSchema = {
     name: 'AutoRecord',
     properties: {
-      id: {type: 'objectId', default: () => new BSON.ObjectID()},
+      _id: {type: 'objectId', default: () => new BSON.ObjectID()},
       amount: 'double?',
       confirmed: {type: 'bool', default: false},
       date_time: {type: 'date', default: () => new Date()},
@@ -124,7 +125,7 @@ export class AutoRecord extends Realm.Object<AutoRecord> {
       subcategory: 'Subcategory?',
       fees: {type: 'double', default: 0}, // Only for transfer transactions
     },
-    primaryKey: 'id',
+    primaryKey: '_id',
   };
   get total() {
     return this.amount - this.fees;
@@ -134,9 +135,9 @@ export class AutoRecord extends Realm.Object<AutoRecord> {
 export class Transfer extends Realm.Object<Transfer> {
   static schema: ObjectSchema = {
     name: 'Transfer',
-    primaryKey: 'id',
+    primaryKey: '_id',
     properties: {
-      id: {type: 'objectId', default: () => new BSON.ObjectID()},
+      _id: {type: 'objectId', default: () => new BSON.ObjectID()},
       fromAccount: 'Account',
       toAccount: 'Account',
       amount: 'double',
@@ -168,7 +169,7 @@ export class Transfer extends Realm.Object<Transfer> {
 }
 
 export class Budget extends Realm.Object<Budget> {
-  id!: BSON.ObjectID;
+  _id!: BSON.ObjectID;
   period!: string;
   startDate?: Date;
   endDate?: Date;
@@ -176,9 +177,9 @@ export class Budget extends Realm.Object<Budget> {
 
   static schema: ObjectSchema = {
     name: 'Budget',
-    primaryKey: 'id',
+    primaryKey: '_id',
     properties: {
-      id: {type: 'objectId', default: new BSON.ObjectID()},
+      _id: {type: 'objectId', default: new BSON.ObjectID()},
       name: 'string', // Overall budget name (e.g., "Monthly Expenses", "Vacation")
       period: 'string?', // 'monthly', 'weekly', 'custom' (for events)
       startDate: 'date?', // Start date (for custom/event budgets)
@@ -214,7 +215,7 @@ export class BudgetItem extends Realm.Object<BudgetItem> {
     name: 'BudgetItem',
     embedded: true, // Mark BudgetItem as embedded
     properties: {
-      id: {type: 'objectId', default: new BSON.ObjectID()},
+      _id: {type: 'objectId', default: new BSON.ObjectID()},
       category: 'Category?',
       subcategory: 'Subcategory?',
       amount: 'double',
@@ -236,7 +237,7 @@ export class SplitDetail extends Realm.Object<SplitDetail> {
 }
 
 export class Category extends Realm.Object<Category> {
-  id!: BSON.ObjectId;
+  _id!: BSON.ObjectId;
   name!: string;
   icon!: string;
   type!: 'income' | 'expense'; // Add a type field
@@ -245,7 +246,7 @@ export class Category extends Realm.Object<Category> {
   static schema: ObjectSchema = {
     name: 'Category',
     properties: {
-      id: {type: 'objectId', default: () => new ObjectId()},
+      _id: {type: 'objectId', default: () => new ObjectId()},
       name: 'string',
       icon: 'string',
       type: {type: 'string', default: 'expense'}, // Default to 'expense'
@@ -255,12 +256,12 @@ export class Category extends Realm.Object<Category> {
         type: 'list',
       },
     },
-    primaryKey: 'id',
+    primaryKey: '_id',
   };
 }
 
 export class Subcategory extends Realm.Object<Subcategory> {
-  id!: BSON.ObjectId;
+  _id!: BSON.ObjectId;
   name!: string;
   icon!: string;
 
@@ -268,7 +269,7 @@ export class Subcategory extends Realm.Object<Subcategory> {
     name: 'Subcategory',
     embedded: true, // Make Subcategory embedded in Category
     properties: {
-      id: {type: 'objectId', default: () => new ObjectId()},
+      _id: {type: 'objectId', default: () => new ObjectId()},
       name: 'string',
       icon: 'string',
     },
@@ -276,7 +277,7 @@ export class Subcategory extends Realm.Object<Subcategory> {
 }
 
 export class ScheduledPayment extends Realm.Object {
-  id!: BSON.ObjectId;
+  _id!: BSON.ObjectId;
   name!: string;
   amount!: number;
   frequency!: 'daily' | 'weekly' | 'monthly' | 'yearly';
@@ -287,9 +288,9 @@ export class ScheduledPayment extends Realm.Object {
 
   static schema: ObjectSchema = {
     name: 'ScheduledPayment',
-    primaryKey: 'id',
+    primaryKey: '_id',
     properties: {
-      id: {type: 'objectId', default: () => new BSON.ObjectID()},
+      _id: {type: 'objectId', default: () => new BSON.ObjectID()},
       name: 'string',
       amount: 'double',
       account: 'Account',
@@ -311,9 +312,9 @@ export class Subscription extends Realm.Object<Subscription> {
   frequency!: 'daily' | 'weekly' | 'monthly' | 'yearly';
   static schema: ObjectSchema = {
     name: 'Subscription',
-    primaryKey: 'id',
+    primaryKey: '_id',
     properties: {
-      id: {type: 'objectId', default: () => new BSON.ObjectID()},
+      _id: {type: 'objectId', default: () => new BSON.ObjectID()},
       providerName: 'string',
       amount: 'double',
       account: 'Account',

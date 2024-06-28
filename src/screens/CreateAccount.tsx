@@ -1,10 +1,18 @@
 /* eslint-disable react-native/no-inline-styles */
 import {Picker} from '@react-native-picker/picker';
 import {useRealm} from '@realm/react';
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {useForm} from 'react-hook-form';
-import {StyleSheet, Switch, Text, TouchableOpacity, View} from 'react-native';
-import {ScrollView} from 'react-native-gesture-handler';
+import {
+  KeyboardAvoidingView,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+// import {ScrollView} from 'react-native-gesture-handler';
 import FloatingLabelInput from '../Components/FloatingInput';
 import {COLORS} from '../assets/images';
 import {Account} from '../tools/Schema';
@@ -21,25 +29,25 @@ const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
       name: 'Bank of Kigali',
       logo: 'https://res.cloudinary.com/feyton/image/upload/v1717159585/bank_of_kigali_n0mezg.webp',
       address: 'BKeBANK',
-      id: 'bk',
+      _id: 'bk',
     },
     {
       name: 'MTN Mobile Money',
       logo: 'https://res.cloudinary.com/feyton/image/upload/v1717159585/mtn_momo_l1nzpn.png',
       address: 'M-Money',
-      id: 'momo',
+      _id: 'momo',
     },
     {
       name: 'Equity Bank',
       logo: 'https://res.cloudinary.com/feyton/image/upload/v1718221618/images_vkxrs9.png',
       address: 'EQUITYBANK',
-      id: 'equity',
+      _id: 'equity',
     },
     {
       name: 'Custom',
       logo: 'https://res.cloudinary.com/feyton/image/upload/v1717159585/custom_pncud4.png',
       address: '',
-      id: 'custom',
+      _id: 'custom',
     },
   ];
 
@@ -49,12 +57,18 @@ const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
   const {control, handleSubmit} = useForm();
   const [provider, setProvider] = useState<string>('');
 
+  useEffect(() => {
+    realm.subscriptions.update(mutableSubs => {
+      mutableSubs.add(realm.objects(Account));
+    });
+  }, []);
+
   const handleCreateAccount = (data: any) => {
     if (!provider) {
       setError('Provider is required');
       return;
     }
-    const prov: any = providers.find(provi => provi.id === provider);
+    const prov: any = providers.find(provi => provi._id === provider);
     try {
       realm.write(() => {
         realm.create(Account, {
@@ -73,85 +87,86 @@ const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
   };
 
   return (
-    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
-      <Text
-        style={{
-          textAlign: 'center',
-          fontFamily: 'Poppins-Bold',
-          color: 'white',
-          fontSize: 16,
-        }}>
-        Create Account
-      </Text>
-
-      <Text style={styles.errorText}>{error}</Text>
-
-      <FloatingLabelInput
-        control={control}
-        name="name"
-        label="Account Name"
-        rules={{required: 'Account Name is required'}}
-      />
-      <FloatingLabelInput
-        control={control}
-        name="number"
-        label="Account Number"
-        rules={{required: 'Account Number is required'}}
-      />
-      <FloatingLabelInput
-        control={control}
-        name="opening_balance"
-        label="Opening Balance"
-        keyboardType="numeric"
-        rules={{required: 'Initial Amount is required'}}
-      />
-
-      <View style={styles.pickerContainer}>
-        <Picker
-          selectedValue={provider}
-          onValueChange={itemValue => setProvider(itemValue)}
-          style={styles.picker}>
-          <Picker.Item label="Select Provider" value={''} />
-          {providers.map(prov => (
-            <Picker.Item
-              key={prov.id}
-              style={{
-                fontFamily: 'Poppins-Regular',
-                fontSize: 14,
-                paddingHorizontal: 15,
-              }}
-              label={prov.name}
-              value={prov.id}
-            />
-          ))}
-        </Picker>
-      </View>
-
-      <View style={styles.switchContainer}>
-        <Text style={styles.switchText}>Automatic Tracking:</Text>
-        <Switch value={auto} onValueChange={setAuto} />
-      </View>
-      <TouchableOpacity
-        style={{
-          backgroundColor: '#1E90FF',
-          padding: 12,
-          borderRadius: 10,
-          alignItems: 'center',
-          marginVertical: 8,
-        }}
-        onPress={handleSubmit(handleCreateAccount)}>
-        <Text style={{fontFamily: 'Poppins-Regular', color: 'white'}}>
+    <KeyboardAvoidingView style={styles.container} behavior="padding">
+      <ScrollView keyboardShouldPersistTaps="handled">
+        <Text
+          style={{
+            textAlign: 'center',
+            fontFamily: 'Poppins-Bold',
+            color: 'white',
+            fontSize: 16,
+          }}>
           Create Account
         </Text>
-      </TouchableOpacity>
-    </ScrollView>
+
+        <Text style={styles.errorText}>{error}</Text>
+
+        <FloatingLabelInput
+          control={control}
+          name="name"
+          label="Account Name"
+          rules={{required: 'Account Name is required'}}
+        />
+        <FloatingLabelInput
+          control={control}
+          name="number"
+          label="Account Number"
+          rules={{required: 'Account Number is required'}}
+        />
+        <FloatingLabelInput
+          control={control}
+          name="opening_balance"
+          label="Opening Balance"
+          rules={{required: 'Initial Amount is required'}}
+        />
+
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={provider}
+            onValueChange={itemValue => setProvider(itemValue)}
+            style={styles.picker}>
+            <Picker.Item label="Select Provider" value={''} />
+            {providers.map(prov => (
+              <Picker.Item
+                key={prov._id}
+                style={{
+                  fontFamily: 'Poppins-Regular',
+                  fontSize: 14,
+                  paddingHorizontal: 15,
+                }}
+                label={prov.name}
+                value={prov._id}
+              />
+            ))}
+          </Picker>
+        </View>
+
+        <View style={styles.switchContainer}>
+          <Text style={styles.switchText}>Automatic Tracking:</Text>
+          <Switch value={auto} onValueChange={setAuto} />
+        </View>
+        <TouchableOpacity
+          style={{
+            backgroundColor: '#1E90FF',
+            padding: 12,
+            borderRadius: 10,
+            alignItems: 'center',
+            marginVertical: 8,
+          }}
+          onPress={handleSubmit(handleCreateAccount)}>
+          <Text style={{fontFamily: 'Poppins-Regular', color: 'white'}}>
+            Create Account
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     padding: 20,
+    flex: 1,
     backgroundColor: COLORS.bgPrimary,
     paddingBottom: 50,
   },

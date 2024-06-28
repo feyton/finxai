@@ -2741,19 +2741,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@react-native-community/datetimepicker@npm:^8.1.0":
-  version: 8.1.0
-  resolution: "@react-native-community/datetimepicker@npm:8.1.0"
-  dependencies:
-    invariant: ^2.2.4
+"@react-native-google-signin/google-signin@npm:^10.1.0":
+  version: 10.1.2
+  resolution: "@react-native-google-signin/google-signin@npm:10.1.2"
   peerDependencies:
+    expo: ">=47.0.0"
     react: "*"
     react-native: "*"
-    react-native-windows: "*"
   peerDependenciesMeta:
-    react-native-windows:
+    expo:
       optional: true
-  checksum: f8b9018560a755b5f8644818533f60b2ff6f3226af075db8dcfaf7b596b39580524c462baecc5765cd237a8b7984d49596ba4c7b179faef8b247f608b52bb06d
+  checksum: 20e16eb76febe5cdcdd1aa6c2ac2555a4ca9eef3c686d47a92f6b9c83b8a160b4f8aaf289f23ed3ed2584e5057d54ece5dc859928631ef34126b1bc1dd003243
   languageName: node
   linkType: hard
 
@@ -5817,7 +5815,7 @@ __metadata:
     "@babel/runtime": ^7.20.0
     "@gorhom/bottom-sheet": ^4
     "@react-native-clipboard/clipboard": ^1.14.1
-    "@react-native-community/datetimepicker": ^8.1.0
+    "@react-native-google-signin/google-signin": ^10.1.0
     "@react-native-picker/picker": ^2.7.6
     "@react-native/babel-preset": 0.74.83
     "@react-native/eslint-config": 0.74.83
@@ -5849,6 +5847,7 @@ __metadata:
     react-native-screens: ^3.31.1
     react-native-select-dropdown: ^4.0.1
     react-native-svg: ^15.3.0
+    react-native-toast-notifications: ^3.4.0
     react-native-vector-icons: ^10.1.0
     react-test-renderer: 18.2.0
     realm: ^12.8.0
@@ -9018,7 +9017,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"prebuild-install@npm:^7.1.1":
+"prebuild-install@npm:^7.1.2":
   version: 7.1.2
   resolution: "prebuild-install@npm:7.1.2"
   dependencies:
@@ -9387,6 +9386,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"react-native-toast-notifications@npm:^3.4.0":
+  version: 3.4.0
+  resolution: "react-native-toast-notifications@npm:3.4.0"
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+  checksum: 734a54111e3657859d3cca9505a197bc6eb486e473e655d8aa087157de8f5e8b819083963f28e5e9155110be9a17774296bbfd721749f670c5f4e093557bd88f
+  languageName: node
+  linkType: hard
+
 "react-native-vector-icons@npm:^10.1.0":
   version: 10.1.0
   resolution: "react-native-vector-icons@npm:10.1.0"
@@ -9548,8 +9557,8 @@ __metadata:
   linkType: hard
 
 "realm@npm:^12.8.0":
-  version: 12.8.0
-  resolution: "realm@npm:12.8.0"
+  version: 12.11.1
+  resolution: "realm@npm:12.11.1"
   dependencies:
     "@realm/fetch": ^0.1.1
     bson: ^4.7.2
@@ -9557,13 +9566,13 @@ __metadata:
     node-gyp: latest
     node-machine-id: ^1.1.12
     path-browserify: ^1.0.1
-    prebuild-install: ^7.1.1
+    prebuild-install: ^7.1.2
   peerDependencies:
     react-native: ">=0.71.0"
   peerDependenciesMeta:
     react-native:
       optional: true
-  checksum: 9a4041d14063efd6b4d4f7acbf737b958ea5192a987077875e886a88963981d6c2f13d32ee0fa51d445a34e594c532bfdecf2d849889de170d11a9eec7a8501a
+  checksum: cf35939335ddc544cffad07afa8f3aa2d5ef3d4aedcb9f5b90ff098f1a481326a804afbd6f58d53df72d3cfcf67cdd4b749ef9a911dfa59e56b36a4857bdb18b
   languageName: node
   linkType: hard
 

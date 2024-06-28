@@ -1,6 +1,6 @@
 /* eslint-disable react-native/no-inline-styles */
 import {useQuery, useRealm} from '@realm/react';
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   Button,
   Modal,
@@ -28,6 +28,11 @@ export default function BudgetScreen({navigation}: any) {
   const handlePress = useCallback((budget: any) => {
     setSelectedBudget(budget);
     setModalVisible(true);
+  }, []);
+  useEffect(() => {
+    realm.subscriptions.update(mutableSubs => {
+      mutableSubs.add(realm.objects(Budget));
+    });
   }, []);
   return (
     <View style={{flex: 1, backgroundColor: '#1d2027', padding: 16}}>

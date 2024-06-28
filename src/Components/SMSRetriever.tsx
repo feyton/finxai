@@ -41,7 +41,7 @@ const SMSRetriever: React.FC = ({refreshing}: any) => {
     smsList: SMS[],
     account: Account,
   ) => {
-    const accountToUpdate = realm.objectForPrimaryKey(Account, account.id);
+    const accountToUpdate = realm.objectForPrimaryKey(Account, account._id);
     realm.write(() => {
       account.logDate = new Date().getTime();
       smsList.map(sms => {
@@ -118,6 +118,10 @@ const SMSRetriever: React.FC = ({refreshing}: any) => {
   };
 
   useEffect(() => {
+    realm.subscriptions.update(mutableSubs => {
+      mutableSubs.add(realm.objects(AutoRecord));
+      mutableSubs.add(realm.objects(Account));
+    });
     if (!initialized) {
       retrieveTransactions();
     }

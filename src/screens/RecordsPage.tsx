@@ -158,7 +158,7 @@ const RecordsPage = ({navigation}: any) => {
             <Text style={styles.dateHeader}>{section.title}</Text>
             <FlatList
               data={section.data}
-              keyExtractor={item => item.id}
+              keyExtractor={item => item._id}
               renderItem={({item}) => (
                 <TouchableOpacity onPress={() => handleTransactionClick(item)}>
                   <TransactionItem transaction={item} />

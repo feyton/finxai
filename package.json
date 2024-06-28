@@ -7,11 +7,13 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "npx react-native start",
-    "test": "jest"
+    "test": "jest",
+    "build": "npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res/ && cd android && ./gradlew assembleRelease"
   },
   "dependencies": {
     "@gorhom/bottom-sheet": "^4",
     "@react-native-clipboard/clipboard": "^1.14.1",
+    "@react-native-google-signin/google-signin": "^10.1.0",
     "@react-native-picker/picker": "^2.7.6",
     "@react-navigation/bottom-tabs": "^6.5.20",
     "@react-navigation/native": "^6.1.17",
@@ -32,6 +34,7 @@
     "react-native-screens": "^3.31.1",
     "react-native-select-dropdown": "^4.0.1",
     "react-native-svg": "^15.3.0",
+    "react-native-toast-notifications": "^3.4.0",
     "react-native-vector-icons": "^10.1.0",
     "realm": "^12.8.0",
     "rn-emoji-picker": "^1.1.6"

@@ -15,50 +15,30 @@ interface AccountDetailsProps {
 
 const AccountDetails: React.FC<AccountDetailsProps> = ({route}) => {
   const {accountId} = route.params;
-  const account = useObject(Account, new BSON.ObjectID(accountId));
-  const today = new Date();
-  const currentMonth = today.getMonth();
-  const currentYear = today.getFullYear();
+  const account = useObject<Account>(Account, new BSON.ObjectID(accountId));
 
   const transactions = useQuery(Transaction).filtered(
-    'account.id == $0',
-    account?.id,
+    'account._id == $0',
+    account?._id,
   );
   const unconfirmedTransactions = useQuery(AutoRecord).filtered(
-    'account.id == $0',
-    account.id,
+    'account._id == $0',
+    account?._id,
   );
 
-  const {totalAmount, monthlyIncome, monthlyExpenses} = useMemo(() => {
-    let totalAmount = account?.amount ?? 0;
-    let monthlyIncome = 0;
-    let monthlyExpenses = 0;
+  const {monthlyIncome, monthlyExpenses} = useMemo(() => {
+    let monthlyIncome = transactions
+      .filtered('transaction_type == $0', 'income')
+      .sum('amount');
+    let monthlyExpenses = transactions
+      .filtered('transaction_type == $0', 'expense')
+      .sum('amount');
 
-    transactions.forEach(transaction => {
-      if (transaction.transaction_type === 'income') {
-        totalAmount += transaction.amount;
-        if (
-          transaction.date_time.getMonth() === currentMonth &&
-          transaction.date_time.getFullYear() === currentYear
-        ) {
-          monthlyIncome += transaction.amount;
-        }
-      } else if (transaction.transaction_type === 'expense') {
-        totalAmount -= transaction.amount;
-        if (
-          transaction.date_time.getMonth() === currentMonth &&
-          transaction.date_time.getFullYear() === currentYear
-        ) {
-          monthlyExpenses += transaction.amount;
-        }
-      }
-    });
-
-    return {totalAmount, monthlyIncome, monthlyExpenses};
-  }, [transactions, account, currentMonth, currentYear]);
+    return {monthlyIncome, monthlyExpenses};
+  }, [transactions]);
 
   const latestConfirmedTransactions = transactions
-    .filtered('account.id == $0', account?.id)
+    .filtered('account._id == $0', account?._id)
     .sorted('date_time');
 
   const renderTransaction = ({item}: any) => (
@@ -104,7 +84,7 @@ const AccountDetails: React.FC<AccountDetailsProps> = ({route}) => {
           {account.name}
         </Text>
         <Text style={styles.totalText}>
-          RWF: {totalAmount.toLocaleString()}
+          RWF: {account.available_balance.toLocaleString()}
         </Text>
         <View style={{flexDirection: 'row', gap: 30}}>
           <View style={{flexDirection: 'row', gap: 2, alignItems: 'center'}}>
@@ -182,7 +162,7 @@ const AccountDetails: React.FC<AccountDetailsProps> = ({route}) => {
 
       <SectionList
         sections={combinedTransactions}
-        keyExtractor={(item, index) => item.id.toString()}
+        keyExtractor={(item, index) => item._id.toString()}
         renderItem={renderTransaction}
         renderSectionHeader={renderSectionHeader}
         renderSectionFooter={renderSectionFooter}

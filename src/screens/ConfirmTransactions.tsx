@@ -2,7 +2,7 @@
 import BottomSheet, {BottomSheetView} from '@gorhom/bottom-sheet';
 import {Picker} from '@react-native-picker/picker';
 import {useQuery, useRealm} from '@realm/react';
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -17,7 +17,14 @@ import {BSON} from 'realm';
 import FloatingLabelInputRegular from '../Components/FloatingInputRegular';
 import TransactionItem from '../Components/Transaction';
 import {COLORS, FONTS} from '../assets/images';
-import {Account, AutoRecord, Budget, Category, Transfer} from '../tools/Schema';
+import {
+  Account,
+  AutoRecord,
+  Budget,
+  Category,
+  Transaction,
+  Transfer,
+} from '../tools/Schema';
 
 function ConfirmTransactionsScreen() {
   const transactionsQuery = useQuery(AutoRecord).sorted('date_time', true);
@@ -29,6 +36,14 @@ function ConfirmTransactionsScreen() {
   const snapPoints = React.useMemo(() => ['25%', '80%'], []);
   const [subcategories, setSubcategories] = useState<any[]>([]);
   const realm = useRealm();
+
+  useEffect(() => {
+    realm.subscriptions.update(mutableSubs => {
+      mutableSubs.add(realm.objects(Transaction));
+      mutableSubs.add(realm.objects(AutoRecord));
+      mutableSubs.add(realm.objects(Transfer));
+    });
+  }, []);
 
   const handleTransactionClick = (transaction: any) => {
     setSelectedTransaction(transaction.toJSON());
@@ -52,9 +67,9 @@ function ConfirmTransactionsScreen() {
       new BSON.ObjectID(selectedTransaction.category),
     );
     const subCat = cat?.subcategories.filter(
-      sub => sub.id == selectedTransaction?.subcategory,
+      sub => sub._id == selectedTransaction?.subcategory,
     )[0];
-    if (selectedTransaction.budget) {
+    if (selectedTransaction.budget && selectedTransaction !== '') {
       selectedTransaction.budget = realm.objectForPrimaryKey(
         Budget,
         new BSON.ObjectID(selectedTransaction.budget),
@@ -77,13 +92,13 @@ function ConfirmTransactionsScreen() {
           ...selectedTransaction,
           toAccount: toAccount,
           fromAccount: account,
-          id: new BSON.ObjectID(),
+          _id: new BSON.ObjectID(),
           amount: parseFloat(selectedTransaction.amount),
         });
         console.log(transfer);
         transfer.afterSave();
         realm.delete(
-          realm.objectForPrimaryKey('AutoRecord', selectedTransaction.id),
+          realm.objectForPrimaryKey('AutoRecord', selectedTransaction._id),
         );
       });
       setSelectedTransaction(null);
@@ -96,19 +111,19 @@ function ConfirmTransactionsScreen() {
         new BSON.ObjectID(selectedTransaction.account),
       );
       realm.write(() => {
-        const {id, ...transaction} = selectedTransaction;
+        const {_id, ...transaction} = selectedTransaction;
 
         const tx = realm.create('Transaction', {
           ...transaction,
           confirmed: true,
           category: cat,
           subcategory: subCat,
-          id: new BSON.ObjectId(),
+          _id: new BSON.ObjectID(),
           account: account,
           amount: parseFloat(selectedTransaction.amount),
         });
         tx.setTotalAmount();
-        realm.delete(realm.objectForPrimaryKey('AutoRecord', id));
+        realm.delete(realm.objectForPrimaryKey('AutoRecord', _id));
         setSelectedTransaction(null);
         bottomSheetRef.current?.close();
       });
@@ -181,14 +196,17 @@ function ConfirmTransactionsScreen() {
           <View style={styles.pickerContainer}>
             <Picker
               style={styles.picker}
-              selectedValue={selectedTransaction?.account?.id?.toString()|| selectedTransaction.account}
+              selectedValue={
+                selectedTransaction?.account?._id?.toString() ||
+                selectedTransaction.account
+              }
               onValueChange={value => handleFieldChange('account', value)}>
               <Picker.Item label={'Select account'} value={''} />
               {accounts.map((account: any) => (
                 <Picker.Item
-                  key={account.id.toString()}
+                  key={account._id.toString()}
                   label={account.name}
-                  value={account.id.toString()}
+                  value={account._id.toString()}
                 />
               ))}
             </Picker>
@@ -202,9 +220,9 @@ function ConfirmTransactionsScreen() {
                 <Picker.Item label={'To account'} value={''} />
                 {accounts.map((account: any) => (
                   <Picker.Item
-                    key={account.id.toString()}
+                    key={account._id.toString()}
                     label={account.name}
-                    value={account.id.toString()}
+                    value={account._id.toString()}
                   />
                 ))}
               </Picker>
@@ -219,9 +237,9 @@ function ConfirmTransactionsScreen() {
               <Picker.Item label={'Select category'} value={''} />
               {categoriesQuery.map((category: any) => (
                 <Picker.Item
-                  key={category.id.toString()}
+                  key={category._id.toString()}
                   label={category.name}
-                  value={category.id.toString()}
+                  value={category._id.toString()}
                 />
               ))}
             </Picker>
@@ -237,9 +255,9 @@ function ConfirmTransactionsScreen() {
                 <Picker.Item label={'Select subcategory'} value={''} />
                 {subcategories.map((subcategory: any) => (
                   <Picker.Item
-                    key={subcategory.id.toString()}
+                    key={subcategory._id.toString()}
                     label={subcategory.name}
-                    value={subcategory.id.toString()}
+                    value={subcategory._id.toString()}
                   />
                 ))}
               </Picker>
@@ -261,9 +279,9 @@ function ConfirmTransactionsScreen() {
               <Picker.Item label={'Select budget'} value={''} />
               {budgetsQuery.map((budget: any) => (
                 <Picker.Item
-                  key={budget.id.toString()}
+                  key={budget._id.toString()}
                   label={budget.name}
-                  value={budget.id.toString()}
+                  value={budget._id.toString()}
                 />
               ))}
             </Picker>
@@ -331,7 +349,7 @@ function ConfirmTransactionsScreen() {
       )}
       <FlatList
         data={transactionsQuery}
-        keyExtractor={item => item.id.toString()}
+        keyExtractor={item => item._id.toString()}
         renderItem={renderTransaction}
         removeClippedSubviews
         maxToRenderPerBatch={20}

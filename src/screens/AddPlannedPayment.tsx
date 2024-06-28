@@ -44,7 +44,7 @@ const AddPlannedPaymentScreen = ({navigation}) => {
         payee: payee,
         note: note,
         account: account,
-        id: new BSON.ObjectID(),
+        _id: new BSON.ObjectID(),
         transaction_type: type,
       });
     });
@@ -74,9 +74,9 @@ const AddPlannedPaymentScreen = ({navigation}) => {
             <Picker.Item label={'Select account'} value={''} />
             {accounts.map((account: any) => (
               <Picker.Item
-                key={account.id.toString()}
+                key={account._id.toString()}
                 label={account.name}
-                value={account.id.toString()}
+                value={account._id.toString()}
               />
             ))}
           </Picker>

@@ -30,7 +30,7 @@ const HomeScreen = ({navigation}: any) => {
     (account: any) => {
       navigation.navigate('AccountsStack', {
         screen: 'AccountDetails',
-        params: {accountId: account.id.toString()},
+        params: {accountId: account._id.toString()},
       });
     },
     [navigation],
@@ -56,7 +56,7 @@ const HomeScreen = ({navigation}: any) => {
   const renderAccount = useCallback(
     ({item: account}: any) => (
       <TouchableOpacity
-        key={account.id.toString()}
+        key={account._id.toString()}
         style={styles.card}
         onPress={() => handlePress(account)}>
         <ImageBackground
@@ -149,13 +149,13 @@ const HomeScreen = ({navigation}: any) => {
           horizontal
           data={accounts}
           renderItem={renderAccount}
-          keyExtractor={account => account.id.toString()}
+          keyExtractor={account => account._id.toString()}
           showsHorizontalScrollIndicator={false}
         />
         {accounts.length === 0 && (
           <TouchableWithoutFeedback
             onPress={() => {
-              navigation.navigate('CreateAccount');
+              navigation.navigate('AccountsStack', {screen: 'CreateAccount'});
             }}>
             <View
               style={{

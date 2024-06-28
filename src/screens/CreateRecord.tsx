@@ -1,6 +1,6 @@
 import {Picker} from '@react-native-picker/picker';
 import {useQuery, useRealm} from '@realm/react';
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {Controller, useForm, useWatch} from 'react-hook-form';
 import {
   KeyboardAvoidingView,
@@ -13,7 +13,7 @@ import {
 
 import FloatingLabelInput from '../Components/FloatingInput';
 import {COLORS} from '../assets/images';
-import {Account, Budget, Category} from '../tools/Schema';
+import {Account, Budget, Category, Transaction} from '../tools/Schema';
 
 interface BudgetItem {
   category: string;
@@ -43,6 +43,14 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
   const createRecord = (data: any) => {
     console.log(data);
   };
+
+  useEffect(()=>{
+    realm.subscriptions.update(mutableSubs => {
+      mutableSubs.add(realm.objects(Budget));
+      mutableSubs.add(realm.objects(Transaction));
+      mutableSubs.add(realm.objects(Account));
+    });
+  },[])
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior="padding">
@@ -82,9 +90,9 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
                 style={styles.picker}>
                 {accounts.map((account: any) => (
                   <Picker.Item
-                    key={account.id.toString()}
+                    key={account._id.toString()}
                     label={account.name}
-                    value={account.id.toString()}
+                    value={account._id.toString()}
                   />
                 ))}
               </Picker>
@@ -105,9 +113,9 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
                 <Picker.Item value="" label="Select Category" />
                 {categories.map((category: any) => (
                   <Picker.Item
-                    key={category.id.toString()}
+                    key={category._id.toString()}
                     label={category.name}
-                    value={category.id.toString()}
+                    value={category._id.toString()}
                   />
                 ))}
               </Picker>
@@ -128,12 +136,12 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
                   style={styles.picker}>
                   <Picker.Item value={''} label="Select Subcategory" />
                   {categories
-                    .find(cat => cat.id == categoryChange)
+                    .find(cat => cat._id == categoryChange)
                     .subcategories.map((subcategory: any) => (
                       <Picker.Item
-                        key={subcategory.id.toString()}
+                        key={subcategory._id.toString()}
                         label={subcategory.name}
-                        value={subcategory.id.toString()}
+                        value={subcategory._id.toString()}
                       />
                     ))}
                 </Picker>
@@ -155,9 +163,9 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
                 style={styles.picker}>
                 {budgets.map((budget: any) => (
                   <Picker.Item
-                    key={budget.id.toString()}
+                    key={budget._id.toString()}
                     label={budget.name}
-                    value={budget.id.toString()}
+                    value={budget._id.toString()}
                   />
                 ))}
               </Picker>

@@ -57,16 +57,19 @@ function CategoryManagementScreen() {
 
   useEffect(() => {
     // Prepopulate categories on initial render if needed
+    realm.subscriptions.update(mutableSubs => {
+      mutableSubs.add(realm.objects(Category));
+    });
     if (incomeCategories.length === 0 && expenseCategories.length === 0) {
       realm.write(() => {
         categoriesData.categories.forEach(catData => {
-          const newCategory: Category = realm.create('Category', {
-            id: new BSON.ObjectId(),
+          realm.create('Category', {
+            _id: new BSON.ObjectId(),
             name: catData.name,
             icon: catData.icon,
             type: catData.type,
             subcategories: catData.subcategories.map(subcat => ({
-              id: new BSON.ObjectId(),
+              _id: new BSON.ObjectId(),
               name: subcat.name,
               icon: subcat.icon,
             })),
@@ -82,7 +85,7 @@ function CategoryManagementScreen() {
         selectedCategory.name = categoryName;
       } else {
         realm.create('Category', {
-          id: new BSON.ObjectID(),
+          _id: new BSON.ObjectID(),
           name: categoryName,
           icon: categoryIcon,
           subcategories: [],
@@ -114,7 +117,7 @@ function CategoryManagementScreen() {
       <Button title="Add Category" onPress={handleAddCategory} />
       <FlatList
         data={expenseCategories}
-        keyExtractor={item => item.id.toString()}
+        keyExtractor={item => item._id.toString()}
         renderItem={({item}) => (
           <View style={styles.categoryItem}>
             <Text style={styles.categoryText}>
@@ -200,7 +203,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingLeft: 16,
-    
   },
   subcategoryText: {
     fontSize: 15,

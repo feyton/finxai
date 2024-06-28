@@ -3,6 +3,7 @@ import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {Path, Svg} from 'react-native-svg';
+import CustomHeader from '../Components/Header';
 import BudgetScreen from '../screens/BudgetScreen';
 import HomeScreen from '../screens/HomeScreen';
 import RecordsPage from '../screens/RecordsPage';
@@ -44,6 +45,8 @@ function MainStack() {
               </Text>
             </View>
           ),
+          header: () => <CustomHeader showBackButton={false} />,
+          headerShown: true,
         }}
       />
       <Tab.Screen
@@ -69,6 +72,10 @@ function MainStack() {
               </Text>
             </View>
           ),
+          header: ({route}) => (
+            <CustomHeader showBackButton={route.name !== 'Accounts'} />
+          ),
+          headerShown: true,
         }}
       />
       <Tab.Screen
