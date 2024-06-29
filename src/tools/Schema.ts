@@ -42,7 +42,6 @@ export class Account extends Realm.Object<Account> {
       .objects('Transaction')
       .filtered('account == $0', this)
       .sum('amount');
-      console.log({amount})
     this.available_balance = this.transfer + amount + this.opening_balance;
   }
 }

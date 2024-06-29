@@ -9,12 +9,14 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import {COLORS, FONTS} from '../assets/images';
+import { Profile } from '../Components/Header';
 
 const ProfilePage = () => {
   const coverPhoto =
     'https://www.blackpast.org/wp-content/uploads/prodimages/files/Kigali_Convention_Centre_December_1_2018_Courtesy_Raddison__CC_BY-SA_40.jpg';
-  const user = useUser();
-  console.log(user)
+  const user:any = useUser();
+  const userData:Profile = user.profile;
   const {logOut} = useAuth();
   const performLogout = () => {
     GoogleSignin.configure({
@@ -29,8 +31,8 @@ const ProfilePage = () => {
   const {width} = useWindowDimensions();
 
   return (
-    <View style={{flex: 1, backgroundColor: 'white'}}>
-      <View style={{height: 200}}>
+    <View style={{flex: 1, backgroundColor: COLORS.bgPrimary}}>
+      <View style={{height: 150}}>
         <Image
           source={{uri: coverPhoto}}
           style={{width: '100%', height: '100%'}}
@@ -38,37 +40,28 @@ const ProfilePage = () => {
         <View
           style={{
             position: 'absolute',
-            top: 150,
+            top: 100,
             left: width / 2 - 50,
             backgroundColor: 'white',
-            borderRadius: 100,
-            padding: 5,
+            borderRadius: 10,
+            overflow: 'hidden',
           }}>
-          <Image
-            source={{uri: user?.photo ||  'https://res.cloudinary.com/feyton/image/upload/v1704708292/logo_dkwxhb.png'}}
-          />
+          <Image source={{uri: userData?.picture}} height={100} width={100} />
         </View>
       </View>
       <View style={{paddingHorizontal: 20, marginTop: 100}}>
         <Text
           style={{
             fontSize: 20,
-            fontWeight: 'bold',
-            fontFamily: 'Poppins-Medium',
-            color: 'black',
+            fontFamily: FONTS.bold,
+            color: 'white',
           }}>
-          {user?.name}
+          {userData?.name}
         </Text>
+
         <Text
-          style={{
-            fontSize: 16,
-            color: 'black',
-            fontFamily: 'Poppins-Medium',
-          }}
-        />
-        <Text
-          style={{fontSize: 16, color: 'black', fontFamily: 'Poppins-Medium'}}>
-          {user?.email}
+          style={{fontSize: 16, color: 'white', fontFamily: 'Poppins-Medium'}}>
+          {userData?.email}
         </Text>
       </View>
       <TouchableOpacity

@@ -1,85 +1,69 @@
 /* eslint-disable react-native/no-inline-styles */
-import React, {useEffect, useState} from 'react';
+import React, {useState} from 'react';
 import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
-  StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 
-import {AuthOperationName, useApp, useEmailPasswordAuth} from '@realm/react';
-import {ScrollView, TextInput} from 'react-native-gesture-handler';
+import {
+  GoogleSignin,
+  statusCodes,
+} from '@react-native-google-signin/google-signin';
+import {useApp} from '@realm/react';
+import {ScrollView} from 'react-native-gesture-handler';
 import {Path, Svg} from 'react-native-svg';
 import {useToast} from 'react-native-toast-notifications';
+import {Credentials} from 'realm';
 import {COLORS, FONTS} from '../assets/images';
 
 const LoginScreen = () => {
   const [inProgress, setInprogress] = useState(false);
   const toast = useToast();
   const app = useApp();
-  // const {logInWithGoogle, result} = useAuth();
-  const [user, setUser] = useState({email: '', password: ''});
-
-  // const signIn = async () => {
-  //   GoogleSignin.configure({
-  //     offlineAccess: true,
-  //     webClientId:
-  //       '560260143969-6nqjnkc3juvn8p7177bl3k69csnfifm1.apps.googleusercontent.com',
-  //   });
-  //   try {
-  //     setInprogress(true);
-  //     await GoogleSignin.hasPlayServices();
-  //     const userInfo: any = await GoogleSignin.signIn();
-  //     // const credentials = Credentials.google({
-  //     //   authCode: userInfo.serverAuthCode,
-  //     // });
-  //     try {
-  //       logInWithGoogle({authCode: userInfo.serverAuthCode});
-  //       console.log(result, userInfo);
-  //       toast.show('Welcome ' + userInfo.user.givenName, {type: 'success'});
-  //     } catch (err) {
-  //       console.log(err);
-  //     }
-  //   } catch (error: any) {
-  //     setInprogress(false);
-  //     if (error.code === statusCodes.SIGN_IN_CANCELLED) {
-  //       // user cancelled the login flow
-  //       toast.show('Sign In Cancelled', {type: 'info'});
-  //     } else if (error.code === statusCodes.IN_PROGRESS) {
-  //       toast.show('In Progress', {type: 'warning'});
-  //       // operation (f.e. sign in) is in progress already
-  //     } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-  //       // play services not available or outdated
-  //       toast.show('Enable Play Services', {type: 'danger'});
-  //     } else {
-  //       // some other error happened
-  //       toast.show(error?.message, {type: 'danger'});
-  //     }
-  //   } finally {
-  //     setInprogress(false);
-  //   }
-  // };
-
-  const {register, result, logIn} = useEmailPasswordAuth();
 
   const signIn = async () => {
-    console.log(user);
-    if (user.email === '' || user.password === '') {
-      toast.show('Fill all info', {type: 'danger'});
-      return;
+    GoogleSignin.configure({
+      offlineAccess: true,
+      webClientId:
+        '560260143969-6nqjnkc3juvn8p7177bl3k69csnfifm1.apps.googleusercontent.com',
+    });
+    try {
+      setInprogress(true);
+      await GoogleSignin.hasPlayServices();
+      const userInfo: any = await GoogleSignin.signIn();
+      const credentials = Credentials.google({
+        authCode: userInfo.serverAuthCode,
+      });
+      try {
+        await app.logIn(credentials);
+        toast.show('Welcome ' + userInfo.user.givenName, {type: 'success'});
+      } catch (err) {
+        console.log(err);
+      }
+    } catch (error: any) {
+      setInprogress(false);
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        // user cancelled the login flow
+        toast.show('Sign In Cancelled', {type: 'info'});
+      } else if (error.code === statusCodes.IN_PROGRESS) {
+        toast.show('In Progress', {type: 'warning'});
+        // operation (f.e. sign in) is in progress already
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        // play services not available or outdated
+        toast.show('Enable Play Services', {type: 'danger'});
+      } else {
+        // some other error happened
+        toast.show(error?.message, {type: 'danger'});
+      }
+    } finally {
+      setInprogress(false);
     }
-    logIn(user);
-    console.log(result);
   };
 
-  useEffect(() => {
-    if (result.success && result.operation === AuthOperationName.Register) {
-      logIn(user);
-    }
-  }, [result, logIn, user]);
   return (
     <KeyboardAvoidingView contentContainerStyle={{flex: 1}}>
       <ScrollView
@@ -101,7 +85,6 @@ const LoginScreen = () => {
           }}>
           Seamlessly Manage Your Finance
         </Text>
-        <Text>{result.pending}</Text>
         <Text
           style={{
             justifyContent: 'center',
@@ -120,17 +103,6 @@ const LoginScreen = () => {
             marginLeft: -40,
           }}
           source={require('../assets/images/man.png')}
-        />
-        <TextInput
-          placeholder="Email"
-          keyboardType="email-address"
-          autoCapitalize="none"
-          onChangeText={text => setUser({...user, email: text})}
-        />
-        <TextInput
-          placeholder="Password"
-          autoCapitalize="none"
-          onChangeText={text => setUser({...user, password: text})}
         />
         <TouchableOpacity
           onPress={signIn}
@@ -184,15 +156,5 @@ const LoginScreen = () => {
     </KeyboardAvoidingView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: COLORS.bgPrimary,
-    flex: 1,
-    padding: 20,
-    justifyContent: 'center',
-    alignContent: 'center',
-  },
-});
 
 export default LoginScreen;

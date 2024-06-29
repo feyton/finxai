@@ -10,17 +10,19 @@ interface HeaderProps {
   goName?: string | null;
 }
 
+export interface Profile {
+  name: string;
+  picture: string;
+  first_name: string;
+  email: string;
+}
+
 const CustomHeader: React.FC<HeaderProps> = ({
   showBackButton,
   goName = null,
 }) => {
-  const userData = useUser();
-  console.log(userData);
-  const user: any = {
-    name: 'Fabrice',
-    photo:
-      'https://res.cloudinary.com/feyton/image/upload/v1704708292/logo_dkwxhb.png',
-  }; // Replace with your user context or prop
+  const userData: any = useUser();
+  const user: Profile = userData?.profile;
   const navigation: any = useNavigation();
   const route: any = useRoute();
 
@@ -62,7 +64,7 @@ const CustomHeader: React.FC<HeaderProps> = ({
         ) : (
           <View style={styles.welcomeContainer}>
             <Text style={styles.hello}>Hello</Text>
-            <Text style={styles.name}>{user.name}</Text>
+            <Text style={styles.name}>{user?.first_name}</Text>
           </View>
         )}
       </View>
@@ -79,7 +81,7 @@ const CustomHeader: React.FC<HeaderProps> = ({
           </Svg>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('UserProfile')}>
-          <Image source={{uri: user.photo}} style={styles.profileImage} />
+          <Image source={{uri: user?.picture}} style={styles.profileImage} />
         </TouchableOpacity>
       </View>
     </View>
@@ -91,7 +93,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     width: '100%',
     paddingHorizontal: 10,
-    height: 50,
+    height: 60,
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottomColor: 'gray',
