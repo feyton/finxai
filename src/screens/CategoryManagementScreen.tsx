@@ -1,3 +1,4 @@
+/* eslint-disable react-native/no-inline-styles */
 // CategoryManagementScreen.js
 
 import {useQuery, useRealm} from '@realm/react';
@@ -19,11 +20,8 @@ import {Category} from '../tools/Schema';
 import categoriesData from '../tools/data.json';
 
 function CategoryManagementScreen() {
-  const incomeCategories = useQuery(Category).filtered('type == $0', 'income');
-  const expenseCategories = useQuery(Category).filtered(
-    'type == $0',
-    'expense',
-  );
+  const categories = useQuery(Category);
+
   const realm = useRealm();
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -60,7 +58,9 @@ function CategoryManagementScreen() {
     realm.subscriptions.update(mutableSubs => {
       mutableSubs.add(realm.objects(Category));
     });
-    if (incomeCategories.length === 0 && expenseCategories.length === 0) {
+    console.log(categories.length);
+
+    if (categories.length === 0) {
       realm.write(() => {
         categoriesData.categories.forEach(catData => {
           realm.create('Category', {
@@ -116,10 +116,15 @@ function CategoryManagementScreen() {
     <View style={styles.container}>
       <Button title="Add Category" onPress={handleAddCategory} />
       <FlatList
-        data={expenseCategories}
+        data={categories}
         keyExtractor={item => item._id.toString()}
         renderItem={({item}) => (
-          <View style={styles.categoryItem}>
+          <View
+            style={{
+              ...styles.categoryItem,
+              backgroundColor:
+                item.type === 'income' ? '#425b3b87' : '#5b3b3b86',
+            }}>
             <Text style={styles.categoryText}>
               {item.icon} {item.name}
             </Text>

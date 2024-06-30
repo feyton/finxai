@@ -61,11 +61,11 @@ const AccountDetails: React.FC<AccountDetailsProps> = ({route}) => {
     {title: 'Unconfirmed Records', data: unconfirmedTransactions},
   ];
 
-  const renderSectionHeader = ({section: {title}}) => (
+  const renderSectionHeader = ({section: {title}}: any) => (
     <Text style={styles.sectionTitle}>{title}</Text>
   );
 
-  const renderSectionFooter = ({section: {data}}) =>
+  const renderSectionFooter = ({section: {data}}: any) =>
     data.length === 0 ? (
       <Text style={styles.noTransactions}>No transactions</Text>
     ) : null;
@@ -162,7 +162,7 @@ const AccountDetails: React.FC<AccountDetailsProps> = ({route}) => {
 
       <SectionList
         sections={combinedTransactions}
-        keyExtractor={(item, index) => item._id.toString()}
+        keyExtractor={(item: any) => item._id.toString()}
         renderItem={renderTransaction}
         renderSectionHeader={renderSectionHeader}
         renderSectionFooter={renderSectionFooter}

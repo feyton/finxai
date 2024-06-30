@@ -1,8 +1,8 @@
 /* eslint-disable react/no-unstable-nested-components */
-import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import React from 'react';
-import {StyleSheet, Text, View} from 'react-native';
-import {Path, Svg} from 'react-native-svg';
+import { StyleSheet, Text, View } from 'react-native';
+import { Path, Svg } from 'react-native-svg';
 import CustomHeader from '../Components/Header';
 import BudgetScreen from '../screens/BudgetScreen';
 import HomeScreen from '../screens/HomeScreen';
@@ -101,6 +101,8 @@ function MainStack() {
               </Text>
             </View>
           ),
+          header: () => <CustomHeader showBackButton={false} />,
+          headerShown: true,
         }}
       />
       <Tab.Screen
@@ -131,7 +133,10 @@ function MainStack() {
               </Text>
             </View>
           ),
+          header: () => <CustomHeader showBackButton={false} />,
+          headerShown: true,
         }}
+        
       />
     </Tab.Navigator>
   );

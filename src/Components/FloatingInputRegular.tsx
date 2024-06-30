@@ -14,7 +14,6 @@ interface FloatingLabelInputProps extends TextInputProps {
 }
 
 const FloatingLabelInputRegular: React.FC<FloatingLabelInputProps> = ({
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   name,
   label,
   ...inputProps
@@ -44,10 +43,15 @@ const FloatingLabelInputRegular: React.FC<FloatingLabelInputProps> = ({
       inputRange: [0, 1],
       outputRange: ['#999', 'white'],
     }),
+    zIndex: labelPosition.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, 1],
+    }),
   };
 
   return (
     <View style={styles.inputContainer}>
+      <Animated.Text style={[styles.label, labelStyle]}>{label}</Animated.Text>
       <TextInput
         style={[styles.input]}
         onFocus={() => setIsFocused(true)}
@@ -56,7 +60,6 @@ const FloatingLabelInputRegular: React.FC<FloatingLabelInputProps> = ({
         }}
         {...inputProps}
       />
-      <Animated.Text style={[styles.label, labelStyle]}>{label}</Animated.Text>
     </View>
   );
 };

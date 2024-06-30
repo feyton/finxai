@@ -42,7 +42,9 @@ export default function BudgetScreen({navigation}: any) {
         title="Create Budget"
       />
       {budgets.map((budget, index) => (
-        <TouchableOpacity onLongPress={() => handlePress(budget)}>
+        <TouchableOpacity
+          onLongPress={() => handlePress(budget)}
+          key={budget?._id.toString()}>
           <View
             key={index}
             style={{

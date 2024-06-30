@@ -44,7 +44,7 @@ export function extractTransactionInfo(message: string) {
   }
 
   // Extracting type of transaction (payment or receipt)
-  const paymentKeywords = ['payment', 'sent', 'debit', 'transferred', 'auth'];
+  const paymentKeywords = ['payment', 'sent', 'debit', 'transferred', 'auth', 'transfer'];
   const receiptKeywords = ['received', 'credited', 'deposit'];
   let transactionType = '';
   const words = doc.text().toLowerCase().split(/\s+/);
@@ -130,6 +130,6 @@ export function extractTransactionInfo(message: string) {
       info.date_time = convertToDate(info.date_time);
     }
   }
-  info.date_time = info.date_time?.replaceAll('/', '-');
+
   return info;
 }

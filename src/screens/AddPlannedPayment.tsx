@@ -1,15 +1,16 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable react-native/no-inline-styles */
 
 import {Picker} from '@react-native-picker/picker';
 import {useQuery, useRealm} from '@realm/react';
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {Button, StyleSheet, View} from 'react-native';
 import DatePicker from 'react-native-date-picker';
 import {ScrollView} from 'react-native-gesture-handler';
 import {BSON} from 'realm';
 import FloatingLabelInputRegular from '../Components/FloatingInputRegular';
 import {COLORS} from '../assets/images';
-import {Account} from '../tools/Schema';
+import {Account, ScheduledPayment} from '../tools/Schema';
 const AddPlannedPaymentScreen = ({navigation}) => {
   const realm = useRealm();
 
@@ -25,14 +26,13 @@ const AddPlannedPaymentScreen = ({navigation}) => {
   const accounts = useQuery(Account);
 
   const addScheduledPayment = () => {
+    let accountToAdd: any;
     if (account !== '') {
-      const accountToAdd: any = realm.objectForPrimaryKey(
+      accountToAdd = realm.objectForPrimaryKey(
         'Account',
         new BSON.ObjectID(account),
       );
-      setAccount(accountToAdd);
     }
-    console.log(note, frequency);
 
     realm.write(() => {
       realm.create('ScheduledPayment', {
@@ -43,13 +43,18 @@ const AddPlannedPaymentScreen = ({navigation}) => {
         nextReminderDate: new Date(date),
         payee: payee,
         note: note,
-        account: account,
+        account: accountToAdd,
         _id: new BSON.ObjectID(),
         transaction_type: type,
       });
     });
     navigation.goBack();
   };
+  useEffect(() => {
+    realm.subscriptions.update(mutableSubs => {
+      mutableSubs.add(realm.objects(ScheduledPayment));
+    });
+  }, []);
 
   return (
     <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">

@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#1d2027',
     paddingHorizontal: 16,
-    paddingTop: 0,
+    paddingTop: 5,
     paddingBottom: 60,
   },
   catStyle: {

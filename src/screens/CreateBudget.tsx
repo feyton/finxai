@@ -42,13 +42,15 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
 
   const addItem = () => {
     if (currentCategory && currentAmount) {
-      const cat = categories.find(cat => cat._id.toString() == currentCategory);
+      const categ = categories.find(
+        cat => cat._id.toString() === currentCategory,
+      );
       setItems([
         ...items,
         {
-          category: cat,
-          subcategory: cat?.subcategories.find(
-            sub => sub._id.toString() == currentSubcategory,
+          category: categ,
+          subcategory: categ?.subcategories.find(
+            sub => sub._id.toString() === currentSubcategory,
           ),
           amount: parseFloat(currentAmount),
         },
@@ -61,8 +63,8 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
   };
 
   const createBudget = () => {
-    if (!name || items.length == 0) {
-      Alert.alert('A budget Need A name');
+    if (!name || items.length === 0) {
+      Alert.alert('A budget Needs a name');
       return;
     }
     realm.write(() => {
@@ -148,8 +150,8 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
         />
         {items.length > 0 && (
           <>
-            {items.map(item => (
-              <View style={styles.budgetItem}>
+            {items.map((item: any) => (
+              <View style={styles.budgetItem} key={item?._id.toString()}>
                 <Text style={styles.budgetItemText}>
                   {item.category.name} -{' '}
                   {item.subcategory?.name || 'No Subcategory'}: ${item.amount}

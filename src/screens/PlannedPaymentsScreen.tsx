@@ -3,17 +3,30 @@
 import {useQuery} from '@realm/react';
 import React from 'react';
 import {Button, FlatList, StyleSheet, Text, View} from 'react-native';
-import {COLORS} from '../assets/images';
+import {COLORS, FONTS} from '../assets/images';
 import {ScheduledPayment} from '../tools/Schema';
 const ScheduledPaymentsScreen = ({navigation}) => {
   const scheduledPayments = useQuery(ScheduledPayment);
 
   const renderScheduledPayment = ({item}) => (
-    <View style={{padding: 10}}>
-      <Text>Name: {item.name}</Text>
-      <Text>Amount: {item.amount}</Text>
-      <Text>Frequency: {item.frequency}</Text>
-      <Text>Next Reminder: {item.startDate.toLocaleString()}</Text>
+    <View
+      style={{
+        padding: 10,
+        borderColor: 'gray',
+        borderWidth: 1,
+        marginVertical: 10,
+        borderRadius: 10,
+      }}>
+      <Text style={{fontFamily: FONTS.regular}}>Name: {item.name}</Text>
+      <Text style={{fontFamily: FONTS.regular}}>
+        Amount: {item.amount.toLocaleString()} Rwf
+      </Text>
+      <Text style={{fontFamily: FONTS.regular}}>
+        Frequency: {item.frequency}
+      </Text>
+      <Text style={{fontFamily: FONTS.regular}}>
+        Next Reminder: {item.startDate.toLocaleString()}
+      </Text>
     </View>
   );
 

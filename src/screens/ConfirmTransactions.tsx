@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import DatePicker from 'react-native-date-picker';
 import {ScrollView} from 'react-native-gesture-handler';
 import {BSON} from 'realm';
 import FloatingLabelInputRegular from '../Components/FloatingInputRegular';
@@ -35,8 +36,15 @@ function ConfirmTransactionsScreen() {
   const bottomSheetRef = React.useRef<BottomSheet>(null);
   const snapPoints = React.useMemo(() => ['25%', '80%'], []);
   const [subcategories, setSubcategories] = useState<any[]>([]);
+  const [filteredCategories, setCategories] = useState<any[]>([]);
+  const [date, setDate] = useState(new Date());
+  const [open, setOpen] = useState(false);
   const realm = useRealm();
 
+  const updateCategories = (type: string) => {
+    const cats = categoriesQuery.filter(cat => cat.type === type);
+    setCategories(cats);
+  };
   useEffect(() => {
     realm.subscriptions.update(mutableSubs => {
       mutableSubs.add(realm.objects(Transaction));
@@ -46,15 +54,26 @@ function ConfirmTransactionsScreen() {
   }, []);
 
   const handleTransactionClick = (transaction: any) => {
-    setSelectedTransaction(transaction.toJSON());
+    setSelectedTransaction({
+      ...transaction.toJSON(),
+      account: transaction.account._id,
+    });
+    updateCategories(transaction?.transaction_type);
+    setDate(transaction.date_time);
     updateSubcategories(transaction?.category);
     bottomSheetRef.current?.snapToIndex(1); // Open the bottom sheet
   };
 
   const deleteTransaction = useCallback(() => {
+    console.log(selectedTransaction);
     realm.write(() => {
       if (selectedTransaction) {
-        realm.delete(selectedTransaction);
+        realm.delete(
+          realm.objectForPrimaryKey(
+            'AutoRecord',
+            new BSON.ObjectID(selectedTransaction._id),
+          ),
+        );
         setSelectedTransaction(null);
         bottomSheetRef.current?.close(); // Close the bottom sheet
       }
@@ -159,6 +178,9 @@ function ConfirmTransactionsScreen() {
     }
 
     const handleFieldChange = (field: string, value: any) => {
+      if (field === 'transaction_type') {
+        updateCategories(value);
+      }
       if (field === 'category') {
         updateSubcategories(value);
       }
@@ -196,10 +218,7 @@ function ConfirmTransactionsScreen() {
           <View style={styles.pickerContainer}>
             <Picker
               style={styles.picker}
-              selectedValue={
-                selectedTransaction?.account?._id?.toString() ||
-                selectedTransaction.account
-              }
+              selectedValue={selectedTransaction?.account}
               onValueChange={value => handleFieldChange('account', value)}>
               <Picker.Item label={'Select account'} value={''} />
               {accounts.map((account: any) => (
@@ -235,7 +254,7 @@ function ConfirmTransactionsScreen() {
               selectedValue={selectedTransaction.category}
               onValueChange={value => handleFieldChange('category', value)}>
               <Picker.Item label={'Select category'} value={''} />
-              {categoriesQuery.map((category: any) => (
+              {filteredCategories.map((category: any) => (
                 <Picker.Item
                   key={category._id.toString()}
                   label={category.name}
@@ -291,6 +310,27 @@ function ConfirmTransactionsScreen() {
             name="note"
             onChangeText={text => handleFieldChange('note', text)}
             label="Note"
+          />
+          <View style={{flexDirection: 'row', gap: 5}}>
+            <Text>Date: {selectedTransaction.date_time.toLocaleString()}</Text>
+            <TouchableOpacity
+              style={{padding: 3, backgroundColor: 'gray'}}
+              onPress={() => setOpen(true)}>
+              <Text>Change</Text>
+            </TouchableOpacity>
+          </View>
+          <DatePicker
+            modal
+            mode="date"
+            open={open}
+            date={selectedTransaction.date_time}
+            onConfirm={date => {
+              setOpen(false);
+              handleFieldChange('date_time', date);
+            }}
+            onCancel={() => {
+              setOpen(false);
+            }}
           />
 
           <View

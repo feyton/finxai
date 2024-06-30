@@ -14,7 +14,7 @@ export default function AccountScreenStack() {
       screenOptions={{
         headerShown: false,
       }}>
-      <Stack.Screen name="AccountsPage" component={AccountsPage} />
+      <Stack.Screen name="AccountsPage"  component={AccountsPage} />
       <Stack.Screen name="CreateAccount" component={CreateAccountScreen} />
       <Stack.Screen name="AccountDetails" component={AccountDetails} />
     </Stack.Navigator>

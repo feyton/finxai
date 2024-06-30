@@ -8,7 +8,7 @@ import {
   TextInputProps,
   View,
 } from 'react-native';
-import {COLORS} from '../assets/images';
+import {COLORS, FONTS} from '../assets/images';
 
 interface FloatingLabelInputProps extends TextInputProps {
   control: Control<any>;
@@ -52,7 +52,11 @@ const FloatingLabelInput: React.FC<FloatingLabelInputProps> = ({
     }),
     color: labelPosition.interpolate({
       inputRange: [0, 1],
-      outputRange: ['#999', 'white'],
+      outputRange: ['white', '#999'],
+    }),
+    zIndex: labelPosition.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, 1],
     }),
   };
 
@@ -63,6 +67,9 @@ const FloatingLabelInput: React.FC<FloatingLabelInputProps> = ({
       rules={rules}
       render={({field: {onChange, onBlur, value}, fieldState: {error}}) => (
         <View style={styles.inputContainer}>
+          <Animated.Text style={[styles.label, labelStyle]}>
+            {label}
+          </Animated.Text>
           <TextInput
             style={[styles.input, error && styles.errorInput]}
             onFocus={() => setIsFocused(true)}
@@ -74,9 +81,6 @@ const FloatingLabelInput: React.FC<FloatingLabelInputProps> = ({
             value={value}
             {...inputProps}
           />
-          <Animated.Text style={[styles.label, labelStyle]}>
-            {label}
-          </Animated.Text>
           {error && <Text style={styles.errorText}>{error.message}</Text>}
         </View>
       )}
@@ -93,9 +97,10 @@ const styles = StyleSheet.create({
     height: 50,
     borderColor: 'gray',
     borderWidth: 1,
-    paddingHorizontal: 10,
+    paddingHorizontal: 20,
     borderRadius: 5,
-    fontFamily: 'Arial',
+    fontFamily: FONTS.regular,
+    fontSize: 12,
   },
   errorInput: {
     borderColor: 'red',
