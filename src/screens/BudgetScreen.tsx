@@ -26,8 +26,7 @@ export default function BudgetScreen({navigation}: any) {
   }, [realm, selectedBudget]);
 
   const handlePress = useCallback((budget: any) => {
-    setSelectedBudget(budget);
-    setModalVisible(true);
+    navigation.navigate('BudgetDetails', {budgetId: budget._id});
   }, []);
   useEffect(() => {
     realm.subscriptions.update(mutableSubs => {
@@ -43,7 +42,7 @@ export default function BudgetScreen({navigation}: any) {
       />
       {budgets.map((budget, index) => (
         <TouchableOpacity
-          onLongPress={() => handlePress(budget)}
+          onPress={() => handlePress(budget)}
           key={budget?._id.toString()}>
           <View
             key={index}

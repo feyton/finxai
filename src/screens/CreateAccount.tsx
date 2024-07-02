@@ -1,6 +1,6 @@
 /* eslint-disable react-native/no-inline-styles */
 import {Picker} from '@react-native-picker/picker';
-import {useRealm} from '@realm/react';
+import {useRealm, useUser} from '@realm/react';
 import React, {useEffect, useState} from 'react';
 import {useForm} from 'react-hook-form';
 import {
@@ -62,6 +62,7 @@ const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
       mutableSubs.add(realm.objects(Account));
     });
   }, []);
+  const user = useUser();
 
   const handleCreateAccount = (data: any) => {
     if (!provider) {
@@ -78,6 +79,7 @@ const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
           address: prov.address,
           providerName: prov.name,
           logo: prov.logo,
+          owner_id: user.id,
         });
       });
       navigation.goBack();

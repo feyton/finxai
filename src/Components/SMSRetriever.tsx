@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import {useNavigation} from '@react-navigation/native';
-import {useQuery, useRealm} from '@realm/react';
+import {useQuery, useRealm, useUser} from '@realm/react';
 import React, {useEffect, useState} from 'react';
 import {
   ActivityIndicator,
@@ -30,6 +30,7 @@ const SMSRetriever: React.FC = ({refreshing}: any) => {
   const [lastChecked, setlastChecked] = useState<Date>(new Date());
   const realm = useRealm();
   const accounts = useQuery(Account).filtered('auto == true');
+  const user = useUser();
 
   const getFirstDayOfMonthEpoch = () => {
     const now = new Date();
@@ -60,6 +61,7 @@ const SMSRetriever: React.FC = ({refreshing}: any) => {
             ...transactionData,
             sms: sms.body,
             account: accountToUpdate,
+            owner_id: user.id,
           });
         } catch (error) {
           console.log('Error parsing sms', error);

@@ -1,12 +1,19 @@
 /* eslint-disable react-native/no-inline-styles */
 
-import {useQuery} from '@realm/react';
-import React from 'react';
+import {useQuery, useRealm} from '@realm/react';
+import React, {useEffect} from 'react';
 import {Button, FlatList, StyleSheet, Text, View} from 'react-native';
 import {COLORS, FONTS} from '../assets/images';
 import {ScheduledPayment} from '../tools/Schema';
 const ScheduledPaymentsScreen = ({navigation}) => {
   const scheduledPayments = useQuery(ScheduledPayment);
+  const realm = useRealm();
+  console.log(scheduledPayments);
+  useEffect(() => {
+    realm.subscriptions.update(mutableSubs => {
+      mutableSubs.add(realm.objects(ScheduledPayment));
+    });
+  }, []);
 
   const renderScheduledPayment = ({item}) => (
     <View
@@ -25,7 +32,7 @@ const ScheduledPaymentsScreen = ({navigation}) => {
         Frequency: {item.frequency}
       </Text>
       <Text style={{fontFamily: FONTS.regular}}>
-        Next Reminder: {item.startDate.toLocaleString()}
+        Next Reminder: {item?.startDate.toLocaleString()}
       </Text>
     </View>
   );

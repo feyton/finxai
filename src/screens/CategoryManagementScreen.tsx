@@ -1,7 +1,7 @@
 /* eslint-disable react-native/no-inline-styles */
 // CategoryManagementScreen.js
 
-import {useQuery, useRealm} from '@realm/react';
+import {useQuery, useRealm, useUser} from '@realm/react';
 import React, {useEffect, useState} from 'react';
 import {
   Button,
@@ -12,6 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {TouchableOpacity} from 'react-native-gesture-handler';
 import {BSON} from 'realm';
 import EmojiPicker from 'rn-emoji-picker';
 import {emojis} from 'rn-emoji-picker/dist/data';
@@ -23,6 +24,7 @@ function CategoryManagementScreen() {
   const categories = useQuery(Category);
 
   const realm = useRealm();
+  const user = useUser();
 
   const [modalVisible, setModalVisible] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -53,13 +55,7 @@ function CategoryManagementScreen() {
     });
   };
 
-  useEffect(() => {
-    // Prepopulate categories on initial render if needed
-    realm.subscriptions.update(mutableSubs => {
-      mutableSubs.add(realm.objects(Category));
-    });
-    console.log(categories.length);
-
+  const createInitialCategories = async () => {
     if (categories.length === 0) {
       realm.write(() => {
         categoriesData.categories.forEach(catData => {
@@ -68,6 +64,7 @@ function CategoryManagementScreen() {
             name: catData.name,
             icon: catData.icon,
             type: catData.type,
+            owner_id: user.id,
             subcategories: catData.subcategories.map(subcat => ({
               _id: new BSON.ObjectId(),
               name: subcat.name,
@@ -77,6 +74,13 @@ function CategoryManagementScreen() {
         });
       });
     }
+  };
+
+  useEffect(() => {
+    // Prepopulate categories on initial render if needed
+    realm.subscriptions.update(mutableSubs => {
+      mutableSubs.add(realm.objects(Category));
+    });
   }, []);
 
   const handleSaveCategory = () => {
@@ -89,6 +93,7 @@ function CategoryManagementScreen() {
           name: categoryName,
           icon: categoryIcon,
           subcategories: [],
+          owner_id: user.id,
         });
       }
     });
@@ -114,7 +119,52 @@ function CategoryManagementScreen() {
 
   return (
     <View style={styles.container}>
-      <Button title="Add Category" onPress={handleAddCategory} />
+      <View style={{justifyContent: 'center', alignItems: 'center'}}>
+        <TouchableOpacity
+          onPress={handleAddCategory}
+          style={{
+            backgroundColor: COLORS.buttonSecondary,
+            padding: 10,
+            borderRadius: 10,
+            paddingHorizontal: 20,
+            marginVertical: 10,
+          }}>
+          <Text style={{fontFamily: FONTS.regular, color: 'white'}}>
+            Add Category
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {categories.length === 0 && (
+        <View
+          style={{
+            marginTop: 50,
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}>
+          <Text
+            style={{
+              fontFamily: FONTS.regular,
+              color: 'white',
+              marginHorizontal: 10,
+            }}>
+            Seems like you have no categories defined
+          </Text>
+          <TouchableOpacity
+            style={{
+              backgroundColor: COLORS.buttonPrimary,
+              padding: 10,
+              borderRadius: 10,
+              paddingHorizontal: 20,
+              marginVertical: 10,
+            }}
+            onPress={() => createInitialCategories()}>
+            <Text style={{fontFamily: FONTS.regular, color: 'white'}}>
+              Add initial categories
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
       <FlatList
         data={categories}
         keyExtractor={item => item._id.toString()}

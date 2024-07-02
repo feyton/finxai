@@ -1,6 +1,6 @@
 import {Picker} from '@react-native-picker/picker';
-import {useQuery, useRealm} from '@realm/react';
-import React, {useState} from 'react';
+import {useQuery, useRealm, useUser} from '@realm/react';
+import React, {useEffect, useState} from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import {BSON} from 'realm';
-import {Category} from '../tools/Schema';
+import {Budget, Category} from '../tools/Schema';
 
 interface BudgetItem {
   category: string;
@@ -42,9 +42,11 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
 
   const addItem = () => {
     if (currentCategory && currentAmount) {
-      const categ = categories.find(
-        cat => cat._id.toString() === currentCategory,
+      const categ = realm.objectForPrimaryKey<Category>(
+        'Category',
+        new BSON.ObjectID(currentCategory),
       );
+
       setItems([
         ...items,
         {
@@ -53,14 +55,17 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
             sub => sub._id.toString() === currentSubcategory,
           ),
           amount: parseFloat(currentAmount),
+          _id: new BSON.ObjectID(),
         },
       ]);
+      console.log('here', categ);
 
       setCurrentCategory('');
       setCurrentSubcategory('');
       setCurrentAmount('');
     }
   };
+  const user = useUser();
 
   const createBudget = () => {
     if (!name || items.length === 0) {
@@ -82,10 +87,17 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
           amount: item.amount,
         })),
         shared_with: [],
+        owner_id: user.id,
       });
     });
     navigation.goBack();
   };
+  useEffect(() => {
+    realm.subscriptions.update(mutableSubs => {
+      mutableSubs.add(realm.objects(Budget));
+      mutableSubs.add(realm.objects(Category));
+    });
+  }, []);
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior="padding">

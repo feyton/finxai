@@ -16,6 +16,7 @@ import CreateBudgetScreen from './src/screens/CreateBudget';
 import {ToastProvider} from 'react-native-toast-notifications';
 import {OpenRealmBehaviorType} from 'realm';
 import AddPlannedPaymentScreen from './src/screens/AddPlannedPayment';
+import BudgetDetails from './src/screens/BudgetDetails';
 import CreateRecord from './src/screens/CreateRecord';
 import LoginScreen from './src/screens/LoginScreen';
 import ScheduledPaymentsScreen from './src/screens/PlannedPaymentsScreen';
@@ -54,7 +55,6 @@ function App(): React.JSX.Element {
         <NavigationContainer>
           <AppProvider
             id="finxai-krgaaei"
-            
             baseUrl="https://services.cloud.mongodb.com">
             <UserProvider fallback={<LoginScreen />}>
               <RealmProvider
@@ -70,6 +70,14 @@ function App(): React.JSX.Element {
                   onError: (session, error) => {
                     // Replace this with a preferred logger in production.
                     console.error(error);
+                  },
+                  initialSubscriptions: {
+                    update: (subs, realm) => {
+                      subs.add(realm.objects(Account), {
+                        name: 'All accounts',
+                      });
+                    },
+                    rerunOnOpen: true,
                   },
                 }}
                 schema={[
@@ -104,6 +112,10 @@ function App(): React.JSX.Element {
                   <Stack.Screen
                     name="CreateBudget"
                     component={CreateBudgetScreen}
+                  />
+                  <Stack.Screen
+                    name="BudgetDetails"
+                    component={BudgetDetails}
                   />
                   <Stack.Screen
                     name="ManageCategories"

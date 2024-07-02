@@ -16,6 +16,7 @@ export class Account extends Realm.Object<Account> {
   available_balance!: number;
   transfer!: number;
   opening_balance!: number;
+  owner_id!: string;
 
   static schema: ObjectSchema = {
     name: 'Account',
@@ -33,6 +34,7 @@ export class Account extends Realm.Object<Account> {
       transactions: {type: 'list', objectType: 'Transaction'},
       transfers: {type: 'list', objectType: 'Transfer'},
       transfer: {type: 'double', default: 0},
+      owner_id: {type: 'string'},
     },
     primaryKey: '_id',
   };
@@ -60,6 +62,7 @@ export class Transaction extends Realm.Object<Transaction> {
   transaction_type?: string;
   note?: string;
   fees!: number;
+  owner_id!: string;
 
   static schema: ObjectSchema = {
     name: 'Transaction',
@@ -78,7 +81,8 @@ export class Transaction extends Realm.Object<Transaction> {
       budget: 'Budget?', // Link to the parent Budget object
       note: 'string?',
       splitDetails: 'SplitDetail[]',
-      fees: {type: 'double', default: 0}, // Only for transfer transactions
+      fees: {type: 'double', default: 0},
+      owner_id: 'string', // Only for transfer transactions
     },
     primaryKey: '_id',
   };
@@ -107,6 +111,7 @@ export class AutoRecord extends Realm.Object<AutoRecord> {
   transaction_type?: string;
   note?: string;
   fees!: Double;
+  owner_id!: string;
 
   static schema: ObjectSchema = {
     name: 'AutoRecord',
@@ -122,7 +127,8 @@ export class AutoRecord extends Realm.Object<AutoRecord> {
       currency: {type: 'string', default: 'RWF'},
       category: 'Category?',
       subcategory: 'Subcategory?',
-      fees: {type: 'double', default: 0}, // Only for transfer transactions
+      fees: {type: 'double', default: 0},
+      owner_id: {type: 'string'}, // Only for transfer transactions
     },
     primaryKey: '_id',
   };
@@ -144,12 +150,14 @@ export class Transfer extends Realm.Object<Transfer> {
       note: 'string?',
       currency: {type: 'string', default: 'RWF'},
       fees: {type: 'double', default: 0},
+      owner_id: {type: 'string'},
     },
   };
   amount: any;
   fees: any;
   fromAccount: any;
   toAccount: any;
+  owner_id!: string;
 
   total() {
     return this.amount + this.fees;
@@ -173,6 +181,7 @@ export class Budget extends Realm.Object<Budget> {
   startDate?: Date;
   endDate?: Date;
   items?: any;
+  owner_id!: string;
 
   static schema: ObjectSchema = {
     name: 'Budget',
@@ -189,6 +198,8 @@ export class Budget extends Realm.Object<Budget> {
       event: 'string?',
       amount: 'double',
       transactions: {type: 'list', objectType: 'Transaction'},
+      owner_id: {type: 'string'},
+      collaborators: 'string[]',
     },
   };
   name!: string;
@@ -220,6 +231,9 @@ export class BudgetItem extends Realm.Object<BudgetItem> {
       amount: 'double',
     },
   };
+  category!: Category;
+  _id!: BSON.ObjectID;
+  subcategory?: Subcategory;
 }
 
 export class SplitDetail extends Realm.Object<SplitDetail> {
@@ -241,6 +255,7 @@ export class Category extends Realm.Object<Category> {
   icon!: string;
   type!: 'income' | 'expense'; // Add a type field
   subcategories: Realm.List<Subcategory> | undefined;
+  owner_id!: string;
 
   static schema: ObjectSchema = {
     name: 'Category',
@@ -254,6 +269,7 @@ export class Category extends Realm.Object<Category> {
         objectType: 'Transaction',
         type: 'list',
       },
+      owner_id: {type: 'string'},
     },
     primaryKey: '_id',
   };
@@ -284,6 +300,7 @@ export class ScheduledPayment extends Realm.Object {
   nextReminderDate!: Date;
   lastPaidDate?: Date;
   isRecurring!: boolean;
+  owner_id!: string;
 
   static schema: ObjectSchema = {
     name: 'ScheduledPayment',
@@ -302,6 +319,7 @@ export class ScheduledPayment extends Realm.Object {
       isRecurring: {type: 'bool', default: true},
       note: 'string',
       labels: 'string[]',
+      owner_id: {type: 'string'},
     },
   };
 }
@@ -309,6 +327,7 @@ export class ScheduledPayment extends Realm.Object {
 export class Subscription extends Realm.Object<Subscription> {
   amount!: number;
   frequency!: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  owner_id!: string;
   static schema: ObjectSchema = {
     name: 'Subscription',
     primaryKey: '_id',
@@ -323,6 +342,7 @@ export class Subscription extends Realm.Object<Subscription> {
       note: 'string',
       labels: 'string[]',
       active: 'bool',
+      owner_id: {type: 'string'},
     },
   };
 }

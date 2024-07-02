@@ -2,7 +2,7 @@
 /* eslint-disable react-native/no-inline-styles */
 
 import {Picker} from '@react-native-picker/picker';
-import {useQuery, useRealm} from '@realm/react';
+import {useQuery, useRealm, useUser} from '@realm/react';
 import React, {useEffect, useState} from 'react';
 import {Button, StyleSheet, View} from 'react-native';
 import DatePicker from 'react-native-date-picker';
@@ -13,6 +13,7 @@ import {COLORS} from '../assets/images';
 import {Account, ScheduledPayment} from '../tools/Schema';
 const AddPlannedPaymentScreen = ({navigation}) => {
   const realm = useRealm();
+  const user = useUser();
 
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
@@ -46,6 +47,7 @@ const AddPlannedPaymentScreen = ({navigation}) => {
         account: accountToAdd,
         _id: new BSON.ObjectID(),
         transaction_type: type,
+        owner_id: user.id,
       });
     });
     navigation.goBack();
