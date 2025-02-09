@@ -15,7 +15,7 @@ import {formatDistanceToNow} from 'date-fns';
 import SmsAndroid from 'react-native-get-sms-android';
 import {Path, Svg} from 'react-native-svg';
 import {FONTS} from '../assets/images';
-import {Account, AutoRecord} from '../tools/Schema';
+import {Account, AutoRecord, Transaction} from '../tools/Schema';
 import {extractTransactionInfo} from '../tools/parseSMS';
 
 interface SMS {
@@ -118,12 +118,14 @@ const SMSRetriever: React.FC = ({refreshing}: any) => {
   const navigateToConfirmations = () => {
     navigation.navigate('Confirm');
   };
-
   useEffect(() => {
     realm.subscriptions.update(mutableSubs => {
       mutableSubs.add(realm.objects(AutoRecord));
       mutableSubs.add(realm.objects(Account));
+      mutableSubs.add(realm.objects(Transaction));
     });
+  }, []);
+  useEffect(() => {
     if (!initialized) {
       retrieveTransactions();
     }

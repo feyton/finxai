@@ -1,7 +1,7 @@
 /* eslint-disable react-native/no-inline-styles */
 import BottomSheet, {BottomSheetView} from '@gorhom/bottom-sheet';
 import {Picker} from '@react-native-picker/picker';
-import {useQuery, useRealm} from '@realm/react';
+import {useQuery, useRealm, useUser} from '@realm/react';
 import React, {useCallback, useEffect, useState} from 'react';
 import {
   FlatList,
@@ -40,6 +40,7 @@ function ConfirmTransactionsScreen() {
   const [date, setDate] = useState(new Date());
   const [open, setOpen] = useState(false);
   const realm = useRealm();
+  const user = useUser();
 
   const updateCategories = (type: string) => {
     const cats = categoriesQuery.filter(cat => cat.type === type);
@@ -113,6 +114,7 @@ function ConfirmTransactionsScreen() {
           fromAccount: account,
           _id: new BSON.ObjectID(),
           amount: parseFloat(selectedTransaction.amount),
+          owner_id: user.id,
         });
         console.log(transfer);
         transfer.afterSave();
@@ -140,6 +142,7 @@ function ConfirmTransactionsScreen() {
           _id: new BSON.ObjectID(),
           account: account,
           amount: parseFloat(selectedTransaction.amount),
+          owner_id: user.id,
         });
         tx.setTotalAmount();
         realm.delete(realm.objectForPrimaryKey('AutoRecord', _id));
