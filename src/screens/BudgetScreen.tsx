@@ -1,6 +1,6 @@
 /* eslint-disable react-native/no-inline-styles */
-import {useQuery, useRealm} from '@realm/react';
-import React, {useCallback, useEffect, useState} from 'react';
+import {useQuery, usePowerSync} from '@powersync/react-native';
+import React, {useCallback, useState} from 'react';
 import {
   Button,
   Modal,
@@ -10,42 +10,55 @@ import {
   View,
 } from 'react-native';
 import {COLORS, FONTS} from '../assets/images';
-import {Budget} from '../tools/Schema';
+import {useCurrentUser} from '../hooks/useCurrentUser';
 
 export default function BudgetScreen({navigation}: any) {
-  const budgets = useQuery(Budget);
+  const {userId} = useCurrentUser();
+  const db = usePowerSync();
+  const {data: budgets} = useQuery(
+    'SELECT * FROM budgets WHERE owner_id = ? ORDER BY created_at DESC',
+    [userId ?? ''],
+  );
   const [modalVisible, setModalVisible] = useState(false);
-  const [selectedBudget, setSelectedBudget] = useState(null);
-  const realm = useRealm();
+  const [selectedBudget, setSelectedBudget] = useState<any>(null);
 
-  const handleDeleteBudget = useCallback(() => {
-    realm.write(() => {
-      realm.delete(selectedBudget);
-      setModalVisible(false);
-    });
-  }, [realm, selectedBudget]);
+  const handleDeleteBudget = useCallback(async () => {
+    if (!selectedBudget) {return;}
+    await db.execute('DELETE FROM budget_items WHERE budget_id = ?', [
+      selectedBudget.id,
+    ]);
+    await db.execute('DELETE FROM budgets WHERE id = ?', [selectedBudget.id]);
+    setModalVisible(false);
+    setSelectedBudget(null);
+  }, [db, selectedBudget]);
 
-  const handlePress = useCallback((budget: any) => {
-    navigation.navigate('BudgetDetails', {budgetId: budget._id});
+  const handlePress = useCallback(
+    (budget: any) => {
+      navigation.navigate('BudgetDetails', {budgetId: budget.id});
+    },
+    [navigation],
+  );
+
+  const handleLongPress = useCallback((budget: any) => {
+    setSelectedBudget(budget);
+    setModalVisible(true);
   }, []);
-  useEffect(() => {
-    realm.subscriptions.update(mutableSubs => {
-      mutableSubs.add(realm.objects(Budget));
-    });
-  }, []);
+
   return (
     <View style={{flex: 1, backgroundColor: '#1d2027', padding: 16}}>
-      <Text style={{fontFamily: FONTS.bold, fontSize: 16}}>Budget</Text>
+      <Text style={{fontFamily: FONTS.bold, fontSize: 16, color: 'white'}}>
+        Budget
+      </Text>
       <Button
         onPress={() => navigation.navigate('CreateBudget')}
         title="Create Budget"
       />
-      {budgets.map((budget, index) => (
+      {budgets.map((budget: any) => (
         <TouchableOpacity
           onPress={() => handlePress(budget)}
-          key={budget?._id.toString()}>
+          onLongPress={() => handleLongPress(budget)}
+          key={budget.id}>
           <View
-            key={index}
             style={{
               backgroundColor: COLORS.bgSecondary,
               margin: 10,
@@ -55,10 +68,10 @@ export default function BudgetScreen({navigation}: any) {
               {budget.name}
             </Text>
             <Text style={{fontFamily: FONTS.regular, color: 'white'}}>
-              RWF: {budget.getTotalAmount().toLocaleString()}
+              RWF: {Number(budget.amount || 0).toLocaleString()}
             </Text>
             <Text style={{fontFamily: FONTS.regular, color: 'white'}}>
-              Current Spending: {budget.getCurrentSpending()}
+              Period: {budget.period}
             </Text>
           </View>
         </TouchableOpacity>
@@ -73,7 +86,7 @@ export default function BudgetScreen({navigation}: any) {
           <View style={styles.centeredView}>
             <View style={styles.modalView}>
               <Text style={styles.modalText}>
-                Do you want to delete this account?
+                Do you want to delete this budget?
               </Text>
               <View
                 style={{
@@ -119,16 +132,6 @@ export default function BudgetScreen({navigation}: any) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#1d2027',
-    position: 'relative',
-  },
-  card: {},
-  cardText: {
-    fontSize: 16,
-    marginBottom: 5,
-  },
   centeredView: {
     flex: 1,
     justifyContent: 'center',
@@ -142,10 +145,7 @@ const styles = StyleSheet.create({
     padding: 35,
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: {width: 0, height: 2},
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 5,

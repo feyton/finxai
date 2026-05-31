@@ -1,6 +1,6 @@
 import {Picker} from '@react-native-picker/picker';
-import {useQuery, useRealm} from '@realm/react';
-import React, {useEffect, useState} from 'react';
+import {useQuery, usePowerSync} from '@powersync/react-native';
+import React, {useState} from 'react';
 import {Controller, useForm, useWatch} from 'react-hook-form';
 import {
   KeyboardAvoidingView,
@@ -13,44 +13,99 @@ import {
 
 import FloatingLabelInput from '../Components/FloatingInput';
 import {COLORS} from '../assets/images';
-import {Account, Budget, Category, Transaction} from '../tools/Schema';
+import {useCurrentUser} from '../hooks/useCurrentUser';
+import categoriesData from '../tools/data.json';
 
-interface BudgetItem {
-  category: string;
-  subcategory: string;
-  amount: number;
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
 }
 
 interface Props {
-  navigation: any; // You should replace 'any' with the appropriate type for navigation
+  navigation: any;
 }
 
 const CreateRecord: React.FC<Props> = ({navigation}) => {
-  const realm = useRealm();
-  const categories = useQuery(Category);
-  const accounts = useQuery(Account);
-  const budgets = useQuery(Budget);
+  const db = usePowerSync();
+  const {userId} = useCurrentUser();
+  const {data: accounts} = useQuery(
+    'SELECT * FROM accounts WHERE owner_id = ? ORDER BY name',
+    [userId ?? ''],
+  );
+  const {data: budgets} = useQuery(
+    'SELECT * FROM budgets WHERE owner_id = ? ORDER BY name',
+    [userId ?? ''],
+  );
+
   const {
     control,
     handleSubmit,
     setValue,
     formState: {errors},
   } = useForm();
-  const [record, setRecord] = useState({});
-  const [subcategories, setSubcategories] = useState<any[]>([]);
+  const [error, setError] = useState('');
 
-  const categoryChange = useWatch({control, name: 'category'});
-  const createRecord = (data: any) => {
-    console.log(data);
+  const transactionType = useWatch({control, name: 'transaction_type'});
+  const categoryName = useWatch({control, name: 'category'});
+
+  const filteredCategories = categoriesData.categories.filter(cat => {
+    if (!transactionType) {return true;}
+    if (transactionType === 'income') {return cat.type === 'income';}
+    return cat.type === 'expense';
+  });
+
+  const selectedCategory = categoriesData.categories.find(
+    cat => cat.name === categoryName,
+  );
+
+  const createRecord = async (data: any) => {
+    if (!data.amount || !data.account || !data.transaction_type) {
+      setError('Amount, account and type are required');
+      return;
+    }
+    try {
+      const now = new Date().toISOString();
+      await db.execute(
+        'INSERT INTO transactions (id, amount, account_id, category, subcategory, date_time, confirmed, currency, payee, transaction_type, note, fees, budget_id, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          generateUUID(),
+          parseFloat(data.amount),
+          data.account,
+          data.category || '',
+          data.subcategory || '',
+          now,
+          1,
+          'RWF',
+          data.payee || '',
+          data.transaction_type,
+          data.note || '',
+          0,
+          data.budget || null,
+          userId ?? '',
+          now,
+        ],
+      );
+
+      // Update account balance
+      if (data.transaction_type === 'income') {
+        await db.execute(
+          'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
+          [parseFloat(data.amount), data.account],
+        );
+      } else if (data.transaction_type === 'expense') {
+        await db.execute(
+          'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
+          [parseFloat(data.amount), data.account],
+        );
+      }
+
+      navigation.goBack();
+    } catch (err: any) {
+      setError('Error: ' + err.message);
+    }
   };
-
-  useEffect(()=>{
-    realm.subscriptions.update(mutableSubs => {
-      mutableSubs.add(realm.objects(Budget));
-      mutableSubs.add(realm.objects(Transaction));
-      mutableSubs.add(realm.objects(Account));
-    });
-  },[])
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior="padding">
@@ -58,23 +113,23 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.scrollContainer}>
         <Text style={styles.header}>Create Record</Text>
+        {error ? <Text style={{color: 'red', marginBottom: 8}}>{error}</Text> : null}
         <FloatingLabelInput control={control} name="amount" label="Amount" />
         <Controller
           name="transaction_type"
           control={control}
           rules={{required: 'Transaction type is required'}}
-          render={({field: {onChange, onBlur, value, ref}}: any) => (
+          render={({field: {onChange, value}}: any) => (
             <View style={styles.pickerContainer}>
-              <Picker
-                selectedValue={value}
-                onValueChange={onChange}
-                style={styles.picker}>
+              <Picker selectedValue={value} onValueChange={onChange} style={styles.picker}>
                 <Picker.Item label={'Select type'} value={''} />
                 <Picker.Item label={'Income'} value={'income'} />
                 <Picker.Item label={'Expense'} value={'expense'} />
                 <Picker.Item label={'Transfer'} value={'transfer'} />
               </Picker>
-              <Text>{errors.transaction_type?.message}</Text>
+              {errors.transaction_type && (
+                <Text style={{color: 'red'}}>{String(errors.transaction_type.message)}</Text>
+              )}
             </View>
           )}
         />
@@ -82,94 +137,66 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
           name="account"
           control={control}
           rules={{required: 'Account is required'}}
-          render={({value}: any) => (
+          render={({field: {value}}: any) => (
             <View style={styles.pickerContainer}>
               <Picker
                 selectedValue={value}
-                onValueChange={itemValue => setValue('account', itemValue)}
+                onValueChange={v => setValue('account', v)}
                 style={styles.picker}>
+                <Picker.Item label="Select Account" value="" />
                 {accounts.map((account: any) => (
                   <Picker.Item
-                    key={account._id.toString()}
+                    key={account.id}
                     label={account.name}
-                    value={account._id.toString()}
+                    value={account.id}
                   />
                 ))}
               </Picker>
-              <Text>{errors.account?.message}</Text>
             </View>
           )}
         />
         <Controller
           name="category"
           control={control}
-          rules={{required: 'Category is required'}}
-          render={({field: {onChange, onBlur, value, ref}}: any) => (
+          render={({field: {onChange, value}}: any) => (
             <View style={styles.pickerContainer}>
-              <Picker
-                selectedValue={value}
-                onValueChange={onChange}
-                style={styles.picker}>
+              <Picker selectedValue={value} onValueChange={onChange} style={styles.picker}>
                 <Picker.Item value="" label="Select Category" />
-                {categories.map((category: any) => (
-                  <Picker.Item
-                    key={category._id.toString()}
-                    label={category.name}
-                    value={category._id.toString()}
-                  />
+                {filteredCategories.map((cat, i) => (
+                  <Picker.Item key={i} label={`${cat.icon} ${cat.name}`} value={cat.name} />
                 ))}
               </Picker>
-              <Text>{errors.category?.message}</Text>
             </View>
           )}
         />
-        {categoryChange && (
+        {selectedCategory && selectedCategory.subcategories.length > 0 && (
           <Controller
             name="subcategory"
             control={control}
-            rules={{}}
-            render={({field: {onChange, onBlur, value, ref}}: any) => (
+            render={({field: {onChange, value}}: any) => (
               <View style={styles.pickerContainer}>
-                <Picker
-                  selectedValue={value}
-                  onValueChange={onChange}
-                  style={styles.picker}>
+                <Picker selectedValue={value} onValueChange={onChange} style={styles.picker}>
                   <Picker.Item value={''} label="Select Subcategory" />
-                  {categories
-                    .find(cat => cat._id == categoryChange)
-                    .subcategories.map((subcategory: any) => (
-                      <Picker.Item
-                        key={subcategory._id.toString()}
-                        label={subcategory.name}
-                        value={subcategory._id.toString()}
-                      />
-                    ))}
+                  {selectedCategory.subcategories.map((sub, i) => (
+                    <Picker.Item key={i} label={`${sub.icon} ${sub.name}`} value={sub.name} />
+                  ))}
                 </Picker>
               </View>
             )}
           />
         )}
-
         <FloatingLabelInput control={control} name="payee" label="Payee" />
         <Controller
           name="budget"
           control={control}
-          rules={{}}
-          render={({field: {onChange, onBlur, value, ref}}: any) => (
+          render={({field: {onChange, value}}: any) => (
             <View style={styles.pickerContainer}>
-              <Picker
-                selectedValue={value}
-                onValueChange={onChange}
-                style={styles.picker}>
+              <Picker selectedValue={value} onValueChange={onChange} style={styles.picker}>
+                <Picker.Item label="No Budget" value="" />
                 {budgets.map((budget: any) => (
-                  <Picker.Item
-                    key={budget._id.toString()}
-                    label={budget.name}
-                    value={budget._id.toString()}
-                  />
+                  <Picker.Item key={budget.id} label={budget.name} value={budget.id} />
                 ))}
               </Picker>
-              <Text>{errors.budget?.message}</Text>
             </View>
           )}
         />
@@ -185,59 +212,16 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.bgPrimary,
-  },
-  scrollContainer: {
-    padding: 16,
-  },
-  header: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 16,
-  },
-  input: {
-    borderWidth: 1,
-    padding: 12,
-    marginVertical: 8,
-    borderColor: '#333',
-    borderRadius: 10,
-    color: '#fff',
-  },
+  container: {flex: 1, backgroundColor: COLORS.bgPrimary},
+  scrollContainer: {padding: 16},
+  header: {fontSize: 24, fontWeight: 'bold', color: '#fff', marginBottom: 16},
   pickerContainer: {
     borderWidth: 1,
     borderColor: '#333',
     borderRadius: 10,
     marginVertical: 8,
   },
-  picker: {
-    color: '#fff',
-  },
-  budgetItemContainer: {
-    marginVertical: 8,
-  },
-  budgetItem: {
-    padding: 12,
-    marginVertical: 4,
-    backgroundColor: '#333',
-    borderRadius: 10,
-  },
-  budgetItemText: {
-    color: '#fff',
-  },
-  addButton: {
-    backgroundColor: '#1E90FF',
-    padding: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginVertical: 8,
-  },
-  addButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
+  picker: {color: '#fff'},
   saveButton: {
     backgroundColor: '#1E90FF',
     padding: 16,
@@ -245,11 +229,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginVertical: 16,
   },
-  saveButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 18,
-  },
+  saveButtonText: {color: '#fff', fontWeight: 'bold', fontSize: 18},
 });
 
 export default CreateRecord;

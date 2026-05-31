@@ -1,5 +1,5 @@
 /* eslint-disable react-native/no-inline-styles */
-import React, {useState} from 'react';
+import {useState} from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -11,53 +11,55 @@ import {
 
 import {
   GoogleSignin,
+  isSuccessResponse,
   statusCodes,
 } from '@react-native-google-signin/google-signin';
-import {useApp} from '@realm/react';
 import {ScrollView} from 'react-native-gesture-handler';
 import {Path, Svg} from 'react-native-svg';
 import {useToast} from 'react-native-toast-notifications';
-import {Credentials} from 'realm';
 import {COLORS, FONTS} from '../assets/images';
+import {supabase} from '../tools/supabase';
+
+GoogleSignin.configure({
+  webClientId:
+    '560260143969-rtfri6clp3brl8fcndptb89p96nd3hnn.apps.googleusercontent.com',
+  scopes: ['email', 'profile'],
+});
 
 const LoginScreen = () => {
   const [inProgress, setInprogress] = useState(false);
   const toast = useToast();
-  const app = useApp();
 
   const signIn = async () => {
-    GoogleSignin.configure({
-      offlineAccess: true,
-      webClientId:
-        '560260143969-6nqjnkc3juvn8p7177bl3k69csnfifm1.apps.googleusercontent.com',
-    });
     try {
       setInprogress(true);
       await GoogleSignin.hasPlayServices();
-      const userInfo: any = await GoogleSignin.signIn();
-      const credentials = Credentials.google({
-        authCode: userInfo.serverAuthCode,
-      });
-      try {
-        await app.logIn(credentials);
-        toast.show('Welcome ' + userInfo.user.givenName, {type: 'success'});
-      } catch (err) {
-        console.log(err);
+      const response = await GoogleSignin.signIn();
+      if (isSuccessResponse(response)) {
+        const {user, idToken} = response.data;
+        if (!idToken) {
+          toast.show('Google sign-in failed: no ID token', {type: 'danger'});
+          return;
+        }
+        const {error} = await supabase.auth.signInWithIdToken({
+          provider: 'google',
+          token: idToken,
+        });
+        if (error) {
+          throw error;
+        }
+        toast.show('Welcome ' + user.givenName, {type: 'success'});
+        // Auth state listener in App.tsx handles navigation automatically
+      } else {
+        toast.show('Sign In Cancelled', {type: 'info'});
       }
     } catch (error: any) {
-      setInprogress(false);
-      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
-        // user cancelled the login flow
-        toast.show('Sign In Cancelled', {type: 'info'});
-      } else if (error.code === statusCodes.IN_PROGRESS) {
+      if (error.code === statusCodes.IN_PROGRESS) {
         toast.show('In Progress', {type: 'warning'});
-        // operation (f.e. sign in) is in progress already
       } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-        // play services not available or outdated
         toast.show('Enable Play Services', {type: 'danger'});
       } else {
-        // some other error happened
-        toast.show(error?.message, {type: 'danger'});
+        toast.show(error?.message ?? 'Sign in failed', {type: 'danger'});
       }
     } finally {
       setInprogress(false);

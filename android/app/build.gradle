@@ -113,6 +113,12 @@ dependencies {
     } else {
         implementation jscFlavor
     }
-}
 
-apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesAppBuildGradle(project)
+    // Add all autolinked native module library projects as implementation dependencies.
+    // The RNGP includes them in the Gradle settings but does not wire them to :app automatically.
+    rootProject.subprojects.each { subproject ->
+        if (subproject.name != "app") {
+            implementation(project(":" + subproject.name))
+        }
+    }
+}

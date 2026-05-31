@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"E:\\\\finxai\" -Force)",
+      "Bash(Select-Object -First 30)",
+      "Bash(Format-Table Name, PSIsContainer)",
+      "Bash(Get-ChildItem *)",
+      "Bash(npm --version)",
+      "Bash(npm show *)",
+      "Bash(npx npm-check-updates *)",
+      "WebSearch",
+      "WebFetch(domain:react-native-google-signin.github.io)",
+      "WebFetch(domain:docs.swmansion.com)",
+      "Bash(npm install *)",
+      "Bash(xargs grep -l \"autolinking\\\\|PackageList\\\\|addDependencies\")",
+      "Bash(./gradlew projects *)",
+      "Bash(grep -E \"^[+\\\\\\\\\\\\\\\\|]|Project\")",
+      "Read(//e/tmp/**)",
+      "Bash(cp \"/c/Users/feyto/.gradle/caches/modules-2/files-2.1/com.facebook.react/react-android/0.85.3/151b0d93c5a52085d391178d0dfd07cdf6ede9c4/react-android-0.85.3-debug.aar\" react-android-debug.aar)",
+      "Bash(unzip -l react-android-debug.aar)",
+      "Bash(node *)",
+      "PowerShell(node -e \"const d=require\\('E:/finxai/node_modules/nativewind/package.json'\\); console.log\\('nativewind version:', d.version\\)\" 2>&1)",
+      "PowerShell(node -e \"const d=require\\('E:/finxai/node_modules/react-native-worklets/package.json'\\); console.log\\('worklets version:', d.version, 'main:', d.main, 'exports:', JSON.stringify\\(d.exports?.['./plugin']\\)\\)\" 2>&1)",
+      "PowerShell(head *)",
+      "PowerShell(node -e \"const d=require\\('E:/finxai/node_modules/react-native-css-interop/package.json'\\); console.log\\('version:', d.version, '\\\\nexports:', JSON.stringify\\(d.exports?.['./babel'], null, 2\\)\\)\" 2>&1)",
+      "PowerShell(node -e \"const d=require\\('E:/finxai/node_modules/nativewind/package.json'\\); console.log\\('nativewind', d.version\\); console.log\\(JSON.stringify\\(d.exports?.['./babel'], null, 2\\)\\)\" 2>&1)",
+      "PowerShell(node -e \"const d=require\\('E:/finxai/node_modules/nativewind/package.json'\\); console.log\\('peerDeps:', JSON.stringify\\(d.peerDependencies, null, 2\\)\\)\" 2>&1)",
+      "PowerShell(node -e \"const d=require\\('E:/finxai/node_modules/nativewind/package.json'\\); console.log\\('deps:', JSON.stringify\\(d.dependencies, null, 2\\)\\)\" 2>&1)",
+      "PowerShell(node -e \"const d=require\\('E:/finxai/node_modules/tailwindcss/package.json'\\); console.log\\('tailwindcss version:', d.version\\)\" 2>&1)",
+      "PowerShell(node -e \"const r = require\\('E:/finxai/node_modules/realm'\\); console.log\\('OpenRealmBehaviorType:', r.OpenRealmBehaviorType\\); console.log\\('keys:', Object.keys\\(r\\).filter\\(k => k.includes\\('Behavior'\\) || k.includes\\('Open'\\)\\)\\)\" 2>&1)",
+      "PowerShell(keytool -list -v -keystore \"$env:USERPROFILE\\\\.android\\\\debug.keystore\" -alias androiddebugkey -storepass android -keypass android 2>&1 | Select-String \"SHA1|SHA256|Certificate|Alias\")",
+      "Bash(npx tsc *)"
+    ]
+  }
+}

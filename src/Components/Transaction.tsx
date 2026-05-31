@@ -3,21 +3,19 @@ import {format} from 'date-fns';
 import React from 'react';
 import {Image, StyleSheet, Text, View} from 'react-native';
 import {Path, Svg} from 'react-native-svg';
-import {Category} from '../tools/Schema';
 
-interface Account {
-  _id: 'string';
-  name: 'string';
-  logo: 'string';
-}
 interface Transaction {
-  account: Account;
+  id: string;
+  account_id: string;
+  account_name?: string;
+  account_logo?: string;
   amount: number;
   transaction_type: string;
-  confirmed: boolean;
+  confirmed: number | boolean;
   date_time: string;
-  payee: string;
-  category: Category;
+  payee?: string;
+  category?: string;
+  subcategory?: string;
 }
 
 interface Props {
@@ -25,12 +23,16 @@ interface Props {
 }
 
 const TransactionItem: React.FC<Props> = ({transaction}) => {
+  const dateLabel = transaction?.date_time
+    ? format(new Date(transaction.date_time), 'dd-MM-yyyy HH:mm')
+    : '';
+
   return (
     <View style={styles.transactionItem}>
       <View style={styles.transactionInfo}>
         <View style={{position: 'relative'}}>
           <Image
-            source={{uri: transaction?.account?.logo}}
+            source={{uri: transaction?.account_logo}}
             style={styles.accountImage}
           />
           <View
@@ -48,8 +50,8 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
                   fill="#737886"
                 />
                 <Path
-                  fill-rule="evenodd"
-                  clip-rule="evenodd"
+                  fillRule="evenodd"
+                  clipRule="evenodd"
                   d="M2 14C2 11.1997 2 9.79961 2.54497 8.73005C3.02433 7.78924 3.78924 7.02433 4.73005 6.54497C5.79961 6 7.19974 6 10 6H14C16.8003 6 18.2004 6 19.27 6.54497C20.2108 7.02433 20.9757 7.78924 21.455 8.73005C22 9.79961 22 11.1997 22 14C22 16.8003 22 18.2004 21.455 19.27C20.9757 20.2108 20.2108 20.9757 19.27 21.455C18.2004 22 16.8003 22 14 22H10C7.19974 22 5.79961 22 4.73005 21.455C3.78924 20.9757 3.02433 20.2108 2.54497 19.27C2 18.2004 2 16.8003 2 14ZM12.5303 10.4697C12.3897 10.329 12.1989 10.25 12 10.25C11.8011 10.25 11.6103 10.329 11.4697 10.4697L8.96967 12.9697C8.67678 13.2626 8.67678 13.7374 8.96967 14.0303C9.26256 14.3232 9.73744 14.3232 10.0303 14.0303L11.25 12.8107V17C11.25 17.4142 11.5858 17.75 12 17.75C12.4142 17.75 12.75 17.4142 12.75 17V12.8107L13.9697 14.0303C14.2626 14.3232 14.7374 14.3232 15.0303 14.0303C15.3232 13.7374 15.3232 13.2626 15.0303 12.9697L12.5303 10.4697Z"
                   fill="green"
                 />
@@ -62,8 +64,8 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
                   fill="#cfbbba"
                 />
                 <Path
-                  fill-rule="evenodd"
-                  clip-rule="evenodd"
+                  fillRule="evenodd"
+                  clipRule="evenodd"
                   d="M2 14C2 11.1997 2 9.79961 2.54497 8.73005C3.02433 7.78924 3.78924 7.02433 4.73005 6.54497C5.79961 6 7.19974 6 10 6H14C16.8003 6 18.2004 6 19.27 6.54497C20.2108 7.02433 20.9757 7.78924 21.455 8.73005C22 9.79961 22 11.1997 22 14C22 16.8003 22 18.2004 21.455 19.27C20.9757 20.2108 20.2108 20.9757 19.27 21.455C18.2004 22 16.8003 22 14 22H10C7.19974 22 5.79961 22 4.73005 21.455C3.78924 20.9757 3.02433 20.2108 2.54497 19.27C2 18.2004 2 16.8003 2 14ZM12.75 11C12.75 10.5858 12.4142 10.25 12 10.25C11.5858 10.25 11.25 10.5858 11.25 11V15.1893L10.0303 13.9697C9.73744 13.6768 9.26256 13.6768 8.96967 13.9697C8.67678 14.2626 8.67678 14.7374 8.96967 15.0303L11.4697 17.5303C11.6103 17.671 11.8011 17.75 12 17.75C12.1989 17.75 12.3897 17.671 12.5303 17.5303L15.0303 15.0303C15.3232 14.7374 15.3232 14.2626 15.0303 13.9697C14.7374 13.6768 14.2626 13.6768 13.9697 13.9697L12.75 15.1893V11Z"
                   fill="red"
                 />
@@ -73,13 +75,9 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
         </View>
 
         <View style={styles.transactionDetails}>
-          <Text style={styles.transactionText}>
-            {transaction?.account?.name}
-          </Text>
+          <Text style={styles.transactionText}>{transaction?.account_name}</Text>
           <View style={styles.transactionAmountContainer}>
-            <Text style={styles.date}>
-              {format(transaction?.date_time, 'dd-MM-yyyy hh:mm')}
-            </Text>
+            <Text style={styles.date}>{dateLabel}</Text>
             <Text
               style={[
                 styles.transactionAmount,
@@ -87,12 +85,11 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
                   ? styles.income
                   : styles.expense,
               ]}>
-              RWF {transaction?.amount.toLocaleString()}
+              RWF {transaction?.amount?.toLocaleString()}
             </Text>
           </View>
           <Text style={styles.payee}>
-            {transaction?.payee} | {transaction?.category?.icon}{' '}
-            {transaction?.category?.name}
+            {transaction?.payee} | {transaction?.category}
           </Text>
         </View>
       </View>
@@ -124,6 +121,7 @@ const TransactionItem: React.FC<Props> = ({transaction}) => {
     </View>
   );
 };
+
 const styles = StyleSheet.create({
   transactionItem: {
     flexDirection: 'row',

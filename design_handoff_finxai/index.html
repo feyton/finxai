@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FinXAI — Finance, sorted by AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  :root {
+    --bg: #0A0D10;
+    --stage: #07090b;
+    --surface: #13171B;
+    --surface-2: #1A1F24;
+    --surface-3: #232A30;
+    --border: rgba(255,255,255,0.07);
+    --border-2: rgba(255,255,255,0.12);
+    --text: #F2F4F5;
+    --text-2: #A6AEB6;
+    --text-3: #6B747C;
+    --accent: #22C55E;
+    --accent-600: #16A34A;
+    --accent-700: #15803D;
+    --accent-soft: rgba(34,197,94,0.14);
+    --accent-ink: #052E16;
+    --income: #34D399;
+    --expense: #FB7185;
+    --warn: #FBBF24;
+    --info: #60A5FA;
+    --r-sm: 10px;
+    --r: 16px;
+    --r-lg: 22px;
+    --shadow: 0 8px 24px rgba(0,0,0,0.35);
+    --shadow-lg: 0 20px 50px rgba(0,0,0,0.5);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    font-family: 'Poppins', system-ui, sans-serif;
+    background: var(--stage);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  #root { height: 100%; }
+  .stage {
+    height: 100%; width: 100%;
+    display: flex; align-items: center; justify-content: center;
+    background:
+      radial-gradient(900px 600px at 50% -10%, rgba(34,197,94,0.10), transparent 60%),
+      var(--stage);
+    padding: 16px;
+  }
+  /* App canvas inside the device */
+  .app {
+    height: 100%; width: 100%;
+    display: flex; flex-direction: column;
+    background: var(--bg);
+    position: relative;
+    overflow: hidden;
+    color: var(--text);
+  }
+  .app *::-webkit-scrollbar { width: 0; height: 0; }
+  .scroll { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
+  .scroll::-webkit-scrollbar { display: none; }
+
+  /* typography helpers */
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  .tabnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+  /* pressable */
+  .press { transition: transform .12s ease, background .15s ease, opacity .15s ease; cursor: pointer; }
+  .press:active { transform: scale(0.97); }
+
+  /* fade/slide for route changes */
+  @keyframes screenIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .screen-in { animation: screenIn .28s cubic-bezier(.2,.7,.3,1); }
+  @keyframes sheetIn { from { transform: translateY(100%); } to { transform: none; } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes popIn { from { opacity:0; transform: scale(.92) translateY(6px);} to { opacity:1; transform:none;} }
+  @keyframes shimmer { 0%{background-position: -200% 0;} 100%{background-position: 200% 0;} }
+  @keyframes dot { 0%,60%,100%{ transform: translateY(0); opacity:.4;} 30%{ transform: translateY(-4px); opacity:1;} }
+
+  .no-select { user-select: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="android-frame.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="data-extra.jsx"></script>
+<script type="text/babel" src="ui.jsx"></script>
+<script type="text/babel" src="screens-home.jsx"></script>
+<script type="text/babel" src="screens-chat.jsx"></script>
+<script type="text/babel" src="screens-money.jsx"></script>
+<script type="text/babel" src="screens-plan.jsx"></script>
+<script type="text/babel" src="screens-debt.jsx"></script>
+<script type="text/babel" src="screens-budgetx.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
+</html>

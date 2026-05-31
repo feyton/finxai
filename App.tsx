@@ -1,42 +1,41 @@
 /* eslint-disable react/no-unstable-nested-components */
-import React, {useEffect} from 'react';
-import {PermissionsAndroid} from 'react-native';
+import React, {useEffect, useState} from 'react';
+import {ActivityIndicator, PermissionsAndroid, View} from 'react-native';
 import 'react-native-get-random-values';
 
 import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {AppProvider, RealmProvider, UserProvider} from '@realm/react';
+import {PowerSyncContext} from '@powersync/react-native';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
-import CustomHeader from './src/Components/Header';
+import {ToastProvider} from 'react-native-toast-notifications';
+import {Session} from '@supabase/supabase-js';
+
 import MyTabs from './src/navigation/MainStack';
+import AIChatScreen from './src/screens/AIChatScreen';
+import AISettingsScreen from './src/screens/AISettingsScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
+import SMSReviewScreen from './src/screens/SMSReviewScreen';
+import ComingSoonScreen from './src/screens/ComingSoonScreen';
 import CategoryManagementScreen from './src/screens/CategoryManagementScreen';
 import ConfirmTransactionsScreen from './src/screens/ConfirmTransactions';
 import CreateBudgetScreen from './src/screens/CreateBudget';
-
-import {ToastProvider} from 'react-native-toast-notifications';
-import {OpenRealmBehaviorType} from 'realm';
 import AddPlannedPaymentScreen from './src/screens/AddPlannedPayment';
 import BudgetDetails from './src/screens/BudgetDetails';
 import CreateRecord from './src/screens/CreateRecord';
 import LoginScreen from './src/screens/LoginScreen';
 import ScheduledPaymentsScreen from './src/screens/PlannedPaymentsScreen';
 import ProfilePage from './src/screens/ProfilePage';
-import {
-  Account,
-  AutoRecord,
-  Budget,
-  BudgetItem,
-  Category,
-  ScheduledPayment,
-  SplitDetail,
-  Subcategory,
-  Subscription,
-  Transaction,
-  Transfer,
-} from './src/tools/Schema';
+
+import {db} from './src/tools/database';
+import {connector} from './src/tools/SupabaseConnector';
+import {supabase} from './src/tools/supabase';
+
 const Stack = createNativeStackNavigator();
 
 function App(): React.JSX.Element {
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+
   const requestSmsPermission = async () => {
     try {
       await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
@@ -47,96 +46,73 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     requestSmsPermission();
+
+    supabase.auth.getSession().then(({data: {session: s}}) => {
+      setSession(s);
+      setLoading(false);
+      if (s) {
+        db.connect(connector);
+      }
+    });
+
+    const {
+      data: {subscription},
+    } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+      if (s) {
+        db.connect(connector);
+      } else {
+        db.disconnect();
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
+  if (loading) {
+    return (
+      <View style={{flex: 1, backgroundColor: '#0A0D10', justifyContent: 'center', alignItems: 'center'}}>
+        <ActivityIndicator color="#22C55E" size="large" />
+      </View>
+    );
+  }
+
   return (
-    <GestureHandlerRootView>
-      <ToastProvider>
-        <NavigationContainer>
-          <AppProvider
-            id="finxai-krgaaei"
-            baseUrl="https://services.cloud.mongodb.com">
-            <UserProvider fallback={<LoginScreen />}>
-              <RealmProvider
-                schemaVersion={0}
-                sync={{
-                  flexible: true,
-                  newRealmFileBehavior: {
-                    type: OpenRealmBehaviorType.DownloadBeforeOpen,
-                  },
-                  existingRealmFileBehavior: {
-                    type: OpenRealmBehaviorType.OpenImmediately,
-                  },
-                  onError: (session, error) => {
-                    // Replace this with a preferred logger in production.
-                    console.error(error);
-                  },
-                  initialSubscriptions: {
-                    update: (subs, realm) => {
-                      subs.add(realm.objects(Account), {
-                        name: 'All accounts',
-                      });
-                    },
-                    rerunOnOpen: true,
-                  },
-                }}
-                schema={[
-                  Account,
-                  Transaction,
-                  Budget,
-                  BudgetItem,
-                  Category,
-                  SplitDetail,
-                  Subcategory,
-                  AutoRecord,
-                  Transfer,
-                  ScheduledPayment,
-                  Subscription,
-                ]}>
-                <Stack.Navigator
-                  screenOptions={({route}) => ({
-                    header: () => (
-                      <CustomHeader showBackButton={route.name !== 'Home'} />
-                    ),
-                  })}>
-                  <Stack.Screen
-                    options={{headerShown: false}}
-                    name="Home"
-                    component={MyTabs}
-                  />
-                  <Stack.Screen name="CreateRecord" component={CreateRecord} />
-                  <Stack.Screen
-                    name="Confirm"
-                    component={ConfirmTransactionsScreen}
-                  />
-                  <Stack.Screen
-                    name="CreateBudget"
-                    component={CreateBudgetScreen}
-                  />
-                  <Stack.Screen
-                    name="BudgetDetails"
-                    component={BudgetDetails}
-                  />
-                  <Stack.Screen
-                    name="ManageCategories"
-                    component={CategoryManagementScreen}
-                  />
-                  <Stack.Screen
-                    name="ScheduledPayment"
-                    component={ScheduledPaymentsScreen}
-                  />
-                  <Stack.Screen
-                    name="AddPlannedPayment"
-                    component={AddPlannedPaymentScreen}
-                  />
-                  <Stack.Screen name="UserProfile" component={ProfilePage} />
-                </Stack.Navigator>
-              </RealmProvider>
-            </UserProvider>
-          </AppProvider>
-        </NavigationContainer>
-      </ToastProvider>
-    </GestureHandlerRootView>
+    <PowerSyncContext.Provider value={db}>
+      <GestureHandlerRootView style={{flex: 1}}>
+        <ToastProvider>
+          <NavigationContainer>
+            {!session ? (
+              <LoginScreen />
+            ) : (
+              <Stack.Navigator
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: {backgroundColor: '#0A0D10'},
+                }}>
+                <Stack.Screen name="Home" component={MyTabs} />
+                <Stack.Screen name="AIChat" component={AIChatScreen} />
+                <Stack.Screen name="AISettings" component={AISettingsScreen} />
+                <Stack.Screen name="SMSReview" component={SMSReviewScreen} />
+                <Stack.Screen name="Notifications" component={NotificationsScreen} />
+                <Stack.Screen name="CreateRecord" component={CreateRecord} />
+                <Stack.Screen name="Confirm" component={ConfirmTransactionsScreen} />
+                <Stack.Screen name="CreateBudget" component={CreateBudgetScreen} />
+                <Stack.Screen name="BudgetDetails" component={BudgetDetails} />
+                <Stack.Screen name="ManageCategories" component={CategoryManagementScreen} />
+                <Stack.Screen name="ScheduledPayment" component={ScheduledPaymentsScreen} />
+                <Stack.Screen name="AddPlannedPayment" component={AddPlannedPaymentScreen} />
+                <Stack.Screen name="UserProfile" component={ProfilePage} />
+                <Stack.Screen name="Debt" component={ComingSoonScreen} />
+                <Stack.Screen name="Shopping" component={ComingSoonScreen} />
+                <Stack.Screen name="Shared" component={ComingSoonScreen} />
+                <Stack.Screen name="Schedule" component={ComingSoonScreen} />
+              </Stack.Navigator>
+            )}
+          </NavigationContainer>
+        </ToastProvider>
+      </GestureHandlerRootView>
+    </PowerSyncContext.Provider>
   );
 }
 

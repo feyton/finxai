@@ -1,6 +1,6 @@
 import {Picker} from '@react-native-picker/picker';
-import {useQuery, useRealm, useUser} from '@realm/react';
-import React, {useEffect, useState} from 'react';
+import {usePowerSync} from '@powersync/react-native';
+import React, {useState} from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -11,93 +11,104 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {BSON} from 'realm';
-import {Budget, Category} from '../tools/Schema';
+import {useCurrentUser} from '../hooks/useCurrentUser';
+import categoriesData from '../tools/data.json';
+
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
 
 interface BudgetItem {
-  category: string;
-  subcategory: string;
+  categoryName: string;
+  subcategoryName: string;
   amount: number;
 }
 
 interface Props {
-  navigation: any; // You should replace 'any' with the appropriate type for navigation
+  navigation: any;
 }
 
 const BudgetScreen: React.FC<Props> = ({navigation}) => {
-  const realm = useRealm();
-  const categories = useQuery(Category);
+  const db = usePowerSync();
+  const {userId} = useCurrentUser();
+  const categories = categoriesData.categories;
 
-  const [name, setName] = useState<string>('');
-  const [event, setEvent] = useState<string>('');
-  const [recurring, setRecurring] = useState<boolean>(false);
-  const [startDate, setStartDate] = useState<string>('');
-  const [endDate, setEndDate] = useState<string>('');
-  const [budgetPeriod, setBudgetPeriod] = useState<string>('Monthly');
+  const [name, setName] = useState('');
+  const [event, setEvent] = useState('');
+  const [recurring, setRecurring] = useState(false);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [budgetPeriod, setBudgetPeriod] = useState('monthly');
   const [items, setItems] = useState<BudgetItem[]>([]);
-  const [budgetAmount, setBudgetAmount] = useState<string>('');
-  const [currentCategory, setCurrentCategory] = useState<string>();
-  const [currentSubcategory, setCurrentSubcategory] = useState<string>();
-  const [currentAmount, setCurrentAmount] = useState<string>('');
+  const [budgetAmount, setBudgetAmount] = useState('');
+  const [currentCategory, setCurrentCategory] = useState('');
+  const [currentSubcategory, setCurrentSubcategory] = useState('');
+  const [currentAmount, setCurrentAmount] = useState('');
+
+  const selectedCategoryData = categories.find(c => c.name === currentCategory);
 
   const addItem = () => {
     if (currentCategory && currentAmount) {
-      const categ = realm.objectForPrimaryKey<Category>(
-        'Category',
-        new BSON.ObjectID(currentCategory),
-      );
-
       setItems([
         ...items,
         {
-          category: categ,
-          subcategory: categ?.subcategories.find(
-            sub => sub._id.toString() === currentSubcategory,
-          ),
+          categoryName: currentCategory,
+          subcategoryName: currentSubcategory,
           amount: parseFloat(currentAmount),
-          _id: new BSON.ObjectID(),
         },
       ]);
-      console.log('here', categ);
-
       setCurrentCategory('');
       setCurrentSubcategory('');
       setCurrentAmount('');
     }
   };
-  const user = useUser();
 
-  const createBudget = () => {
-    if (!name || items.length === 0) {
-      Alert.alert('A budget Needs a name');
+  const createBudget = async () => {
+    if (!name) {
+      Alert.alert('A budget needs a name');
       return;
     }
-    realm.write(() => {
-      realm.create('Budget', {
-        _id: new BSON.ObjectID(),
-        name,
-        amount: parseFloat(budgetAmount),
-        event,
-        recurring,
-        start_date: new Date(startDate),
-        end_date: new Date(endDate),
-        items: items.map(item => ({
-          category: item.category,
-          subcategory: item.subcategory,
-          amount: item.amount,
-        })),
-        shared_with: [],
-        owner_id: user.id,
-      });
-    });
-    navigation.goBack();
+    try {
+      const budgetId = generateUUID();
+      const now = new Date().toISOString();
+      await db.execute(
+        'INSERT INTO budgets (id, name, period, start_date, end_date, amount, recurring, event, shared_with, collaborators, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          budgetId,
+          name,
+          budgetPeriod,
+          startDate || now,
+          endDate || now,
+          parseFloat(budgetAmount) || 0,
+          recurring ? 1 : 0,
+          event,
+          '[]',
+          '[]',
+          userId ?? '',
+          now,
+        ],
+      );
+      for (const item of items) {
+        await db.execute(
+          'INSERT INTO budget_items (id, budget_id, category, subcategory, amount, owner_id) VALUES (?, ?, ?, ?, ?, ?)',
+          [
+            generateUUID(),
+            budgetId,
+            item.categoryName,
+            item.subcategoryName,
+            item.amount,
+            userId ?? '',
+          ],
+        );
+      }
+      navigation.goBack();
+    } catch (err: any) {
+      Alert.alert('Error creating budget: ' + err.message);
+    }
   };
-  useEffect(() => {
-    realm.subscriptions.update(mutableSubs => {
-      mutableSubs.add(realm.objects(Budget));
-      mutableSubs.add(realm.objects(Category));
-    });
-  }, []);
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior="padding">
@@ -123,7 +134,7 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
         <View style={styles.pickerContainer}>
           <Picker
             selectedValue={budgetPeriod}
-            onValueChange={itemValue => setBudgetPeriod(itemValue)}
+            onValueChange={setBudgetPeriod}
             style={styles.picker}>
             <Picker.Item label="Monthly" value="monthly" />
             <Picker.Item label="Weekly" value="weekly" />
@@ -140,7 +151,7 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
         <View style={styles.pickerContainer}>
           <Picker
             selectedValue={recurring}
-            onValueChange={itemValue => setRecurring(itemValue)}
+            onValueChange={setRecurring}
             style={styles.picker}>
             <Picker.Item label="One-time Event" value={false} />
             <Picker.Item label="Recurring Budget" value={true} />
@@ -160,50 +171,50 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
           onChangeText={setEndDate}
           style={styles.input}
         />
+
         {items.length > 0 && (
           <>
-            {items.map((item: any) => (
-              <View style={styles.budgetItem} key={item?._id.toString()}>
+            {items.map((item, i) => (
+              <View style={styles.budgetItem} key={i}>
                 <Text style={styles.budgetItemText}>
-                  {item.category.name} -{' '}
-                  {item.subcategory?.name || 'No Subcategory'}: ${item.amount}
+                  {item.categoryName} —{' '}
+                  {item.subcategoryName || 'No Subcategory'}: {item.amount}
                 </Text>
               </View>
             ))}
           </>
         )}
+
         <View style={styles.budgetItemContainer}>
           <View style={styles.pickerContainer}>
             <Picker
               selectedValue={currentCategory}
-              onValueChange={itemValue => setCurrentCategory(itemValue)}
+              onValueChange={setCurrentCategory}
               style={styles.picker}>
               <Picker.Item label="Select Category" value="" />
-              {categories.map(cat => (
+              {categories.map((cat, i) => (
                 <Picker.Item
-                  key={cat._id.toString()}
-                  label={cat.name}
-                  value={cat._id.toString()}
+                  key={i}
+                  label={`${cat.icon} ${cat.name}`}
+                  value={cat.name}
                 />
               ))}
             </Picker>
           </View>
-          {currentCategory && (
+          {selectedCategoryData && selectedCategoryData.subcategories.length > 0 && (
             <View style={styles.pickerContainer}>
               <Picker
                 selectedValue={currentSubcategory}
-                onValueChange={itemValue => setCurrentSubcategory(itemValue)}
+                onValueChange={setCurrentSubcategory}
                 style={styles.picker}>
                 <Picker.Item label="Select Subcategory" value="" />
-                {categories
-                  .find((cat: any) => cat._id.toString() === currentCategory)
-                  ?.subcategories.map((subcat: any) => (
-                    <Picker.Item
-                      key={subcat._id.toString()}
-                      label={subcat.name}
-                      value={subcat._id.toString()}
-                    />
-                  ))}
+                {selectedCategoryData.subcategories.map((sub, i) => (
+                  <Picker.Item
+                    key={i}
+                    label={`${sub.icon} ${sub.name}`}
+                    value={sub.name}
+                  />
+                ))}
               </Picker>
             </View>
           )}
@@ -229,19 +240,9 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#121212',
-  },
-  scrollContainer: {
-    padding: 16,
-  },
-  header: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 16,
-  },
+  container: {flex: 1, backgroundColor: '#121212'},
+  scrollContainer: {padding: 16},
+  header: {fontSize: 24, fontWeight: 'bold', color: '#fff', marginBottom: 16},
   input: {
     borderWidth: 1,
     padding: 12,
@@ -256,21 +257,15 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginVertical: 8,
   },
-  picker: {
-    color: '#fff',
-  },
-  budgetItemContainer: {
-    marginVertical: 8,
-  },
+  picker: {color: '#fff'},
+  budgetItemContainer: {marginVertical: 8},
   budgetItem: {
     padding: 12,
     marginVertical: 4,
     backgroundColor: '#333',
     borderRadius: 10,
   },
-  budgetItemText: {
-    color: '#fff',
-  },
+  budgetItemText: {color: '#fff'},
   addButton: {
     backgroundColor: '#1E90FF',
     padding: 12,
@@ -278,10 +273,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginVertical: 8,
   },
-  addButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
+  addButtonText: {color: '#fff', fontWeight: 'bold'},
   saveButton: {
     backgroundColor: '#1E90FF',
     padding: 16,
@@ -289,11 +281,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginVertical: 16,
   },
-  saveButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 18,
-  },
+  saveButtonText: {color: '#fff', fontWeight: 'bold', fontSize: 18},
 });
 
 export default BudgetScreen;

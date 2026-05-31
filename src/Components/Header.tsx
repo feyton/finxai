@@ -1,9 +1,9 @@
 import {useNavigation, useRoute} from '@react-navigation/native';
-import {useUser} from '@realm/react';
 import React from 'react';
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {Circle, Path, Svg} from 'react-native-svg';
 import {COLORS} from '../assets/images';
+import {useCurrentUser} from '../hooks/useCurrentUser';
 
 interface HeaderProps {
   showBackButton?: boolean;
@@ -21,8 +21,7 @@ const CustomHeader: React.FC<HeaderProps> = ({
   showBackButton,
   goName = null,
 }) => {
-  const userData: any = useUser();
-  const user: Profile = userData?.profile;
+  const {firstName, picture} = useCurrentUser();
   const navigation: any = useNavigation();
   const route: any = useRoute();
 
@@ -64,7 +63,7 @@ const CustomHeader: React.FC<HeaderProps> = ({
         ) : (
           <View style={styles.welcomeContainer}>
             <Text style={styles.hello}>Hello</Text>
-            <Text style={styles.name}>{user?.first_name}</Text>
+            <Text style={styles.name}>{firstName}</Text>
           </View>
         )}
       </View>
@@ -81,7 +80,10 @@ const CustomHeader: React.FC<HeaderProps> = ({
           </Svg>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('UserProfile')}>
-          <Image source={{uri: user?.picture}} style={styles.profileImage} />
+          <Image
+            source={{uri: picture ?? undefined}}
+            style={styles.profileImage}
+          />
         </TouchableOpacity>
       </View>
     </View>

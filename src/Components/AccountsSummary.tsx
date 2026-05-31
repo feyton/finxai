@@ -1,41 +1,36 @@
 /* eslint-disable react-native/no-inline-styles */
-import {useQuery} from '@realm/react';
+import {useQuery} from '@powersync/react-native';
 import {startOfMonth} from 'date-fns';
-import React, {useMemo} from 'react';
+import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {Path, Svg} from 'react-native-svg';
-import {Account, Transaction} from '../tools/Schema';
+import {useCurrentUser} from '../hooks/useCurrentUser';
 
 function Summary() {
-  const accounts = useQuery(Account);
-  const transactions = useQuery<any>(Transaction);
+  const {userId} = useCurrentUser();
+  const monthStart = startOfMonth(new Date()).toISOString();
 
-  const today = new Date();
-  const currentMonthStart = startOfMonth(today);
+  const {data: balanceRows} = useQuery<{total: number}>(
+    'SELECT COALESCE(SUM(available_balance), 0) as total FROM accounts WHERE owner_id = ?',
+    [userId ?? ''],
+  );
+  const {data: incomeRows} = useQuery<{total: number}>(
+    "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE owner_id = ? AND transaction_type = 'income' AND date_time >= ?",
+    [userId ?? '', monthStart],
+  );
+  const {data: expenseRows} = useQuery<{total: number}>(
+    "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE owner_id = ? AND transaction_type = 'expense' AND date_time >= ?",
+    [userId ?? '', monthStart],
+  );
 
-  const summary = useMemo(() => {
-    const totalAvailable = accounts.sum('available_balance');
-    const totalExpense = transactions
-      .filtered(
-        'transaction_type == "expense" AND date_time > $0',
-        currentMonthStart,
-      )
-      .sum('amount');
-    const totalIncome = transactions
-      .filtered(
-        'transaction_type == "income" AND date_time > $0',
-        currentMonthStart,
-      )
-      .sum('amount');
-
-    return {totalAvailable, totalIncome, totalExpense};
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accounts, transactions]);
+  const totalAvailable = balanceRows?.[0]?.total ?? 0;
+  const totalIncome = incomeRows?.[0]?.total ?? 0;
+  const totalExpense = expenseRows?.[0]?.total ?? 0;
 
   return (
     <View style={styles.container}>
       <Text style={styles.totalText}>
-        RWF: {summary.totalAvailable.toLocaleString()}
+        RWF: {Number(totalAvailable).toLocaleString()}
       </Text>
       <View style={{flexDirection: 'row', gap: 30}}>
         <View style={{flexDirection: 'row', gap: 2, alignItems: 'center'}}>
@@ -46,8 +41,8 @@ function Summary() {
               fill="#737886"
             />
             <Path
-              fill-rule="evenodd"
-              clip-rule="evenodd"
+              fillRule="evenodd"
+              clipRule="evenodd"
               d="M2 14C2 11.1997 2 9.79961 2.54497 8.73005C3.02433 7.78924 3.78924 7.02433 4.73005 6.54497C5.79961 6 7.19974 6 10 6H14C16.8003 6 18.2004 6 19.27 6.54497C20.2108 7.02433 20.9757 7.78924 21.455 8.73005C22 9.79961 22 11.1997 22 14C22 16.8003 22 18.2004 21.455 19.27C20.9757 20.2108 20.2108 20.9757 19.27 21.455C18.2004 22 16.8003 22 14 22H10C7.19974 22 5.79961 22 4.73005 21.455C3.78924 20.9757 3.02433 20.2108 2.54497 19.27C2 18.2004 2 16.8003 2 14ZM12.5303 10.4697C12.3897 10.329 12.1989 10.25 12 10.25C11.8011 10.25 11.6103 10.329 11.4697 10.4697L8.96967 12.9697C8.67678 13.2626 8.67678 13.7374 8.96967 14.0303C9.26256 14.3232 9.73744 14.3232 10.0303 14.0303L11.25 12.8107V17C11.25 17.4142 11.5858 17.75 12 17.75C12.4142 17.75 12.75 17.4142 12.75 17V12.8107L13.9697 14.0303C14.2626 14.3232 14.7374 14.3232 15.0303 14.0303C15.3232 13.7374 15.3232 13.2626 15.0303 12.9697L12.5303 10.4697Z"
               fill="green"
             />
@@ -60,7 +55,7 @@ function Summary() {
                 marginBottom: -8,
                 color: 'green',
               }}>
-              {summary.totalIncome.toLocaleString()}
+              {Number(totalIncome).toLocaleString()}
             </Text>
             <Text
               style={{
@@ -81,8 +76,8 @@ function Summary() {
               fill="#cfbbba"
             />
             <Path
-              fill-rule="evenodd"
-              clip-rule="evenodd"
+              fillRule="evenodd"
+              clipRule="evenodd"
               d="M2 14C2 11.1997 2 9.79961 2.54497 8.73005C3.02433 7.78924 3.78924 7.02433 4.73005 6.54497C5.79961 6 7.19974 6 10 6H14C16.8003 6 18.2004 6 19.27 6.54497C20.2108 7.02433 20.9757 7.78924 21.455 8.73005C22 9.79961 22 11.1997 22 14C22 16.8003 22 18.2004 21.455 19.27C20.9757 20.2108 20.2108 20.9757 19.27 21.455C18.2004 22 16.8003 22 14 22H10C7.19974 22 5.79961 22 4.73005 21.455C3.78924 20.9757 3.02433 20.2108 2.54497 19.27C2 18.2004 2 16.8003 2 14ZM12.75 11C12.75 10.5858 12.4142 10.25 12 10.25C11.5858 10.25 11.25 10.5858 11.25 11V15.1893L10.0303 13.9697C9.73744 13.6768 9.26256 13.6768 8.96967 13.9697C8.67678 14.2626 8.67678 14.7374 8.96967 15.0303L11.4697 17.5303C11.6103 17.671 11.8011 17.75 12 17.75C12.1989 17.75 12.3897 17.671 12.5303 17.5303L15.0303 15.0303C15.3232 14.7374 15.3232 14.2626 15.0303 13.9697C14.7374 13.6768 14.2626 13.6768 13.9697 13.9697L12.75 15.1893V11Z"
               fill="red"
             />
@@ -95,7 +90,7 @@ function Summary() {
                 marginBottom: -8,
                 color: 'red',
               }}>
-              {summary.totalExpense.toLocaleString()}
+              {Number(totalExpense).toLocaleString()}
             </Text>
             <Text
               style={{

@@ -1,6 +1,5 @@
 /* eslint-disable react-native/no-inline-styles */
 import {GoogleSignin} from '@react-native-google-signin/google-signin';
-import {useAuth, useUser} from '@realm/react';
 import React from 'react';
 import {
   Image,
@@ -10,22 +9,19 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import {COLORS, FONTS} from '../assets/images';
-import { Profile } from '../Components/Header';
+import {useCurrentUser} from '../hooks/useCurrentUser';
+import {supabase} from '../tools/supabase';
 
 const ProfilePage = () => {
   const coverPhoto =
     'https://www.blackpast.org/wp-content/uploads/prodimages/files/Kigali_Convention_Centre_December_1_2018_Courtesy_Raddison__CC_BY-SA_40.jpg';
-  const user:any = useUser();
-  const userData:Profile = user.profile;
-  const {logOut} = useAuth();
-  const performLogout = () => {
-    GoogleSignin.configure({
-      offlineAccess: true,
-      webClientId:
-        '560260143969-6nqjnkc3juvn8p7177bl3k69csnfifm1.apps.googleusercontent.com',
-    });
-    GoogleSignin.signOut();
-    logOut();
+  const {name, email, picture} = useCurrentUser();
+
+  const performLogout = async () => {
+    try {
+      await GoogleSignin.signOut();
+    } catch {}
+    await supabase.auth.signOut();
   };
 
   const {width} = useWindowDimensions();
@@ -46,7 +42,7 @@ const ProfilePage = () => {
             borderRadius: 10,
             overflow: 'hidden',
           }}>
-          <Image source={{uri: userData?.picture}} height={100} width={100} />
+          <Image source={{uri: picture ?? undefined}} height={100} width={100} />
         </View>
       </View>
       <View style={{paddingHorizontal: 20, marginTop: 100}}>
@@ -56,12 +52,11 @@ const ProfilePage = () => {
             fontFamily: FONTS.bold,
             color: 'white',
           }}>
-          {userData?.name}
+          {name}
         </Text>
-
         <Text
           style={{fontSize: 16, color: 'white', fontFamily: 'Poppins-Medium'}}>
-          {userData?.email}
+          {email}
         </Text>
       </View>
       <TouchableOpacity

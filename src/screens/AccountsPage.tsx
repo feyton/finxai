@@ -1,9 +1,8 @@
 /* eslint-disable react-native/no-inline-styles */
-import {useQuery, useRealm} from '@realm/react';
+import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useCallback, useState} from 'react';
 
 import Clipboard from '@react-native-clipboard/clipboard';
-import {styled} from 'nativewind';
 import {
   FlatList,
   Image,
@@ -15,30 +14,31 @@ import {
   View,
 } from 'react-native';
 import {Path, Svg} from 'react-native-svg';
-import {Account, Transaction} from '../tools/Schema';
+import {useCurrentUser} from '../hooks/useCurrentUser';
 
 interface Props {
   navigation: any;
 }
 
-
-
 const AccountsPage: React.FC<Props> = ({navigation}) => {
   const [modalVisible, setModalVisible] = useState(false);
-  const [selectedAccount, setSelectedAccount] = useState(null);
-  const realm = useRealm();
-  const accounts = useQuery(Account);
+  const [selectedAccount, setSelectedAccount] = useState<any>(null);
+  const db = usePowerSync();
+  const {userId} = useCurrentUser();
+  const {data: accounts} = useQuery(
+    'SELECT * FROM accounts WHERE owner_id = ? ORDER BY created_at DESC',
+    [userId ?? ''],
+  );
 
-  const deleteAccount = useCallback(() => {
-    realm.write(() => {
-      const transactionsToDelete = realm
-        .objects(Transaction)
-        .filtered('account == $0', selectedAccount);
-      realm.delete(transactionsToDelete);
-      realm.delete(selectedAccount);
-    });
+  const deleteAccount = useCallback(async () => {
+    if (!selectedAccount) {return;}
+    await db.execute('DELETE FROM transactions WHERE account_id = ?', [
+      selectedAccount.id,
+    ]);
+    await db.execute('DELETE FROM accounts WHERE id = ?', [selectedAccount.id]);
     setModalVisible(false);
-  }, [realm, selectedAccount]);
+    setSelectedAccount(null);
+  }, [db, selectedAccount]);
 
   const handleLongPress = useCallback((account: any) => {
     setSelectedAccount(account);
@@ -47,7 +47,7 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
 
   const handlePress = useCallback(
     (account: any) => {
-      navigation.navigate('AccountDetails', {accountId: account._id});
+      navigation.navigate('AccountDetails', {accountId: account.id});
     },
     [navigation],
   );
@@ -55,7 +55,7 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
   const renderAccount = useCallback(
     ({item: account}: any) => (
       <TouchableOpacity
-        key={account._id.toString()}
+        key={account.id}
         style={styles.card}
         onPress={() => handlePress(account)}
         onLongPress={() => handleLongPress(account)}>
@@ -88,7 +88,7 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
                   fontSize: 16,
                   color: 'black',
                 }}>
-                RWF: {account.available_balance}
+                RWF: {Number(account.available_balance).toLocaleString()}
               </Text>
             </View>
             <View style={{marginTop: 40, flexDirection: 'row', gap: 3}}>
@@ -135,6 +135,7 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
     ),
     [handlePress, handleLongPress],
   );
+
   return (
     <View style={styles.container}>
       <View>
@@ -151,7 +152,7 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
           horizontal
           data={accounts}
           renderItem={renderAccount}
-          keyExtractor={account => account._id.toString()}
+          keyExtractor={account => account.id}
           showsHorizontalScrollIndicator={false}
         />
       </View>
@@ -212,8 +213,8 @@ const AccountsPage: React.FC<Props> = ({navigation}) => {
         onPress={() => navigation.navigate('CreateAccount')}>
         <Svg width="50px" height="50px" viewBox="0 0 24 24" fill="white">
           <Path
-            fill-rule="evenodd"
-            clip-rule="evenodd"
+            fillRule="evenodd"
+            clipRule="evenodd"
             d="M13 9C13 8.44772 12.5523 8 12 8C11.4477 8 11 8.44772 11 9V11H9C8.44772 11 8 11.4477 8 12C8 12.5523 8.44772 13 9 13H11V15C11 15.5523 11.4477 16 12 16C12.5523 16 13 15.5523 13 15V13H15C15.5523 13 16 12.5523 16 12C16 11.4477 15.5523 11 15 11H13V9ZM7.25007 2.38782C8.54878 2.0992 10.1243 2 12 2C13.8757 2 15.4512 2.0992 16.7499 2.38782C18.06 2.67897 19.1488 3.176 19.9864 4.01358C20.824 4.85116 21.321 5.94002 21.6122 7.25007C21.9008 8.54878 22 10.1243 22 12C22 13.8757 21.9008 15.4512 21.6122 16.7499C21.321 18.06 20.824 19.1488 19.9864 19.9864C19.1488 20.824 18.06 21.321 16.7499 21.6122C15.4512 21.9008 13.8757 22 12 22C10.1243 22 8.54878 21.9008 7.25007 21.6122C5.94002 21.321 4.85116 20.824 4.01358 19.9864C3.176 19.1488 2.67897 18.06 2.38782 16.7499C2.0992 15.4512 2 13.8757 2 12C2 10.1243 2.0992 8.54878 2.38782 7.25007C2.67897 5.94002 3.176 4.85116 4.01358 4.01358C4.85116 3.176 5.94002 2.67897 7.25007 2.38782Z"
             fill="#0cb5e9fb"
           />
@@ -230,10 +231,6 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   card: {},
-  cardText: {
-    fontSize: 16,
-    marginBottom: 5,
-  },
   centeredView: {
     flex: 1,
     justifyContent: 'center',
@@ -247,10 +244,7 @@ const styles = StyleSheet.create({
     padding: 35,
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: {width: 0, height: 2},
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 5,

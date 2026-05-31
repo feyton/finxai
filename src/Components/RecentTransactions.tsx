@@ -1,19 +1,21 @@
-import {useQuery} from '@realm/react';
+import {useQuery} from '@powersync/react-native';
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import TransactionItem from '../Components/Transaction';
-import {Transaction} from '../tools/Schema';
+import {useCurrentUser} from '../hooks/useCurrentUser';
 
 function RecentTransactions() {
-  const transactions = useQuery(Transaction)
-    .sorted('date_time', true) // Sort by date_time in descending order
-    .slice(0, 5); // Get the top 5 recent transactions
+  const {userId} = useCurrentUser();
+  const {data: transactions} = useQuery(
+    'SELECT t.*, a.name as account_name, a.logo as account_logo FROM transactions t LEFT JOIN accounts a ON t.account_id = a.id WHERE t.owner_id = ? ORDER BY t.date_time DESC LIMIT 5',
+    [userId ?? ''],
+  );
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Recent Transactions</Text>
       {transactions.map((transaction: any) => (
-        <TransactionItem key={transaction._id} transaction={transaction} />
+        <TransactionItem key={transaction.id} transaction={transaction} />
       ))}
     </View>
   );
@@ -29,18 +31,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginBottom: 10,
     fontFamily: 'Poppins-Bold',
-  },
-  transactionItem: {
-    backgroundColor: '#004',
-    padding: 16,
-    marginBottom: 10,
-    borderRadius: 4,
-  },
-  noTransactions: {
-    color: '#fff',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    padding: 16,
   },
 });
 

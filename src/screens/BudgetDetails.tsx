@@ -1,56 +1,68 @@
-import {useObject, useRealm, useUser} from '@realm/react';
-import React, {useEffect} from 'react';
+import {useQuery} from '@powersync/react-native';
+import React from 'react';
 import {Text, View} from 'react-native';
-import {TouchableOpacity} from 'react-native-gesture-handler';
-import {BSON} from 'realm';
 import {COLORS, FONTS} from '../assets/images';
-import {Budget} from '../tools/Schema';
+import {useCurrentUser} from '../hooks/useCurrentUser';
 
 const BudgetDetails = ({route}: any) => {
   const {budgetId} = route.params;
-  const realm = useRealm();
-  const budget = useObject<Budget>(Budget, new BSON.ObjectID(budgetId));
-  console.log(budget);
+  const {userId} = useCurrentUser();
 
-  const user = useUser();
-  const handleShare = async () => {
-    const userFound = await user.callFunction(
-      'findUser',
-      'tumbafabruce@gmail.com',
-    );
-    console.log(userFound);
-  };
+  const {data: budgets} = useQuery(
+    'SELECT * FROM budgets WHERE id = ? AND owner_id = ?',
+    [budgetId, userId ?? ''],
+  );
+  const {data: items} = useQuery(
+    'SELECT * FROM budget_items WHERE budget_id = ? AND owner_id = ?',
+    [budgetId, userId ?? ''],
+  );
 
-  useEffect(() => {
-    realm.subscriptions.update(mutableSubs => {
-      mutableSubs.add(realm.objects(Budget));
-    });
-  }, []);
+  const budget = budgets?.[0];
+
   if (!budget) {
     return (
-      <View>
-        <Text>Budget not found</Text>
+      <View style={{flex: 1, backgroundColor: COLORS.bgPrimary, padding: 20}}>
+        <Text style={{color: 'white'}}>Budget not found</Text>
       </View>
     );
   }
+
   return (
     <View style={{backgroundColor: COLORS.bgPrimary, flex: 1, padding: 20}}>
-      <Text>BudgetDetails</Text>
-      <Text>{budget.name}</Text>
-      {budget.items.map(item => (
-        <View key={item?._id.toString()}>
-          <Text>
-            {item.category.name} - {item.subcategory?.name || 'No Subcategory'}:
-            ${item.amount}
+      <Text style={{color: 'white', fontFamily: FONTS.bold, fontSize: 20}}>
+        {budget.name}
+      </Text>
+      <Text style={{color: 'white', fontFamily: FONTS.regular}}>
+        Period: {budget.period}
+      </Text>
+      <Text style={{color: 'white', fontFamily: FONTS.regular}}>
+        Total: RWF {Number(budget.amount || 0).toLocaleString()}
+      </Text>
+      <Text
+        style={{
+          color: 'white',
+          fontFamily: FONTS.bold,
+          marginTop: 16,
+          marginBottom: 8,
+        }}>
+        Budget Items
+      </Text>
+      {items.map((item: any) => (
+        <View
+          key={item.id}
+          style={{
+            backgroundColor: COLORS.bgSecondary,
+            padding: 10,
+            borderRadius: 8,
+            marginBottom: 6,
+          }}>
+          <Text style={{color: 'white', fontFamily: FONTS.regular}}>
+            {item.category}
+            {item.subcategory ? ` — ${item.subcategory}` : ''}: RWF{' '}
+            {Number(item.amount).toLocaleString()}
           </Text>
         </View>
       ))}
-
-      <TouchableOpacity
-        style={{fontFamily: FONTS.primary}}
-        onPress={handleShare}>
-        <Text>Share</Text>
-      </TouchableOpacity>
     </View>
   );
 };

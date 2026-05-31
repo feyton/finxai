@@ -1,95 +1,96 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable react-native/no-inline-styles */
-
 import {Picker} from '@react-native-picker/picker';
-import {useQuery, useRealm, useUser} from '@realm/react';
-import React, {useEffect, useState} from 'react';
+import {useQuery, usePowerSync} from '@powersync/react-native';
+import React, {useState} from 'react';
 import {Button, StyleSheet, View} from 'react-native';
 import DatePicker from 'react-native-date-picker';
 import {ScrollView} from 'react-native-gesture-handler';
-import {BSON} from 'realm';
 import FloatingLabelInputRegular from '../Components/FloatingInputRegular';
 import {COLORS} from '../assets/images';
-import {Account, ScheduledPayment} from '../tools/Schema';
-const AddPlannedPaymentScreen = ({navigation}) => {
-  const realm = useRealm();
-  const user = useUser();
+import {useCurrentUser} from '../hooks/useCurrentUser';
+
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+const AddPlannedPaymentScreen = ({navigation}: any) => {
+  const db = usePowerSync();
+  const {userId} = useCurrentUser();
+  const {data: accounts} = useQuery(
+    'SELECT * FROM accounts WHERE owner_id = ? ORDER BY name',
+    [userId ?? ''],
+  );
 
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [payee, setPayee] = useState('');
-  const [account, setAccount] = useState();
+  const [accountId, setAccountId] = useState('');
   const [note, setNote] = useState('');
   const [type, setType] = useState('expense');
   const [frequency, setFrequency] = useState('monthly');
   const [date, setDate] = useState(new Date());
   const [open, setOpen] = useState(false);
-  const accounts = useQuery(Account);
 
-  const addScheduledPayment = () => {
-    let accountToAdd: any;
-    if (account !== '') {
-      accountToAdd = realm.objectForPrimaryKey(
-        'Account',
-        new BSON.ObjectID(account),
+  const addScheduledPayment = async () => {
+    try {
+      const now = new Date().toISOString();
+      await db.execute(
+        'INSERT INTO scheduled_payments (id, name, amount, account_id, payee, frequency, transaction_type, start_date, next_reminder_date, is_recurring, note, labels, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          generateUUID(),
+          name,
+          parseFloat(amount) || 0,
+          accountId || null,
+          payee,
+          frequency,
+          type,
+          date.toISOString(),
+          date.toISOString(),
+          1,
+          note,
+          '[]',
+          userId ?? '',
+          now,
+        ],
       );
+      navigation.goBack();
+    } catch (err: any) {
+      console.error('Error adding scheduled payment:', err);
     }
-
-    realm.write(() => {
-      realm.create('ScheduledPayment', {
-        name,
-        amount: parseFloat(amount),
-        frequency: frequency,
-        startDate: new Date(date),
-        nextReminderDate: new Date(date),
-        payee: payee,
-        note: note,
-        account: accountToAdd,
-        _id: new BSON.ObjectID(),
-        transaction_type: type,
-        owner_id: user.id,
-      });
-    });
-    navigation.goBack();
   };
-  useEffect(() => {
-    realm.subscriptions.update(mutableSubs => {
-      mutableSubs.add(realm.objects(ScheduledPayment));
-    });
-  }, []);
 
   return (
     <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
       <View style={{padding: 20, backgroundColor: COLORS.bgPrimary, flex: 1}}>
         <FloatingLabelInputRegular
           value={name}
-          onChangeText={value => setName(value)}
+          onChangeText={setName}
           label="Name"
           name="name"
         />
         <FloatingLabelInputRegular
           value={amount}
-          onChangeText={value => setAmount(value)}
+          onChangeText={setAmount}
           label="Amount"
           name="amount"
         />
         <View style={styles.pickerContainer}>
           <Picker
             style={styles.picker}
-            selectedValue={account}
-            onValueChange={value => setAccount(value)}>
+            selectedValue={accountId}
+            onValueChange={setAccountId}>
             <Picker.Item label={'Select account'} value={''} />
-            {accounts.map((account: any) => (
-              <Picker.Item
-                key={account._id.toString()}
-                label={account.name}
-                value={account._id.toString()}
-              />
+            {accounts.map((acc: any) => (
+              <Picker.Item key={acc.id} label={acc.name} value={acc.id} />
             ))}
           </Picker>
         </View>
         <View style={styles.pickerContainer}>
-          <Picker selectedValue={type} onValueChange={value => setType(value)}>
+          <Picker selectedValue={type} onValueChange={setType}>
             <Picker.Item label={'Income'} value={'income'} />
             <Picker.Item label={'Expense'} value={'expense'} />
           </Picker>
@@ -97,12 +98,10 @@ const AddPlannedPaymentScreen = ({navigation}) => {
         <FloatingLabelInputRegular
           label="Payee"
           value={payee}
-          onChangeText={value => setPayee(value)}
+          onChangeText={setPayee}
           name="payee"
         />
-        <Picker
-          selectedValue={frequency}
-          onValueChange={value => setFrequency(value)}>
+        <Picker selectedValue={frequency} onValueChange={setFrequency}>
           <Picker.Item label="Daily" value="daily" />
           <Picker.Item label="Weekly" value="weekly" />
           <Picker.Item label="Monthly" value="monthly" />
@@ -114,18 +113,16 @@ const AddPlannedPaymentScreen = ({navigation}) => {
           mode="date"
           open={open}
           date={date}
-          onConfirm={date => {
+          onConfirm={d => {
             setOpen(false);
-            setDate(date);
+            setDate(d);
           }}
-          onCancel={() => {
-            setOpen(false);
-          }}
+          onCancel={() => setOpen(false)}
         />
         <FloatingLabelInputRegular
           label="Note"
           value={note}
-          onChangeText={value => setNote(value)}
+          onChangeText={setNote}
           name="note"
         />
         <Button title="Add Scheduled Payment" onPress={addScheduledPayment} />
@@ -137,72 +134,15 @@ const AddPlannedPaymentScreen = ({navigation}) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
     backgroundColor: '#1d2027',
-    paddingBottom: 20,
-  },
-  title: {
-    color: 'white',
-    fontSize: 20,
-    marginBottom: 16,
-    fontFamily: 'Poppins-Bold',
-  },
-  transactionItem: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ccc',
-  },
-  sheetContent: {
-    backgroundColor: COLORS.bgSecondary,
-    paddingHorizontal: 16,
-  },
-  sheetTitle: {
-    color: 'white',
-    fontSize: 18,
-    marginBottom: 10,
-    fontFamily: 'Poppins-Bold',
-    textAlign: 'center',
-  },
-  scrollViewContent: {
-    flexGrow: 1,
-    paddingBottom: 50,
-  },
-
-  sms: {
-    fontSize: 11,
-    marginBottom: 16,
-    color: 'white',
-    fontFamily: 'Poppins-Light',
-    textAlign: 'justify',
-    borderRadius: 10,
-    borderColor: 'gray',
-    borderWidth: 1,
-    padding: 5,
-  },
-  input: {
-    height: 40,
-    borderColor: 'gray',
-    borderWidth: 1,
-    marginBottom: 16,
-    padding: 8,
-    color: 'white',
-  },
-  sheetHandle: {
-    color: 'white',
-    backgroundColor: 'white',
-  },
-  splitDetailContainer: {
-    marginBottom: 16,
   },
   pickerContainer: {
     borderWidth: 1,
     borderColor: '#bdb7b7',
     borderRadius: 10,
     marginVertical: 8,
-    fontFamily: 'Poppins-Regular',
     paddingHorizontal: 10,
   },
-
   picker: {
     color: '#ffffff',
     fontFamily: 'Poppins-Regular',
