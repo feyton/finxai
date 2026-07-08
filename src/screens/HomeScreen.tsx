@@ -3,12 +3,12 @@ import React, {useMemo} from 'react';
 import {
   FlatList,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {T, FONTS, R, resolveCat, accountTint, accountIcon, fmtAmount} from '../theme';
 import {Avatar, Card, CatChip, Icon, Money, Pill, SectionHeader} from '../Components/ui';
 import SMSRetriever from '../Components/SMSRetriever';
@@ -102,7 +102,7 @@ export default function HomeScreen({navigation}: any) {
   };
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView style={styles.root} edges={['top']}>
       <SMSRetriever />
       <ScrollView
         showsVerticalScrollIndicator={false}

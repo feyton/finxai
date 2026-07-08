@@ -2,6 +2,7 @@
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {T, FONTS} from '../theme';
 import {Icon} from '../Components/ui';
 import BudgetScreen from '../screens/BudgetScreen';
@@ -11,13 +12,20 @@ import AccountScreenStack from './AccountNavigationStack';
 
 const Tab = createBottomTabNavigator();
 
+const TAB_HEIGHT = 68;
+
 function AiFab({onPress}: {onPress?: () => void}) {
   return (
-    <Pressable
-      onPress={onPress}
-      style={({pressed}) => [styles.aiFab, {transform: [{scale: pressed ? 0.94 : 1}]}]}>
-      <Icon name="Sparkles" size={24} color={T.accentInk} strokeWidth={2.2} />
-    </Pressable>
+    <View style={styles.aiFabSlot}>
+      <Pressable
+        onPress={onPress}
+        style={({pressed}) => [
+          styles.aiFab,
+          {transform: [{scale: pressed ? 0.93 : 1}]},
+        ]}>
+        <Icon name="Sparkles" size={23} color={T.accentInk} strokeWidth={2.2} />
+      </Pressable>
+    </View>
   );
 }
 
@@ -32,19 +40,28 @@ function TabIcon({
 }) {
   const color = focused ? T.accent : T.text3;
   return (
-    <View style={styles.iconContainer}>
-      <Icon name={name} size={21} color={color} strokeWidth={focused ? 2.4 : 1.9} />
-      <Text style={[styles.label, {color}]}>{label}</Text>
+    <View style={styles.tabItem}>
+      <Icon name={name} size={22} color={color} strokeWidth={focused ? 2.4 : 1.9} />
+      <Text style={[styles.tabLabel, {color}]} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
   );
 }
 
-function MainStack() {
+export default function MainStack() {
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       initialRouteName="HomePage"
       screenOptions={{
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: [
+          styles.tabBar,
+          {
+            height: TAB_HEIGHT + insets.bottom,
+            paddingBottom: insets.bottom,
+          },
+        ],
         tabBarShowLabel: false,
         headerShown: false,
         tabBarHideOnKeyboard: true,
@@ -69,7 +86,7 @@ function MainStack() {
       />
       <Tab.Screen
         name="AITab"
-        component={HomeScreen} // dummy — navigation intercepts tabPress
+        component={HomeScreen}
         listeners={({navigation}) => ({
           tabPress: e => {
             e.preventDefault();
@@ -77,7 +94,9 @@ function MainStack() {
           },
         })}
         options={{
-          tabBarButton: ({onPress}) => <AiFab onPress={onPress as () => void} />,
+          tabBarButton: ({onPress}) => (
+            <AiFab onPress={onPress as () => void} />
+          ),
         }}
       />
       <Tab.Screen
@@ -104,42 +123,52 @@ function MainStack() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    backgroundColor: 'rgba(13,17,21,0.95)',
-    borderTopWidth: 1,
-    borderTopColor: T.border,
-    height: 64,
+    backgroundColor: '#0D1115',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.10)',
+    // overflow visible is required so the floating FAB isn't clipped
+    overflow: 'visible',
+    elevation: 16,
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    elevation: 0,
   },
-  iconContainer: {
+  tabItem: {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 3,
-    paddingVertical: 4,
+    paddingTop: 8,
+    minWidth: 64,
   },
-  label: {
+  tabLabel: {
     fontFamily: FONTS.medium,
-    fontSize: 10,
+    fontSize: 10.5,
+    lineHeight: 14,
+  },
+  aiFabSlot: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
   },
   aiFab: {
-    width: 52,
-    height: 52,
+    width: 54,
+    height: 54,
     borderRadius: 18,
-    marginBottom: 22,
-    backgroundColor: T.accent600,
+    backgroundColor: T.accent,
     alignItems: 'center',
     justifyContent: 'center',
+    // Lift it ~14px above the tab bar top edge
+    marginTop: -14,
+    // Ring that blends with the background, creating the floating look
     borderWidth: 3,
-    borderColor: T.bg,
+    borderColor: '#0D1115',
+    // Android shadow via elevation
+    elevation: 14,
+    // iOS shadow
     shadowColor: T.accent,
-    shadowOffset: {width: 0, height: 8},
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    elevation: 12,
+    shadowOffset: {width: 0, height: 6},
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
   },
 });
-
-export default MainStack;

@@ -2,6 +2,7 @@
 import {useQuery} from '@powersync/react-native';
 import React from 'react';
 import {Button, FlatList, StyleSheet, Text, View} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {COLORS, FONTS} from '../assets/images';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 
@@ -37,7 +38,7 @@ const ScheduledPaymentsScreen = ({navigation}: any) => {
   );
 
   return (
-    <View style={{padding: 20, backgroundColor: COLORS.bgPrimary, flex: 1}}>
+    <SafeAreaView style={{padding: 20, backgroundColor: COLORS.bgPrimary, flex: 1}}>
       <Button
         title="Add Planned Payment"
         onPress={() => navigation.navigate('AddPlannedPayment')}
@@ -47,7 +48,7 @@ const ScheduledPaymentsScreen = ({navigation}: any) => {
         renderItem={renderScheduledPayment}
         keyExtractor={item => item.id}
       />
-    </View>
+    </SafeAreaView>
   );
 };
 

@@ -1,7 +1,9 @@
 /* eslint-disable react-native/no-inline-styles */
 import {GoogleSignin} from '@react-native-google-signin/google-signin';
-import React from 'react';
+import {usePowerSync} from '@powersync/react-native';
+import React, {useState} from 'react';
 import {
+  Alert,
   Image,
   Text,
   TouchableOpacity,
@@ -10,18 +12,82 @@ import {
 } from 'react-native';
 import {COLORS, FONTS} from '../assets/images';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {clearMyData, hasSeededData, seedDemoData} from '../tools/seed';
 import {supabase} from '../tools/supabase';
 
 const ProfilePage = () => {
   const coverPhoto =
     'https://www.blackpast.org/wp-content/uploads/prodimages/files/Kigali_Convention_Centre_December_1_2018_Courtesy_Raddison__CC_BY-SA_40.jpg';
-  const {name, email, picture} = useCurrentUser();
+  const {name, email, picture, userId} = useCurrentUser();
+  const db = usePowerSync();
+  const [busy, setBusy] = useState(false);
 
   const performLogout = async () => {
     try {
       await GoogleSignin.signOut();
     } catch {}
     await supabase.auth.signOut();
+  };
+
+  const doSeed = async () => {
+    if (!userId) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await seedDemoData(db, userId);
+      Alert.alert('Done', 'Demo data seeded.');
+    } catch (e: any) {
+      Alert.alert('Seed failed', e?.message ?? 'Unknown error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runSeed = async () => {
+    if (!userId || busy) {
+      return;
+    }
+    if (await hasSeededData(db, userId)) {
+      Alert.alert(
+        'Data already exists',
+        'You already have accounts. Seed anyway (adds duplicates)?',
+        [
+          {text: 'Cancel', style: 'cancel'},
+          {text: 'Seed anyway', onPress: doSeed},
+        ],
+      );
+    } else {
+      await doSeed();
+    }
+  };
+
+  const runClear = () => {
+    if (!userId || busy) {
+      return;
+    }
+    Alert.alert(
+      'Clear all my data?',
+      'Deletes every record owned by this user (local + synced). This cannot be undone.',
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {
+          text: 'Delete everything',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await clearMyData(db, userId);
+              Alert.alert('Done', 'All your data was deleted.');
+            } catch (e: any) {
+              Alert.alert('Clear failed', e?.message ?? 'Unknown error');
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const {width} = useWindowDimensions();
@@ -72,6 +138,49 @@ const ProfilePage = () => {
         }}>
         <Text style={{color: 'white', fontFamily: 'Poppins-Bold'}}>Logout</Text>
       </TouchableOpacity>
+      {__DEV__ && (
+        <View style={{paddingHorizontal: 10, marginTop: 20}}>
+          <Text
+            style={{
+              color: '#9CA3AF',
+              fontFamily: FONTS.bold,
+              fontSize: 13,
+              marginBottom: 6,
+              marginLeft: 4,
+            }}>
+            Developer
+          </Text>
+          <TouchableOpacity
+            onPress={runSeed}
+            disabled={busy}
+            style={{
+              backgroundColor: '#22C55E',
+              padding: 10,
+              borderRadius: 10,
+              alignItems: 'center',
+              opacity: busy ? 0.5 : 1,
+              marginBottom: 8,
+            }}>
+            <Text style={{color: 'white', fontFamily: 'Poppins-Bold'}}>
+              {busy ? 'Working…' : 'Seed demo data'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={runClear}
+            disabled={busy}
+            style={{
+              backgroundColor: '#374151',
+              padding: 10,
+              borderRadius: 10,
+              alignItems: 'center',
+              opacity: busy ? 0.5 : 1,
+            }}>
+            <Text style={{color: '#F87171', fontFamily: 'Poppins-Bold'}}>
+              Clear my data
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 };

@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import categoriesData from '../tools/data.json';
 
@@ -111,7 +112,8 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior="padding">
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView style={{flex: 1}} behavior="padding">
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.scrollContainer}>
@@ -235,7 +237,8 @@ const BudgetScreen: React.FC<Props> = ({navigation}) => {
           <Text style={styles.saveButtonText}>Save Budget</Text>
         </TouchableOpacity>
       </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 

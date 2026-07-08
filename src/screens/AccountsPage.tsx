@@ -1,261 +1,274 @@
-/* eslint-disable react-native/no-inline-styles */
+import BottomSheet, {BottomSheetView} from '@gorhom/bottom-sheet';
 import {useQuery, usePowerSync} from '@powersync/react-native';
-import React, {useCallback, useState} from 'react';
-
-import Clipboard from '@react-native-clipboard/clipboard';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {
   FlatList,
-  Image,
-  ImageBackground,
-  Modal,
+  Pressable,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
-import {Path, Svg} from 'react-native-svg';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
 
-interface Props {
-  navigation: any;
+function AccountCard({
+  account,
+  onPress,
+  onLongPress,
+}: {
+  account: any;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
+  const tint = accountTint(account.name ?? '');
+  const icon = accountIcon(account.name ?? '', account.type ?? '');
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      style={({pressed}) => [styles.accountCard, {opacity: pressed ? 0.85 : 1}]}>
+      <View style={[styles.accountIconCircle, {backgroundColor: tint + '22'}]}>
+        <Icon name={icon} size={22} color={tint} strokeWidth={2} />
+      </View>
+      <View style={styles.accountMid}>
+        <Text style={styles.accountName} numberOfLines={1}>{account.name}</Text>
+        <Text style={styles.accountType}>{account.type ?? 'Account'}</Text>
+      </View>
+      <View style={styles.accountRight}>
+        <Text style={styles.accountBalance}>
+          RWF {fmtAmount(account.available_balance ?? 0)}
+        </Text>
+        {account.number ? (
+          <Text style={styles.accountNumber}>{account.number}</Text>
+        ) : null}
+      </View>
+    </Pressable>
+  );
 }
 
-const AccountsPage: React.FC<Props> = ({navigation}) => {
-  const [modalVisible, setModalVisible] = useState(false);
-  const [selectedAccount, setSelectedAccount] = useState<any>(null);
-  const db = usePowerSync();
+export default function AccountsPage({navigation}: any) {
   const {userId} = useCurrentUser();
+  const db = usePowerSync();
+
   const {data: accounts} = useQuery(
     'SELECT * FROM accounts WHERE owner_id = ? ORDER BY created_at DESC',
     [userId ?? ''],
   );
 
-  const deleteAccount = useCallback(async () => {
-    if (!selectedAccount) {return;}
-    await db.execute('DELETE FROM transactions WHERE account_id = ?', [
-      selectedAccount.id,
-    ]);
-    await db.execute('DELETE FROM accounts WHERE id = ?', [selectedAccount.id]);
-    setModalVisible(false);
-    setSelectedAccount(null);
-  }, [db, selectedAccount]);
-
-  const handleLongPress = useCallback((account: any) => {
-    setSelectedAccount(account);
-    setModalVisible(true);
-  }, []);
-
-  const handlePress = useCallback(
-    (account: any) => {
-      navigation.navigate('AccountDetails', {accountId: account.id});
-    },
-    [navigation],
+  const totalBalance = useMemo(
+    () =>
+      (accounts as any[]).reduce(
+        (s: number, a: any) => s + (a.available_balance ?? 0),
+        0,
+      ),
+    [accounts],
   );
 
-  const renderAccount = useCallback(
-    ({item: account}: any) => (
-      <TouchableOpacity
-        key={account.id}
-        style={styles.card}
-        onPress={() => handlePress(account)}
-        onLongPress={() => handleLongPress(account)}>
-        <ImageBackground
-          resizeMode="stretch"
-          source={{
-            uri: 'https://res.cloudinary.com/feyton/image/upload/v1717410044/f0xwtiflerpfsepgnkm4.png',
-          }}>
-          <View
-            style={{
-              width: 230,
-              padding: 25,
-              height: 170,
-              marginHorizontal: 0,
-              borderRadius: 10,
-              position: 'relative',
-            }}>
-            <View>
-              <Text
-                style={{
-                  fontFamily: 'Poppins-Bold',
-                  fontSize: 12,
-                  color: 'black',
-                }}>
-                {account.name}
-              </Text>
-              <Text
-                style={{
-                  fontFamily: 'Poppins-Bold',
-                  fontSize: 16,
-                  color: 'black',
-                }}>
-                RWF: {Number(account.available_balance).toLocaleString()}
-              </Text>
-            </View>
-            <View style={{marginTop: 40, flexDirection: 'row', gap: 3}}>
-              <TouchableOpacity
-                onLongPress={() => {
-                  Clipboard.setString(account.number);
-                }}
-                style={{flexDirection: 'row', alignItems: 'center', gap: 2}}>
-                <Text
-                  style={{
-                    fontFamily: 'Poppins-Bold',
-                    fontSize: 14,
-                    color: '#1169c0',
-                  }}>
-                  {account.number}
-                </Text>
-                <Svg width="15px" height="15px" viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M6.59961 11.3974C6.59961 8.67119 6.59961 7.3081 7.44314 6.46118C8.28667 5.61426 9.64432 5.61426 12.3596 5.61426H15.2396C17.9549 5.61426 19.3125 5.61426 20.1561 6.46118C20.9996 7.3081 20.9996 8.6712 20.9996 11.3974V16.2167C20.9996 18.9429 20.9996 20.306 20.1561 21.1529C19.3125 21.9998 17.9549 21.9998 15.2396 21.9998H12.3596C9.64432 21.9998 8.28667 21.9998 7.44314 21.1529C6.59961 20.306 6.59961 18.9429 6.59961 16.2167V11.3974Z"
-                    fill="#1C274C"
-                  />
-                  <Path
-                    opacity="0.5"
-                    d="M4.17157 3.17157C3 4.34315 3 6.22876 3 10V12C3 15.7712 3 17.6569 4.17157 18.8284C4.78913 19.446 5.6051 19.738 6.79105 19.8761C6.59961 19.0353 6.59961 17.8796 6.59961 16.2167V11.3974C6.59961 8.6712 6.59961 7.3081 7.44314 6.46118C8.28667 5.61426 9.64432 5.61426 12.3596 5.61426H15.2396C16.8915 5.61426 18.0409 5.61426 18.8777 5.80494C18.7403 4.61146 18.4484 3.79154 17.8284 3.17157C16.6569 2 14.7712 2 11 2C7.22876 2 5.34315 2 4.17157 3.17157Z"
-                    fill="#1C274C"
-                  />
-                </Svg>
-              </TouchableOpacity>
-            </View>
-            <Image
-              style={{
-                height: 30,
-                width: 30,
-                position: 'absolute',
-                top: 25,
-                right: 25,
-                borderRadius: 50,
-              }}
-              source={{uri: account.logo}}
-            />
-          </View>
-        </ImageBackground>
-      </TouchableOpacity>
-    ),
-    [handlePress, handleLongPress],
-  );
+  const [toDelete, setToDelete] = useState<any>(null);
+  const sheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ['30%'], []);
+
+  const openDeleteSheet = (account: any) => {
+    setToDelete(account);
+    sheetRef.current?.snapToIndex(0);
+  };
+
+  const confirmDelete = useCallback(async () => {
+    if (!toDelete) {return;}
+    await db.execute('DELETE FROM transactions WHERE account_id = ?', [toDelete.id]);
+    await db.execute('DELETE FROM accounts WHERE id = ?', [toDelete.id]);
+    sheetRef.current?.close();
+    setToDelete(null);
+  }, [db, toDelete]);
 
   return (
-    <View style={styles.container}>
-      <View>
-        <Text
-          style={{
-            marginHorizontal: 20,
-            color: 'white',
-            fontFamily: 'Poppins-Bold',
-            fontSize: 16,
-          }}>
-          Accounts
-        </Text>
-        <FlatList
-          horizontal
-          data={accounts}
-          renderItem={renderAccount}
-          keyExtractor={account => account.id}
-          showsHorizontalScrollIndicator={false}
-        />
+    <SafeAreaView style={styles.root} edges={['top']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.title}>Accounts</Text>
+        <Pressable
+          onPress={() => navigation.navigate('CreateAccount')}
+          style={({pressed}) => [styles.addBtn, {opacity: pressed ? 0.7 : 1}]}>
+          <Icon name="Plus" size={18} color={T.accentInk} strokeWidth={2.5} />
+        </Pressable>
       </View>
 
-      {selectedAccount && (
-        <Modal
-          animationType="slide"
-          transparent
-          visible={modalVisible}
-          onRequestClose={() => setModalVisible(false)}>
-          <View style={styles.centeredView}>
-            <View style={styles.modalView}>
-              <Text style={styles.modalText}>
-                Do you want to delete this account?
-              </Text>
-              <View
-                style={{
-                  flexDirection: 'row',
-                  justifyContent: 'space-around',
-                  alignItems: 'center',
-                }}>
-                <TouchableOpacity
-                  style={{
-                    backgroundColor: '#1E90FF',
-                    padding: 12,
-                    borderRadius: 10,
-                    alignItems: 'center',
-                    marginVertical: 8,
-                    marginHorizontal: 10,
-                  }}
-                  onPress={() => setModalVisible(false)}>
-                  <Text style={{fontFamily: 'Poppins-Regular', color: 'white'}}>
-                    Cancel
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={{
-                    backgroundColor: '#7c1616',
-                    padding: 12,
-                    borderRadius: 10,
-                    alignItems: 'center',
-                    marginVertical: 8,
-                    marginHorizontal: 10,
-                  }}
-                  onPress={deleteAccount}>
-                  <Text style={{fontFamily: 'Poppins-Regular', color: 'white'}}>
-                    Delete
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
+      {/* Total balance card */}
+      {(accounts as any[]).length > 0 && (
+        <View style={styles.totalCard}>
+          <Text style={styles.totalLabel}>Total balance</Text>
+          <Text style={styles.totalBalance}>RWF {fmtAmount(totalBalance)}</Text>
+          <Text style={styles.totalSub}>{(accounts as any[]).length} account{(accounts as any[]).length !== 1 ? 's' : ''}</Text>
+        </View>
       )}
 
-      <TouchableOpacity
-        style={{position: 'absolute', bottom: 90, right: 30}}
-        onPress={() => navigation.navigate('CreateAccount')}>
-        <Svg width="50px" height="50px" viewBox="0 0 24 24" fill="white">
-          <Path
-            fillRule="evenodd"
-            clipRule="evenodd"
-            d="M13 9C13 8.44772 12.5523 8 12 8C11.4477 8 11 8.44772 11 9V11H9C8.44772 11 8 11.4477 8 12C8 12.5523 8.44772 13 9 13H11V15C11 15.5523 11.4477 16 12 16C12.5523 16 13 15.5523 13 15V13H15C15.5523 13 16 12.5523 16 12C16 11.4477 15.5523 11 15 11H13V9ZM7.25007 2.38782C8.54878 2.0992 10.1243 2 12 2C13.8757 2 15.4512 2.0992 16.7499 2.38782C18.06 2.67897 19.1488 3.176 19.9864 4.01358C20.824 4.85116 21.321 5.94002 21.6122 7.25007C21.9008 8.54878 22 10.1243 22 12C22 13.8757 21.9008 15.4512 21.6122 16.7499C21.321 18.06 20.824 19.1488 19.9864 19.9864C19.1488 20.824 18.06 21.321 16.7499 21.6122C15.4512 21.9008 13.8757 22 12 22C10.1243 22 8.54878 21.9008 7.25007 21.6122C5.94002 21.321 4.85116 20.824 4.01358 19.9864C3.176 19.1488 2.67897 18.06 2.38782 16.7499C2.0992 15.4512 2 13.8757 2 12C2 10.1243 2.0992 8.54878 2.38782 7.25007C2.67897 5.94002 3.176 4.85116 4.01358 4.01358C4.85116 3.176 5.94002 2.67897 7.25007 2.38782Z"
-            fill="#0cb5e9fb"
+      {/* Accounts list */}
+      <FlatList
+        data={accounts as any[]}
+        keyExtractor={(a: any) => a.id}
+        renderItem={({item}) => (
+          <AccountCard
+            account={item}
+            onPress={() => navigation.navigate('AccountDetails', {accountId: item.id})}
+            onLongPress={() => openDeleteSheet(item)}
           />
-        </Svg>
-      </TouchableOpacity>
-    </View>
+        )}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Icon name="Landmark" size={42} color={T.text3} strokeWidth={1.4} />
+            <Text style={styles.emptyText}>No accounts yet</Text>
+            <Pressable
+              onPress={() => navigation.navigate('CreateAccount')}
+              style={({pressed}) => [styles.emptyBtn, {opacity: pressed ? 0.7 : 1}]}>
+              <Icon name="Plus" size={15} color={T.accentInk} strokeWidth={2.5} />
+              <Text style={styles.emptyBtnText}>Add account</Text>
+            </Pressable>
+          </View>
+        }
+        contentContainerStyle={styles.list}
+      />
+
+      {/* Delete confirm sheet */}
+      <BottomSheet
+        ref={sheetRef}
+        index={-1}
+        snapPoints={snapPoints}
+        enablePanDownToClose
+        backgroundStyle={styles.sheetBg}
+        handleIndicatorStyle={styles.handle}
+        onChange={i => {
+          if (i === -1) {setToDelete(null);}
+        }}>
+        <BottomSheetView style={styles.sheetContent}>
+          {toDelete && (
+            <View style={styles.deleteSheet}>
+              <Text style={styles.deleteTitle}>Delete account?</Text>
+              <Text style={styles.deleteSub}>
+                "{toDelete.name}" and all its transactions will be permanently removed.
+              </Text>
+              <View style={styles.deleteActions}>
+                <Pressable
+                  onPress={() => sheetRef.current?.close()}
+                  style={({pressed}) => [styles.cancelBtn, {opacity: pressed ? 0.7 : 1}]}>
+                  <Text style={styles.cancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={confirmDelete}
+                  style={({pressed}) => [styles.confirmDeleteBtn, {opacity: pressed ? 0.7 : 1}]}>
+                  <Icon name="Trash2" size={15} color={T.expense} strokeWidth={2} />
+                  <Text style={styles.confirmDeleteText}>Delete</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </BottomSheetView>
+      </BottomSheet>
+    </SafeAreaView>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#1d2027',
-    position: 'relative',
+  root: {flex: 1, backgroundColor: T.bg},
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 12,
   },
-  card: {},
-  centeredView: {
-    flex: 1,
+  title: {fontFamily: FONTS.bold, fontSize: 20, color: T.text},
+  addBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: T.accent,
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  totalCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    backgroundColor: T.surface,
+    borderRadius: R.card,
+    borderWidth: 1,
+    borderColor: T.border,
+    padding: 18,
+  },
+  totalLabel: {fontFamily: FONTS.medium, fontSize: 12.5, color: T.text3, marginBottom: 4},
+  totalBalance: {fontFamily: FONTS.bold, fontSize: 26, color: T.text},
+  totalSub: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3, marginTop: 2},
+  list: {paddingHorizontal: 16, paddingBottom: 100},
+  accountCard: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 22,
+    gap: 14,
+    backgroundColor: T.surface,
+    borderRadius: R.card,
+    borderWidth: 1,
+    borderColor: T.border,
+    padding: 14,
   },
-  modalView: {
-    margin: 20,
-    backgroundColor: '#2e2e2e',
-    borderRadius: 20,
-    padding: 35,
+  accountIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {width: 0, height: 2},
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    justifyContent: 'center',
+    flexShrink: 0,
   },
-  modalText: {
-    marginBottom: 15,
-    textAlign: 'center',
-    fontSize: 14,
-    color: 'white',
-    fontFamily: 'Poppins-Regular',
+  accountMid: {flex: 1},
+  accountName: {fontFamily: FONTS.semibold, fontSize: 14, color: T.text},
+  accountType: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3, marginTop: 1},
+  accountRight: {alignItems: 'flex-end'},
+  accountBalance: {fontFamily: FONTS.bold, fontSize: 14, color: T.text},
+  accountNumber: {fontFamily: FONTS.regular, fontSize: 11, color: T.text3, marginTop: 1},
+  separator: {height: 8},
+  empty: {alignItems: 'center', paddingTop: 80, gap: 10},
+  emptyText: {fontFamily: FONTS.semibold, fontSize: 15, color: T.text2, marginTop: 4},
+  emptyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: T.accent,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: R.pill,
+    marginTop: 6,
   },
+  emptyBtnText: {fontFamily: FONTS.semibold, fontSize: 13.5, color: T.accentInk},
+  sheetBg: {backgroundColor: T.surface},
+  handle: {backgroundColor: T.border2},
+  sheetContent: {flex: 1, paddingHorizontal: 20, paddingTop: 8},
+  deleteSheet: {gap: 8},
+  deleteTitle: {fontFamily: FONTS.bold, fontSize: 17, color: T.text},
+  deleteSub: {fontFamily: FONTS.regular, fontSize: 13.5, color: T.text2, lineHeight: 20},
+  deleteActions: {flexDirection: 'row', gap: 10, marginTop: 16},
+  cancelBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: R.card,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  cancelText: {fontFamily: FONTS.semibold, fontSize: 14, color: T.text2},
+  confirmDeleteBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingVertical: 12,
+    borderRadius: R.card,
+    backgroundColor: 'rgba(251,113,133,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,113,133,0.25)',
+  },
+  confirmDeleteText: {fontFamily: FONTS.semibold, fontSize: 14, color: T.expense},
 });
-
-export default AccountsPage;

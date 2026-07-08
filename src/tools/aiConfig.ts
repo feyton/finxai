@@ -2,9 +2,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const KEY_GEMINI_API  = 'finxai:gemini_api_key';
 const KEY_GEMINI_MODEL = 'finxai:gemini_model';
+const KEY_ANTHROPIC_API = 'finxai:anthropic_api_key';
+const KEY_ANTHROPIC_MODEL = 'finxai:anthropic_model';
 
 // Default: gemini-2.5-flash (user called it gemini-3.5-flash — editable in AI Settings)
 export const DEFAULT_MODEL = 'gemini-2.5-flash';
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
 
 // ── Key management ─────────────────────────────────────────────
 
@@ -34,6 +37,34 @@ export async function getGeminiModel(): Promise<string> {
 
 export async function setGeminiModel(model: string): Promise<void> {
   await AsyncStorage.setItem(KEY_GEMINI_MODEL, model.trim());
+}
+
+// ── Anthropic key management ───────────────────────────────────
+
+export async function getAnthropicKey(): Promise<string | null> {
+  return AsyncStorage.getItem(KEY_ANTHROPIC_API);
+}
+
+export async function setAnthropicKey(key: string): Promise<void> {
+  await AsyncStorage.setItem(KEY_ANTHROPIC_API, key.trim());
+}
+
+export async function clearAnthropicKey(): Promise<void> {
+  await AsyncStorage.removeItem(KEY_ANTHROPIC_API);
+}
+
+export async function hasAnthropicKey(): Promise<boolean> {
+  const key = await getAnthropicKey();
+  return key != null && key.length > 10;
+}
+
+export async function getAnthropicModel(): Promise<string> {
+  const m = await AsyncStorage.getItem(KEY_ANTHROPIC_MODEL);
+  return m ?? DEFAULT_ANTHROPIC_MODEL;
+}
+
+export async function setAnthropicModel(model: string): Promise<void> {
+  await AsyncStorage.setItem(KEY_ANTHROPIC_MODEL, model.trim());
 }
 
 // ── Validate key with a lightweight Gemini call ────────────────

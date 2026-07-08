@@ -1,6 +1,7 @@
 import {useQuery} from '@powersync/react-native';
 import React from 'react';
 import {Text, View} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {COLORS, FONTS} from '../assets/images';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 
@@ -21,14 +22,14 @@ const BudgetDetails = ({route}: any) => {
 
   if (!budget) {
     return (
-      <View style={{flex: 1, backgroundColor: COLORS.bgPrimary, padding: 20}}>
+      <SafeAreaView style={{flex: 1, backgroundColor: COLORS.bgPrimary, padding: 20}}>
         <Text style={{color: 'white'}}>Budget not found</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={{backgroundColor: COLORS.bgPrimary, flex: 1, padding: 20}}>
+    <SafeAreaView style={{backgroundColor: COLORS.bgPrimary, flex: 1, padding: 20}}>
       <Text style={{color: 'white', fontFamily: FONTS.bold, fontSize: 20}}>
         {budget.name}
       </Text>
@@ -63,7 +64,7 @@ const BudgetDetails = ({route}: any) => {
           </Text>
         </View>
       ))}
-    </View>
+    </SafeAreaView>
   );
 };
 

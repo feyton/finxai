@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 
 import FloatingLabelInput from '../Components/FloatingInput';
 import {COLORS} from '../assets/images';
@@ -108,7 +109,8 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior="padding">
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView style={{flex: 1}} behavior="padding">
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.scrollContainer}>
@@ -207,7 +209,8 @@ const CreateRecord: React.FC<Props> = ({navigation}) => {
           <Text style={styles.saveButtonText}>Save Record</Text>
         </TouchableOpacity>
       </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 

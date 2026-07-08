@@ -1,277 +1,448 @@
-/* eslint-disable react-native/no-inline-styles */
 import BottomSheet, {BottomSheetView} from '@gorhom/bottom-sheet';
 import {useQuery, usePowerSync} from '@powersync/react-native';
-import {format} from 'date-fns/format';
-import React, {useCallback, useState} from 'react';
+import {format} from 'date-fns';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
+  Pressable,
+  SectionList,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
-import {ScrollView} from 'react-native-gesture-handler';
-import {Path, Svg} from 'react-native-svg';
-import TransactionItem from '../Components/Transaction';
-import {COLORS, FONTS} from '../assets/images';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import {TxRow} from '../Components/TxRow';
+import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {CATS, FONTS, R, T, fmtAmount, resolveCat} from '../theme';
 
-const RecordsPage = ({navigation}: any) => {
-  const {userId} = useCurrentUser();
-  const db = usePowerSync();
-  const {data: transactionsQuery} = useQuery(
-    'SELECT t.*, a.name as account_name, a.logo as account_logo FROM transactions t LEFT JOIN accounts a ON t.account_id = a.id WHERE t.owner_id = ? ORDER BY t.date_time DESC',
-    [userId ?? ''],
-  );
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
-  const bottomSheetRef = React.useRef<BottomSheet>(null);
-  const snapPoints = React.useMemo(() => ['25%', '50%', '90%'], []);
+type FilterType = 'all' | 'income' | 'expense' | 'ai';
 
-  const handleSheetChanges = useCallback((index: number) => {
-    if (index === -1) {
-      setSelectedTransaction(null);
-    }
-  }, []);
+function dayLabel(dt: string): string {
+  const date = new Date(dt);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) {return 'Today';}
+  if (date.toDateString() === yesterday.toDateString()) {return 'Yesterday';}
+  return format(date, 'MMM d, yyyy');
+}
 
-  const handleTransactionClick = (transaction: any) => {
-    setSelectedTransaction(transaction);
-    bottomSheetRef.current?.snapToIndex(1);
-  };
-
-  const deleteTransaction = useCallback(async () => {
-    if (selectedTransaction) {
-      await db.execute('DELETE FROM transactions WHERE id = ?', [
-        selectedTransaction.id,
-      ]);
-      setSelectedTransaction(null);
-      bottomSheetRef.current?.close();
-    }
-  }, [db, selectedTransaction]);
-
-  const renderBottomSheetContent = () => {
-    if (!selectedTransaction) {
-      return null;
-    }
-    return (
-      <KeyboardAvoidingView
-        style={styles.sheetContent}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView contentContainerStyle={styles.scrollViewContent}>
-          <Text style={styles.sheetTitle}>Transaction Details</Text>
-          <View style={styles.transactionDetails}>
-            <Text style={styles.transactionText}>
-              Date:{' '}
-              {selectedTransaction.date_time
-                ? format(
-                    new Date(selectedTransaction.date_time),
-                    'dd-MM-yy HH:mm',
-                  )
-                : ''}
-            </Text>
-            <Text style={styles.transactionText}>
-              Amount: {selectedTransaction.amount}
-            </Text>
-            <Text style={styles.transactionText}>
-              Category: {selectedTransaction.category}
-            </Text>
-            <Text style={styles.transactionText}>
-              Note: {selectedTransaction.note}
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={deleteTransaction}>
-            <Text style={styles.deleteButtonText}>Delete</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    );
-  };
-
-  const groupTransactionsByDate = (transactions: any[]) => {
-    const grouped: any = {};
-    transactions.forEach((transaction: any) => {
-      const date = new Date(transaction.date_time);
-      const today = new Date();
-      let dateLabel: string;
-      if (date.toDateString() === today.toDateString()) {
-        dateLabel = 'Today';
-      } else if (
-        date.toDateString() ===
-        new Date(today.setDate(today.getDate() - 1)).toDateString()
-      ) {
-        dateLabel = 'Yesterday';
-      } else {
-        dateLabel = date.toDateString();
-      }
-      if (!grouped[dateLabel]) {
-        grouped[dateLabel] = [];
-      }
-      grouped[dateLabel].push(transaction);
-    });
-    return grouped;
-  };
-
-  const filtered = searchQuery
-    ? transactionsQuery.filter(
-        (t: any) =>
-          t.payee?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          t.category?.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    : transactionsQuery;
-
-  const grouped = groupTransactionsByDate(filtered);
-  const sections = Object.keys(grouped).map(date => ({
-    title: date,
-    data: grouped[date],
-  }));
+function TxDetail({
+  tx,
+  onDelete,
+  onClose,
+}: {
+  tx: any;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const cat = CATS[resolveCat(tx.category ?? '')];
+  const isIncome = tx.transaction_type === 'income';
+  const dateStr = tx.date_time
+    ? format(new Date(tx.date_time), 'MMM d, yyyy  HH:mm')
+    : '';
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerView}>
-        <TouchableOpacity
-          style={styles.categoryButton}
-          onPress={() => navigation.navigate('ManageCategories')}>
-          <Text style={styles.catStyle}>Categories</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={{
-            backgroundColor: COLORS.buttonPrimary,
-            paddingVertical: 4,
-            paddingHorizontal: 10,
-            borderRadius: 5,
-            alignItems: 'center',
-            marginHorizontal: 10,
-          }}
-          onPress={() => navigation.navigate('Confirm')}>
-          <Text style={{color: 'white', fontFamily: FONTS.bold}}>Confirm</Text>
-        </TouchableOpacity>
+    <View style={styles.detail}>
+      <View style={styles.detailTop}>
+        <View style={[styles.detailIcon, {backgroundColor: cat.color + '22'}]}>
+          <Icon name={cat.icon} size={22} color={cat.color} strokeWidth={2} />
+        </View>
+        <Text style={[styles.detailAmount, {color: isIncome ? T.income : T.expense}]}>
+          {isIncome ? '+' : '-'}RWF {fmtAmount(tx.amount ?? 0)}
+        </Text>
+        <Text style={styles.detailLabel}>
+          {tx.merchant || tx.payee || tx.category || '—'}
+        </Text>
+        <Text style={styles.detailSub}>
+          {cat.label}{'  ·  '}{dateStr}
+        </Text>
+        {tx.account_name ? (
+          <Text style={styles.detailSub}>{tx.account_name}</Text>
+        ) : null}
+        {tx.note ? (
+          <Text style={styles.detailNote}>{tx.note}</Text>
+        ) : null}
       </View>
-
-      <View style={styles.searchView}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search transaction"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
+      <View style={styles.detailBtns}>
+        <Pressable
+          onPress={onDelete}
+          style={({pressed}) => [styles.deleteBtn, {opacity: pressed ? 0.7 : 1}]}>
+          <Icon name="Trash2" size={16} color={T.expense} strokeWidth={2} />
+          <Text style={styles.deleteBtnText}>Delete</Text>
+        </Pressable>
+        <Pressable
+          onPress={onClose}
+          style={({pressed}) => [styles.closeBtn, {opacity: pressed ? 0.7 : 1}]}>
+          <Text style={styles.closeBtnText}>Close</Text>
+        </Pressable>
       </View>
-
-      <FlatList
-        data={sections}
-        keyExtractor={item => item.title}
-        renderItem={({item: section}) => (
-          <View key={section.title} style={styles.sectionView}>
-            <Text style={styles.dateHeader}>{section.title}</Text>
-            <FlatList
-              data={section.data}
-              keyExtractor={item => item.id}
-              renderItem={({item}) => (
-                <TouchableOpacity onPress={() => handleTransactionClick(item)}>
-                  <TransactionItem transaction={item} />
-                </TouchableOpacity>
-              )}
-              ListHeaderComponentStyle={styles.listHeader}
-            />
-          </View>
-        )}
-      />
-      <BottomSheet
-        ref={bottomSheetRef}
-        index={-1}
-        snapPoints={snapPoints}
-        onChange={handleSheetChanges}
-        enablePanDownToClose={true}
-        backgroundStyle={styles.sheetContent}
-        handleIndicatorStyle={styles.sheetHandle}>
-        <BottomSheetView>{renderBottomSheetContent()}</BottomSheetView>
-      </BottomSheet>
-
-      <TouchableOpacity
-        style={{position: 'absolute', bottom: 90, right: 30}}
-        onPress={() => navigation.navigate('CreateRecord')}>
-        <Svg width="50px" height="50px" viewBox="0 0 24 24" fill="white">
-          <Path
-            fillRule="evenodd"
-            clipRule="evenodd"
-            d="M13 9C13 8.44772 12.5523 8 12 8C11.4477 8 11 8.44772 11 9V11H9C8.44772 11 8 11.4477 8 12C8 12.5523 8.44772 13 9 13H11V15C11 15.5523 11.4477 16 12 16C12.5523 16 13 15.5523 13 15V13H15C15.5523 13 16 12.5523 16 12C16 11.4477 15.5523 11 15 11H13V9ZM7.25007 2.38782C8.54878 2.0992 10.1243 2 12 2C13.8757 2 15.4512 2.0992 16.7499 2.38782C18.06 2.67897 19.1488 3.176 19.9864 4.01358C20.824 4.85116 21.321 5.94002 21.6122 7.25007C21.9008 8.54878 22 10.1243 22 12C22 13.8757 21.9008 15.4512 21.6122 16.7499C21.321 18.06 20.824 19.1488 19.9864 19.9864C19.1488 20.824 18.06 21.321 16.7499 21.6122C15.4512 21.9008 13.8757 22 12 22C10.1243 22 8.54878 21.9008 7.25007 21.6122C5.94002 21.321 4.85116 20.824 4.01358 19.9864C3.176 19.1488 2.67897 18.06 2.38782 16.7499C2.0992 15.4512 2 13.8757 2 12C2 10.1243 2.0992 8.54878 2.38782 7.25007C2.67897 5.94002 3.176 4.85116 4.01358 4.01358C4.85116 3.176 5.94002 2.67897 7.25007 2.38782Z"
-            fill="#0ce97bfa"
-          />
-        </Svg>
-      </TouchableOpacity>
     </View>
   );
-};
+}
+
+const FILTERS: {key: FilterType; label: string}[] = [
+  {key: 'all', label: 'All'},
+  {key: 'expense', label: 'Spending'},
+  {key: 'income', label: 'Income'},
+  {key: 'ai', label: 'AI-tagged'},
+];
+
+export default function RecordsPage({navigation}: any) {
+  const {userId} = useCurrentUser();
+  const db = usePowerSync();
+
+  const {data: txns} = useQuery(
+    'SELECT t.*, a.name as account_name FROM transactions t LEFT JOIN accounts a ON t.account_id = a.id WHERE t.owner_id = ? ORDER BY t.date_time DESC',
+    [userId ?? ''],
+  );
+
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<FilterType>('all');
+  const [selected, setSelected] = useState<any>(null);
+  const sheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ['45%', '75%'], []);
+
+  const monthTotals = useMemo(() => {
+    const start = new Date();
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+    const startIso = start.toISOString();
+    let moneyIn = 0;
+    let moneyOut = 0;
+    for (const t of txns as any[]) {
+      if ((t.date_time ?? '') < startIso) {
+        continue;
+      }
+      if (t.transaction_type === 'income') {
+        moneyIn += t.amount ?? 0;
+      } else {
+        moneyOut += t.amount ?? 0;
+      }
+    }
+    return {moneyIn, moneyOut};
+  }, [txns]);
+
+  const sections = useMemo(() => {
+    let list = txns as any[];
+    if (filter === 'ai') {
+      list = list.filter(t => t.source === 'sms' || t.source === 'ai');
+    } else if (filter !== 'all') {
+      list = list.filter(t => t.transaction_type === filter);
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        t =>
+          (t.merchant || t.payee || '').toLowerCase().includes(q) ||
+          (t.category || '').toLowerCase().includes(q),
+      );
+    }
+
+    const groups: Record<string, any[]> = {};
+    for (const t of list) {
+      const key = dayLabel(t.date_time);
+      if (!groups[key]) {groups[key] = [];}
+      groups[key].push(t);
+    }
+
+    return Object.entries(groups).map(([title, data]) => ({
+      title,
+      data,
+      dayIncome: data
+        .filter(t => t.transaction_type === 'income')
+        .reduce((s: number, t: any) => s + (t.amount ?? 0), 0),
+      dayExpense: data
+        .filter(t => t.transaction_type !== 'income')
+        .reduce((s: number, t: any) => s + (t.amount ?? 0), 0),
+    }));
+  }, [txns, filter, search]);
+
+  const openDetail = (tx: any) => {
+    setSelected(tx);
+    sheetRef.current?.snapToIndex(0);
+  };
+
+  const deleteSelected = useCallback(async () => {
+    if (!selected) {return;}
+    await db.execute('DELETE FROM transactions WHERE id = ?', [selected.id]);
+    sheetRef.current?.close();
+    setSelected(null);
+  }, [db, selected]);
+
+  return (
+    <SafeAreaView style={styles.root} edges={['top']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.title}>Records</Text>
+        <Pressable
+          onPress={() => navigation.navigate('CreateRecord')}
+          style={({pressed}) => [styles.addBtn, {opacity: pressed ? 0.7 : 1}]}>
+          <Icon name="Plus" size={18} color={T.accentInk} strokeWidth={2.5} />
+        </Pressable>
+      </View>
+
+      {/* Money in / out summary */}
+      <View style={styles.summaryRow}>
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryHead}>
+            <Icon name="ArrowDownLeft" size={14} color={T.income} strokeWidth={2.2} />
+            <Text style={styles.summaryLabel}>Money in</Text>
+          </View>
+          <Text style={[styles.summaryValue, {color: T.income}]}>
+            {fmtAmount(monthTotals.moneyIn)}
+            <Text style={styles.summaryUnit}> RWF</Text>
+          </Text>
+        </View>
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryHead}>
+            <Icon name="ArrowUpRight" size={14} color={T.expense} strokeWidth={2.2} />
+            <Text style={styles.summaryLabel}>Money out</Text>
+          </View>
+          <Text style={[styles.summaryValue, {color: T.expense}]}>
+            {fmtAmount(monthTotals.moneyOut)}
+            <Text style={styles.summaryUnit}> RWF</Text>
+          </Text>
+        </View>
+      </View>
+
+      {/* Search */}
+      <View style={styles.searchRow}>
+        <Icon name="Search" size={16} color={T.text3} strokeWidth={2} />
+        <TextInput
+          style={styles.searchInput}
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search transactions..."
+          placeholderTextColor={T.text3}
+        />
+        {search.length > 0 && (
+          <Pressable onPress={() => setSearch('')}>
+            <Icon name="X" size={16} color={T.text3} strokeWidth={2} />
+          </Pressable>
+        )}
+      </View>
+
+      {/* Filter chips */}
+      <View style={styles.filterRow}>
+        {FILTERS.map(f => (
+          <Pressable
+            key={f.key}
+            onPress={() => setFilter(f.key)}
+            style={[styles.chip, filter === f.key && styles.chipActive]}>
+            <Text
+              style={[
+                styles.chipText,
+                filter === f.key && styles.chipTextActive,
+              ]}>
+              {f.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {/* Transaction list */}
+      <SectionList
+        sections={sections}
+        keyExtractor={(item: any) => item.id}
+        renderItem={({item}) => <TxRow tx={item} onPress={() => openDetail(item)} />}
+        renderSectionHeader={({section}: any) => (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionDate}>{section.title}</Text>
+            <View style={styles.dayTotals}>
+              {section.dayIncome > 0 && (
+                <Text style={styles.dayIn}>+{fmtAmount(section.dayIncome)}</Text>
+              )}
+              {section.dayExpense > 0 && (
+                <Text style={styles.dayOut}>-{fmtAmount(section.dayExpense)}</Text>
+              )}
+            </View>
+          </View>
+        )}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Icon name="Receipt" size={42} color={T.text3} strokeWidth={1.4} />
+            <Text style={styles.emptyText}>No transactions yet</Text>
+            <Text style={styles.emptyHint}>Add one with the + button above</Text>
+          </View>
+        }
+        contentContainerStyle={styles.list}
+        stickySectionHeadersEnabled={false}
+      />
+
+      {/* Transaction detail sheet */}
+      <BottomSheet
+        ref={sheetRef}
+        index={-1}
+        snapPoints={snapPoints}
+        enablePanDownToClose
+        backgroundStyle={styles.sheetBg}
+        handleIndicatorStyle={styles.handle}
+        onChange={i => {
+          if (i === -1) {setSelected(null);}
+        }}>
+        <BottomSheetView style={styles.sheetWrap}>
+          {selected && (
+            <TxDetail
+              tx={selected}
+              onDelete={deleteSelected}
+              onClose={() => sheetRef.current?.close()}
+            />
+          )}
+        </BottomSheetView>
+      </BottomSheet>
+    </SafeAreaView>
+  );
+}
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#1d2027',
-    paddingHorizontal: 16,
-    paddingTop: 5,
-    paddingBottom: 60,
-  },
-  catStyle: {fontFamily: 'Poppins-Bold', color: 'white'},
-  headerView: {
-    marginBottom: 10,
+  root: {flex: 1, backgroundColor: T.bg},
+  header: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
-  categoryButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 5,
     alignItems: 'center',
-  },
-  searchView: {marginBottom: 5},
-  searchInput: {
-    backgroundColor: '#2e2e2e',
-    color: 'white',
-    padding: 10,
-    borderRadius: 8,
-  },
-  sectionView: {marginBottom: 16},
-  listHeader: {paddingBottom: 8},
-  dateHeader: {
-    fontSize: 14,
-    marginBottom: 4,
-    fontFamily: 'Poppins-Bold',
-    color: 'white',
-  },
-  transactionDetails: {marginLeft: 16},
-  transactionText: {
-    color: 'white',
-    fontSize: 16,
-    fontFamily: FONTS.regular,
-  },
-  sheetContent: {
-    backgroundColor: '#1d2027',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
   },
-  sheetTitle: {
-    color: 'white',
-    fontSize: 18,
+  title: {fontFamily: FONTS.bold, fontSize: 20, color: T.text},
+  summaryRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  summaryCard: {
+    flex: 1,
+    backgroundColor: T.surface,
+    borderRadius: R.card,
+    borderWidth: 1,
+    borderColor: T.border,
+    padding: 12,
+    gap: 4,
+  },
+  summaryHead: {flexDirection: 'row', alignItems: 'center', gap: 6},
+  summaryLabel: {fontFamily: FONTS.regular, fontSize: 11.5, color: T.text2},
+  summaryValue: {fontFamily: FONTS.bold, fontSize: 17},
+  summaryUnit: {fontFamily: FONTS.regular, fontSize: 10.5, color: T.text3},
+  addBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: T.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
     marginBottom: 10,
-    fontFamily: 'Poppins-Bold',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    backgroundColor: T.surface2,
+    borderRadius: R.small,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  searchInput: {
+    flex: 1,
+    fontFamily: FONTS.regular,
+    fontSize: 13.5,
+    color: T.text,
+    paddingVertical: 0,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    marginBottom: 4,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: R.pill,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  chipActive: {backgroundColor: T.accentSoft, borderColor: T.accent},
+  chipText: {fontFamily: FONTS.medium, fontSize: 12.5, color: T.text2},
+  chipTextActive: {color: T.accent},
+  list: {paddingBottom: 100},
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 6,
+  },
+  sectionDate: {fontFamily: FONTS.semibold, fontSize: 12, color: T.text3, textTransform: 'uppercase', letterSpacing: 0.5},
+  dayTotals: {flexDirection: 'row', gap: 10},
+  dayIn: {fontFamily: FONTS.semibold, fontSize: 12, color: T.income},
+  dayOut: {fontFamily: FONTS.semibold, fontSize: 12, color: T.expense},
+  empty: {alignItems: 'center', paddingTop: 80, gap: 8},
+  emptyText: {fontFamily: FONTS.semibold, fontSize: 15, color: T.text2, marginTop: 4},
+  emptyHint: {fontFamily: FONTS.regular, fontSize: 13, color: T.text3},
+  sheetBg: {backgroundColor: T.surface},
+  handle: {backgroundColor: T.border2},
+  sheetWrap: {flex: 1},
+  detail: {flex: 1, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between'},
+  detailTop: {alignItems: 'center', paddingVertical: 16, gap: 4},
+  detailIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  detailAmount: {fontFamily: FONTS.bold, fontSize: 26},
+  detailLabel: {fontFamily: FONTS.semibold, fontSize: 15.5, color: T.text, marginTop: 2},
+  detailSub: {fontFamily: FONTS.regular, fontSize: 12.5, color: T.text3, marginTop: 1},
+  detailNote: {
+    fontFamily: FONTS.regular,
+    fontSize: 13,
+    color: T.text2,
+    backgroundColor: T.surface2,
+    borderRadius: R.small,
+    padding: 10,
+    marginTop: 10,
+    alignSelf: 'stretch',
     textAlign: 'center',
   },
-  scrollViewContent: {flexGrow: 1},
-  sheetHandle: {color: 'white', backgroundColor: 'white'},
-  deleteButton: {
-    padding: 5,
-    backgroundColor: '#678',
-    width: 100,
-    borderRadius: 10,
-    alignSelf: 'flex-start',
-    marginHorizontal: 10,
-    marginTop: 10,
+  detailBtns: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: T.border,
   },
-  deleteButtonText: {textAlign: 'center', fontFamily: 'Poppins-Bold'},
+  deleteBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: R.card,
+    backgroundColor: 'rgba(251,113,133,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,113,133,0.2)',
+  },
+  deleteBtnText: {fontFamily: FONTS.semibold, fontSize: 13.5, color: T.expense},
+  closeBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: R.card,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  closeBtnText: {fontFamily: FONTS.semibold, fontSize: 13.5, color: T.text2},
 });
-
-export default RecordsPage;

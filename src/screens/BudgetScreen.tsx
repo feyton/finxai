@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {COLORS, FONTS} from '../assets/images';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 
@@ -45,7 +46,9 @@ export default function BudgetScreen({navigation}: any) {
   }, []);
 
   return (
-    <View style={{flex: 1, backgroundColor: '#1d2027', padding: 16}}>
+    <SafeAreaView
+      style={{flex: 1, backgroundColor: '#1d2027', padding: 16}}
+      edges={['top']}>
       <Text style={{fontFamily: FONTS.bold, fontSize: 16, color: 'white'}}>
         Budget
       </Text>
@@ -127,7 +130,7 @@ export default function BudgetScreen({navigation}: any) {
           </View>
         </Modal>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 

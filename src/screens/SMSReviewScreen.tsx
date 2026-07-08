@@ -5,12 +5,12 @@ import {
   FlatList,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {CATS, CategoryId, FONTS, R, T, resolveCat} from '../theme';
 import {CatChip, ConfPill, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';

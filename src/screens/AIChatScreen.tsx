@@ -1,27 +1,31 @@
-import React, {useEffect, useRef, useState} from 'react';
+import {useQuery} from '@powersync/react-native';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import {T, FONTS, R} from '../theme';
-import {Avatar, Icon} from '../Components/ui';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {T, FONTS, R, fmtAmount} from '../theme';
+import {
+  DEFAULT_ANTHROPIC_MODEL,
+  getAnthropicKey,
+  getAnthropicModel,
+} from '../tools/aiConfig';
+import {AnthropicApiMessage, askClaude} from '../tools/anthropicClient';
 
 interface Message {
   id: string;
   who: 'ai' | 'me';
   text: string;
-  bars?: {cat: string; value: number; color: string}[];
-  list?: string[];
-  foot?: string;
-  action?: string;
 }
 
 const SEED: Message[] = [
@@ -33,10 +37,10 @@ const SEED: Message[] = [
 ];
 
 const SUGGESTIONS = [
-  'Where did my money go this week?',
+  'Where did my money go this month?',
   'How much on transport this month?',
   'Can I afford 200k for savings?',
-  'Find subscriptions I forgot',
+  'What debts do I have?',
 ];
 
 function richText(text: string) {
@@ -66,40 +70,15 @@ function Bubble({msg}: {msg: Message}) {
     );
   }
   return (
-    <View style={styles.bubbleAiWrap}>
-      <View style={styles.bubbleAi}>
-        <Text style={styles.bubbleAiText}>{richText(msg.text)}</Text>
-        {msg.list && (
-          <View style={{marginTop: 9, gap: 7}}>
-            {msg.list.map((x, i) => (
-              <View key={i} style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
-                <Icon name="Repeat" size={15} color={T.accent} strokeWidth={2} />
-                <Text style={{fontFamily: FONTS.regular, fontSize: 12.5, color: T.text, flex: 1}}>{x}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-        {msg.foot && (
-          <Text style={[styles.bubbleAiText, {marginTop: 9, color: T.text2}]}>
-            {richText(msg.foot)}
-          </Text>
-        )}
-      </View>
-      {msg.action && (
-        <Pressable style={styles.actionBtn}>
-          <Icon name="Check" size={15} color={T.accent} strokeWidth={2.4} />
-          <Text style={{fontFamily: FONTS.semibold, fontSize: 12.5, color: T.accent}}>
-            {msg.action}
-          </Text>
-        </Pressable>
-      )}
+    <View style={styles.bubbleAi}>
+      <Text style={styles.bubbleAiText}>{richText(msg.text)}</Text>
     </View>
   );
 }
 
 function TypingIndicator() {
   return (
-    <View style={[styles.bubbleAi, {flexDirection: 'row', gap: 5, alignSelf: 'flex-start', paddingVertical: 14}]}>
+    <View style={[styles.bubbleAi, {flexDirection: 'row', gap: 5, paddingVertical: 14}]}>
       {[0, 1, 2].map(i => (
         <View key={i} style={[styles.dot, {opacity: 0.4 + i * 0.2}]} />
       ))}
@@ -107,12 +86,143 @@ function TypingIndicator() {
   );
 }
 
+function monthStartISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
 export default function AIChatScreen({navigation}: any) {
-  const {firstName, picture} = useCurrentUser();
+  const {firstName, userId} = useCurrentUser();
+  const uid = userId ?? '';
+
+  const ms = useMemo(() => monthStartISO(), []);
+
+  // ── Financial context queries ──────────────────────────────────
+  const {data: accounts} = useQuery(
+    'SELECT id, name, type, available_balance FROM accounts WHERE owner_id = ? ORDER BY available_balance DESC',
+    [uid],
+  );
+
+  const {data: monthTxns} = useQuery(
+    "SELECT amount, category, transaction_type FROM transactions WHERE owner_id = ? AND date_time >= ? AND confirmed = 1",
+    [uid, ms],
+  );
+
+  const {data: recentTxns} = useQuery(
+    'SELECT amount, category, merchant, payee, date_time, transaction_type FROM transactions WHERE owner_id = ? AND confirmed = 1 ORDER BY date_time DESC LIMIT 8',
+    [uid],
+  );
+
+  const {data: budgets} = useQuery(
+    'SELECT name, amount, period FROM budgets WHERE owner_id = ? LIMIT 5',
+    [uid],
+  );
+
+  const {data: debts} = useQuery(
+    'SELECT dir, party, outstanding, frequency, next_due FROM debts WHERE owner_id = ?',
+    [uid],
+  );
+
+  // ── Derived financial numbers ──────────────────────────────────
+  const {totalBalance, monthlyIncome, monthlyExpenses, topCats} = useMemo(() => {
+    const bal = accounts.reduce((s: number, a: any) => s + (a.available_balance ?? 0), 0);
+    let income = 0;
+    let expenses = 0;
+    const catMap: Record<string, number> = {};
+    for (const t of monthTxns as any[]) {
+      if (t.transaction_type === 'income') {
+        income += t.amount ?? 0;
+      } else {
+        expenses += t.amount ?? 0;
+        if (t.category) {
+          catMap[t.category] = (catMap[t.category] ?? 0) + (t.amount ?? 0);
+        }
+      }
+    }
+    const cats = Object.entries(catMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([cat, amt]) => `  • ${cat}: RWF ${fmtAmount(amt)}`);
+    return {totalBalance: bal, monthlyIncome: income, monthlyExpenses: expenses, topCats: cats};
+  }, [accounts, monthTxns]);
+
+  // ── System prompt (rebuilt when financial data changes) ────────
+  const systemPrompt = useMemo(() => {
+    const now = new Date();
+    const monthLabel = now.toLocaleString('en-US', {month: 'long', year: 'numeric'});
+
+    const accountLines = (accounts as any[])
+      .map(a => `  • ${a.name} (${a.type}): RWF ${fmtAmount(a.available_balance ?? 0)}`)
+      .join('\n') || '  None yet';
+
+    const recentLines = (recentTxns as any[])
+      .map(t => {
+        const sign = t.transaction_type === 'income' ? '+' : '-';
+        const label = t.merchant || t.payee || t.category || '—';
+        const date = t.date_time ? String(t.date_time).slice(0, 10) : '';
+        return `  • ${date} ${sign}RWF ${fmtAmount(t.amount ?? 0)} — ${label} [${t.category ?? '?'}]`;
+      })
+      .join('\n') || '  None yet';
+
+    const budgetLines = (budgets as any[])
+      .map(b => `  • ${b.name}: RWF ${fmtAmount(b.amount ?? 0)} (${b.period})`)
+      .join('\n') || '  None set';
+
+    const debtLines = (debts as any[])
+      .map(d => {
+        const dir = d.dir === 'borrowed' ? 'Owed to' : 'Owed by';
+        const due = d.next_due ? `, next ${d.next_due}` : '';
+        return `  • ${dir} ${d.party}: RWF ${fmtAmount(d.outstanding ?? 0)} — ${d.frequency}${due}`;
+      })
+      .join('\n') || '  None recorded';
+
+    return `You are Finance Coach, a personal financial advisor for ${firstName || 'the user'} in Rwanda. Be concise, specific, and use their real numbers. All amounts are in RWF (Rwandan Francs).
+
+TODAY: ${now.toDateString()}
+
+## Accounts (${(accounts as any[]).length})
+${accountLines}
+Total balance: RWF ${fmtAmount(totalBalance)}
+
+## ${monthLabel} Summary
+Income:   RWF ${fmtAmount(monthlyIncome)}
+Expenses: RWF ${fmtAmount(monthlyExpenses)}
+Net:      RWF ${fmtAmount(monthlyIncome - monthlyExpenses)}${topCats.length ? `\n\nTop spend categories:\n${topCats.join('\n')}` : ''}
+
+## Recent Transactions (last 8)
+${recentLines}
+
+## Active Budgets
+${budgetLines}
+
+## Debts
+${debtLines}
+
+Guidelines:
+- Respond in English or Kinyarwanda matching the user's language
+- Keep answers to 2-4 sentences unless the user asks for detail
+- Bold key figures with **asterisks**
+- Give actionable, specific advice
+- If asked about data you don't have, say so honestly`;
+  }, [firstName, accounts, totalBalance, monthlyIncome, monthlyExpenses, topCats, recentTxns, budgets, debts]);
+
+  // ── Chat state ─────────────────────────────────────────────────
   const [msgs, setMsgs] = useState<Message[]>(SEED);
+  const [apiHistory, setApiHistory] = useState<AnthropicApiMessage[]>([]);
   const [typing, setTyping] = useState(false);
   const [input, setInput] = useState('');
+  const [apiKey, setApiKeyState] = useState('');
+  const [model, setModelState] = useState(DEFAULT_ANTHROPIC_MODEL);
   const listRef = useRef<FlatList>(null);
+
+  useEffect(() => {
+    (async () => {
+      const k = await getAnthropicKey();
+      const m = await getAnthropicModel();
+      if (k) {setApiKeyState(k);}
+      setModelState(m);
+    })();
+  }, []);
 
   useEffect(() => {
     listRef.current?.scrollToEnd({animated: true});
@@ -121,21 +231,40 @@ export default function AIChatScreen({navigation}: any) {
   const send = (text?: string) => {
     const q = (text ?? input).trim();
     if (!q) {return;}
+
+    if (!apiKey) {
+      navigation.navigate('AISettings');
+      return;
+    }
+
     setInput('');
-    setMsgs(m => [...m, {id: 'u' + Date.now(), who: 'me', text: q}]);
+    const userMsg: Message = {id: 'u' + Date.now(), who: 'me', text: q};
+    setMsgs(m => [...m, userMsg]);
+
+    const newHistory: AnthropicApiMessage[] = [
+      ...apiHistory,
+      {role: 'user', content: q},
+    ];
+    setApiHistory(newHistory);
     setTyping(true);
-    // Placeholder — will be replaced with real Anthropic API call
-    setTimeout(() => {
-      setTyping(false);
-      setMsgs(m => [
-        ...m,
-        {
-          id: 'a' + Date.now(),
-          who: 'ai',
-          text: "I'm connecting to your financial data. Full AI coaching will be available soon — your accounts, budgets, and transaction history will be analyzed to give you personalized insights.",
-        },
-      ]);
-    }, 1200);
+
+    const capped = newHistory.slice(-20);
+    const snap = systemPrompt;
+    const keySnap = apiKey;
+    const modelSnap = model;
+
+    askClaude(capped, snap, keySnap, modelSnap)
+      .then(reply => {
+        setMsgs(m => [...m, {id: 'a' + Date.now(), who: 'ai', text: reply}]);
+        setApiHistory(prev => [...prev, {role: 'assistant', content: reply}]);
+      })
+      .catch((e: any) => {
+        const errText = e?.message?.includes('Invalid')
+          ? 'API key rejected. Go to AI Settings to update it.'
+          : `Something went wrong: ${e?.message ?? 'unknown error'}`;
+        setMsgs(m => [...m, {id: 'err' + Date.now(), who: 'ai', text: errText}]);
+      })
+      .finally(() => setTyping(false));
   };
 
   return (
@@ -144,23 +273,25 @@ export default function AIChatScreen({navigation}: any) {
       <View style={styles.header}>
         <Pressable
           onPress={() => navigation.goBack()}
-          style={({pressed}) => [styles.backBtn, {opacity: pressed ? 0.7 : 1}]}>
+          style={({pressed}) => [styles.headerBtn, {opacity: pressed ? 0.7 : 1}]}>
           <Icon name="ArrowLeft" size={19} color={T.text} />
         </Pressable>
         <View style={styles.aiAvatar}>
-          <Icon name="Sparkles" size={21} color={T.accentInk} strokeWidth={2.2} />
+          <Icon name="Sparkles" size={20} color={T.accentInk} strokeWidth={2.2} />
         </View>
         <View style={{flex: 1}}>
           <Text style={styles.headerTitle}>Finance Coach</Text>
           <View style={{flexDirection: 'row', alignItems: 'center', gap: 5}}>
-            <View style={styles.greenDot} />
-            <Text style={{fontFamily: FONTS.medium, fontSize: 11, color: T.accent}}>
-              Knows your accounts
+            <View style={[styles.statusDot, {backgroundColor: apiKey ? T.accent : T.text3}]} />
+            <Text style={{fontFamily: FONTS.medium, fontSize: 11, color: apiKey ? T.accent : T.text3}}>
+              {apiKey ? 'Knows your accounts' : 'Not configured'}
             </Text>
           </View>
         </View>
-        <Pressable style={styles.backBtn}>
-          <Icon name="Clock" size={18} color={T.text2} />
+        <Pressable
+          onPress={() => navigation.navigate('AISettings')}
+          style={({pressed}) => [styles.headerBtn, {opacity: pressed ? 0.7 : 1}]}>
+          <Icon name="Settings2" size={17} color={T.text2} />
         </Pressable>
       </View>
 
@@ -177,6 +308,17 @@ export default function AIChatScreen({navigation}: any) {
           contentContainerStyle={styles.thread}
           onContentSizeChange={() => listRef.current?.scrollToEnd({animated: true})}
         />
+
+        {/* No-key banner */}
+        {!apiKey && (
+          <Pressable
+            onPress={() => navigation.navigate('AISettings')}
+            style={({pressed}) => [styles.noKeyBanner, {opacity: pressed ? 0.85 : 1}]}>
+            <Icon name="Key" size={14} color={T.warn} strokeWidth={2.2} />
+            <Text style={styles.noKeyText}>Add your Anthropic key in AI Settings to start chatting</Text>
+            <Icon name="ChevronRight" size={14} color={T.warn} />
+          </Pressable>
+        )}
 
         {/* Suggestion chips */}
         <FlatList
@@ -205,15 +347,21 @@ export default function AIChatScreen({navigation}: any) {
               style={styles.input}
               onSubmitEditing={() => send()}
               returnKeyType="send"
+              editable={!!apiKey}
             />
-            <Pressable style={{padding: 4}}>
-              <Icon name="Mic" size={19} color={T.text3} />
-            </Pressable>
           </View>
           <Pressable
             onPress={() => send()}
-            style={({pressed}) => [styles.sendBtn, {opacity: pressed ? 0.8 : 1}]}>
-            <Icon name="Send" size={20} color={T.accentInk} strokeWidth={2.2} />
+            disabled={typing}
+            style={({pressed}) => [
+              styles.sendBtn,
+              {opacity: pressed || typing || !apiKey ? 0.5 : 1},
+            ]}>
+            {typing ? (
+              <ActivityIndicator size="small" color={T.accentInk} />
+            ) : (
+              <Icon name="Send" size={19} color={T.accentInk} strokeWidth={2.2} />
+            )}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -227,12 +375,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 11,
-    padding: 12,
     paddingHorizontal: 14,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: T.border,
   },
-  backBtn: {
+  headerBtn: {
     width: 36,
     height: 36,
     borderRadius: 11,
@@ -251,7 +399,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {fontFamily: FONTS.semibold, fontSize: 14.5, color: T.text},
-  greenDot: {width: 6, height: 6, borderRadius: 6, backgroundColor: T.accent},
+  statusDot: {width: 6, height: 6, borderRadius: 6},
   thread: {padding: 14, gap: 12, paddingBottom: 8},
   bubbleMe: {
     alignSelf: 'flex-end',
@@ -263,8 +411,9 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 5,
   },
   bubbleMeText: {fontFamily: FONTS.medium, fontSize: 13.5, color: T.accentInk, lineHeight: 20},
-  bubbleAiWrap: {alignSelf: 'flex-start', maxWidth: '88%', gap: 8},
   bubbleAi: {
+    alignSelf: 'flex-start',
+    maxWidth: '88%',
     backgroundColor: T.surface,
     borderWidth: 1,
     borderColor: T.border,
@@ -274,19 +423,26 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 5,
   },
   bubbleAiText: {fontFamily: FONTS.regular, fontSize: 13.5, color: T.text, lineHeight: 22},
-  actionBtn: {
-    alignSelf: 'flex-start',
+  dot: {width: 7, height: 7, borderRadius: 7, backgroundColor: T.text3},
+  noKeyBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 12,
-    backgroundColor: T.accentSoft,
+    gap: 8,
+    marginHorizontal: 14,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: R.card,
+    backgroundColor: 'rgba(251,191,36,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.25)',
+    borderColor: 'rgba(251,191,36,0.2)',
   },
-  dot: {width: 7, height: 7, borderRadius: 7, backgroundColor: T.text3},
+  noKeyText: {
+    flex: 1,
+    fontFamily: FONTS.medium,
+    fontSize: 12.5,
+    color: T.warn,
+    lineHeight: 17,
+  },
   chips: {gap: 8, paddingHorizontal: 14, paddingBottom: 10},
   chip: {
     flexShrink: 0,
@@ -312,9 +468,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingLeft: 14,
-    paddingRight: 6,
+    paddingHorizontal: 14,
     paddingVertical: 4,
     backgroundColor: T.surface2,
     borderWidth: 1,

@@ -15,6 +15,7 @@ import {
   statusCodes,
 } from '@react-native-google-signin/google-signin';
 import {ScrollView} from 'react-native-gesture-handler';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {Path, Svg} from 'react-native-svg';
 import {useToast} from 'react-native-toast-notifications';
 import {COLORS, FONTS} from '../assets/images';
@@ -67,7 +68,8 @@ const LoginScreen = () => {
   };
 
   return (
-    <KeyboardAvoidingView contentContainerStyle={{flex: 1}}>
+    <SafeAreaView style={{flex: 1, backgroundColor: COLORS.bgPrimary}}>
+      <KeyboardAvoidingView style={{flex: 1}}>
       <ScrollView
         contentContainerStyle={{
           backgroundColor: COLORS.bgPrimary,
@@ -155,7 +157,8 @@ const LoginScreen = () => {
           </View>
         </TouchableOpacity>
       </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 

@@ -1,206 +1,573 @@
-/* eslint-disable react-native/no-inline-styles */
-import {Picker} from '@react-native-picker/picker';
 import {usePowerSync} from '@powersync/react-native';
-import React, {useState} from 'react';
-import {useForm} from 'react-hook-form';
+import React, {useRef, useState} from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
+  Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
-  TouchableOpacity,
+  TextInput,
   View,
 } from 'react-native';
-import FloatingLabelInput from '../Components/FloatingInput';
-import {COLORS} from '../assets/images';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {FONTS, R, T} from '../theme';
 
-function generateUUID(): string {
+function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = (Math.random() * 16) | 0;
     return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
   });
 }
 
-interface CreateAccountScreenProps {
-  navigation: any;
-}
-
-const providers = [
+const PROVIDERS = [
   {
-    name: 'Bank of Kigali',
-    logo: 'https://res.cloudinary.com/feyton/image/upload/v1717159585/bank_of_kigali_n0mezg.webp',
-    address: 'BKeBANK',
-    id: 'bk',
-  },
-  {
-    name: 'MTN Mobile Money',
-    logo: 'https://res.cloudinary.com/feyton/image/upload/v1717159585/mtn_momo_l1nzpn.png',
+    id: 'mtn',
+    name: 'MTN MoMo',
+    kind: 'Auto-reads M-Money SMS',
+    icon: 'Phone',
+    tint: '#FFCC00',
     address: 'M-Money',
-    id: 'momo',
+    type: 'Mobile Money',
+    auto: true,
   },
   {
-    name: 'Equity Bank',
-    logo: 'https://res.cloudinary.com/feyton/image/upload/v1718221618/images_vkxrs9.png',
-    address: 'EQUITYBANK',
+    id: 'airtel',
+    name: 'Airtel Money',
+    kind: 'Auto-reads Airtel SMS',
+    icon: 'Phone',
+    tint: '#E40000',
+    address: 'Airtel-Money',
+    type: 'Mobile Money',
+    auto: true,
+  },
+  {
+    id: 'bk',
+    name: 'Bank of Kigali',
+    kind: 'Reads BK SMS alerts',
+    icon: 'Landmark',
+    tint: '#1E73BE',
+    address: 'BKeBANK',
+    type: 'Bank',
+    auto: true,
+  },
+  {
     id: 'equity',
+    name: 'Equity Bank',
+    kind: 'Reads Equity SMS alerts',
+    icon: 'CreditCard',
+    tint: '#E2231A',
+    address: 'EQUITYBANK',
+    type: 'Bank',
+    auto: true,
   },
   {
-    name: 'Custom',
-    logo: 'https://res.cloudinary.com/feyton/image/upload/v1717159585/custom_pncud4.png',
+    id: 'cash',
+    name: 'Cash wallet',
+    kind: 'Track spending manually',
+    icon: 'Coins',
+    tint: '#22C55E',
     address: '',
-    id: 'custom',
+    type: 'Cash',
+    auto: false,
   },
 ];
 
-const CreateAccountScreen: React.FC<CreateAccountScreenProps> = ({
-  navigation,
-}) => {
+type Provider = (typeof PROVIDERS)[number];
+
+export default function CreateAccount({navigation}: any) {
   const db = usePowerSync();
   const {userId} = useCurrentUser();
-  const [auto, setAuto] = useState(true);
-  const [error, setError] = useState('');
-  const {control, handleSubmit} = useForm();
-  const [provider, setProvider] = useState<string>('');
 
-  const handleCreateAccount = async (data: any) => {
-    if (!provider) {
-      setError('Provider is required');
+  const [step, setStep] = useState<1 | 2>(1);
+  const [picked, setPicked] = useState<Provider | null>(null);
+  const [name, setName] = useState('');
+  const [balance, setBalance] = useState('');
+  const [number, setNumber] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const nameRef = useRef<TextInput>(null);
+  const balanceRef = useRef<TextInput>(null);
+  const numberRef = useRef<TextInput>(null);
+
+  const handlePickProvider = (p: Provider) => {
+    setPicked(p);
+  };
+
+  const handleContinue = () => {
+    if (!picked) {return;}
+    setName(picked.name);
+    setBalance('');
+    setNumber('');
+    setError('');
+    setStep(2);
+  };
+
+  const handleCreate = async () => {
+    if (!picked) {return;}
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError('Account name is required');
+      nameRef.current?.focus();
       return;
     }
-    const prov = providers.find(p => p.id === provider);
-    if (!prov) {return;}
+    const openingBalance = parseFloat(balance.replace(/,/g, '')) || 0;
+    setError('');
+    setSaving(true);
     try {
-      const openingBalance = parseFloat(data.opening_balance) || 0;
       await db.execute(
-        'INSERT INTO accounts (id, name, number, opening_balance, available_balance, auto, address, logo, provider_name, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO accounts (id, name, number, opening_balance, available_balance, auto, address, logo, provider_name, type, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
-          generateUUID(),
-          data.name,
-          data.number,
+          uuid(),
+          trimmedName,
+          number.trim(),
           openingBalance,
           openingBalance,
-          auto ? 1 : 0,
-          prov.address,
-          prov.logo,
-          prov.name,
+          picked.auto ? 1 : 0,
+          picked.address,
+          '',
+          picked.name,
+          picked.type,
           userId ?? '',
           new Date().toISOString(),
         ],
       );
       navigation.goBack();
-    } catch (err: any) {
-      setError('Error creating account: ' + err.message);
+    } catch (e: any) {
+      setError(e?.message ?? 'Something went wrong');
+      setSaving(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior="padding">
-      <ScrollView keyboardShouldPersistTaps="handled">
-        <Text
-          style={{
-            textAlign: 'center',
-            fontFamily: 'Poppins-Bold',
-            color: 'white',
-            fontSize: 16,
-          }}>
-          Create Account
-        </Text>
+    <SafeAreaView style={styles.root}>
+      <KeyboardAvoidingView
+        style={{flex: 1}}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Pressable
+            onPress={() => (step === 2 ? setStep(1) : navigation.goBack())}
+            style={({pressed}) => [styles.backBtn, {opacity: pressed ? 0.7 : 1}]}>
+            <Icon name="ArrowLeft" size={18} color={T.text} strokeWidth={2.2} />
+          </Pressable>
+          <View style={{flex: 1}}>
+            <Text style={styles.headerTitle}>
+              {step === 1 ? 'Add an account' : 'Account details'}
+            </Text>
+            <Text style={styles.headerSub}>
+              {step === 1
+                ? 'Connect once — AI reads the rest'
+                : `Setting up ${picked?.name}`}
+            </Text>
+          </View>
+        </View>
 
-        <Text style={styles.errorText}>{error}</Text>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.scroll}>
 
-        <FloatingLabelInput
-          control={control}
-          name="name"
-          label="Account Name"
-          rules={{required: 'Account Name is required'}}
-        />
-        <FloatingLabelInput
-          control={control}
-          name="number"
-          label="Account Number"
-          rules={{required: 'Account Number is required'}}
-        />
-        <FloatingLabelInput
-          control={control}
-          name="opening_balance"
-          label="Opening Balance"
-          rules={{required: 'Initial Amount is required'}}
-        />
+          {step === 1 ? (
+            <>
+              {/* SMS info banner */}
+              <View style={styles.infoBanner}>
+                <View style={styles.infoIcon}>
+                  <Icon name="MessageSquare" size={18} color={T.accent} strokeWidth={2} />
+                </View>
+                <Text style={styles.infoText}>
+                  Grant SMS read access and FinXAI quietly turns your{' '}
+                  <Text style={{color: T.text, fontFamily: FONTS.semibold}}>
+                    MoMo & bank notifications
+                  </Text>
+                  {' '}into clean records. Nothing leaves your phone unencrypted.
+                </Text>
+              </View>
 
-        <View style={styles.pickerContainer}>
-          <Picker
-            selectedValue={provider}
-            onValueChange={itemValue => setProvider(itemValue)}
-            style={styles.picker}>
-            <Picker.Item label="Select Provider" value={''} />
-            {providers.map(prov => (
-              <Picker.Item
-                key={prov.id}
-                style={{
-                  fontFamily: 'Poppins-Regular',
-                  fontSize: 14,
-                  paddingHorizontal: 15,
-                }}
-                label={prov.name}
-                value={prov.id}
+              {/* Provider cards */}
+              <View style={styles.providerList}>
+                {PROVIDERS.map(p => {
+                  const isSelected = picked?.id === p.id;
+                  return (
+                    <Pressable
+                      key={p.id}
+                      onPress={() => handlePickProvider(p)}
+                      style={({pressed}) => [
+                        styles.providerCard,
+                        isSelected && styles.providerCardSelected,
+                        {opacity: pressed ? 0.85 : 1},
+                      ]}>
+                      {/* Icon */}
+                      <View
+                        style={[
+                          styles.providerIcon,
+                          {backgroundColor: p.tint + '22'},
+                        ]}>
+                        <Icon
+                          name={p.icon}
+                          size={22}
+                          color={p.tint}
+                          strokeWidth={2}
+                        />
+                      </View>
+
+                      {/* Label */}
+                      <View style={{flex: 1}}>
+                        <Text style={styles.providerName}>{p.name}</Text>
+                        <Text style={styles.providerKind}>{p.kind}</Text>
+                      </View>
+
+                      {/* Radio indicator */}
+                      <View
+                        style={[
+                          styles.radio,
+                          isSelected && styles.radioSelected,
+                        ]}>
+                        {isSelected && (
+                          <Icon
+                            name="Check"
+                            size={12}
+                            color={T.accentInk}
+                            strokeWidth={3}
+                          />
+                        )}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
+          ) : (
+            <>
+              {/* Step 2 — Account details */}
+              {error !== '' && (
+                <View style={styles.errorBanner}>
+                  <Icon name="AlertCircle" size={14} color={T.expense} strokeWidth={2} />
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              )}
+
+              <View style={styles.form}>
+                {/* Account name */}
+                <View style={styles.field}>
+                  <Text style={styles.fieldLabel}>Account name</Text>
+                  <TextInput
+                    ref={nameRef}
+                    style={styles.fieldInput}
+                    value={name}
+                    onChangeText={setName}
+                    placeholder={picked?.name ?? 'e.g. My MoMo'}
+                    placeholderTextColor={T.text3}
+                    returnKeyType="next"
+                    onSubmitEditing={() => balanceRef.current?.focus()}
+                  />
+                </View>
+
+                {/* Opening balance */}
+                <View style={styles.field}>
+                  <Text style={styles.fieldLabel}>Opening balance (RWF)</Text>
+                  <TextInput
+                    ref={balanceRef}
+                    style={styles.fieldInput}
+                    value={balance}
+                    onChangeText={setBalance}
+                    placeholder="0"
+                    placeholderTextColor={T.text3}
+                    keyboardType="decimal-pad"
+                    returnKeyType={picked?.type === 'Cash' ? 'done' : 'next'}
+                    onSubmitEditing={() =>
+                      picked?.type !== 'Cash'
+                        ? numberRef.current?.focus()
+                        : undefined
+                    }
+                  />
+                  <Text style={styles.fieldHint}>
+                    Enter current balance to start tracking from today
+                  </Text>
+                </View>
+
+                {/* Account number — only for bank / mobile money */}
+                {picked?.type !== 'Cash' && (
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>
+                      Account / phone number{' '}
+                      <Text style={styles.optional}>(optional)</Text>
+                    </Text>
+                    <TextInput
+                      ref={numberRef}
+                      style={styles.fieldInput}
+                      value={number}
+                      onChangeText={setNumber}
+                      placeholder={
+                        picked?.type === 'Mobile Money'
+                          ? '07XXXXXXXX'
+                          : 'XXXXX-XXXXXXXX'
+                      }
+                      placeholderTextColor={T.text3}
+                      keyboardType="phone-pad"
+                      returnKeyType="done"
+                    />
+                  </View>
+                )}
+
+                {/* Auto-tracking info */}
+                {picked?.auto && (
+                  <View style={styles.autoNote}>
+                    <Icon
+                      name="Sparkles"
+                      size={14}
+                      color={T.accent}
+                      strokeWidth={2}
+                    />
+                    <Text style={styles.autoNoteText}>
+                      AI will automatically read{' '}
+                      <Text style={{color: T.text, fontFamily: FONTS.semibold}}>
+                        {picked.address}
+                      </Text>{' '}
+                      SMS messages and create records for you.
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </>
+          )}
+        </ScrollView>
+
+        {/* Bottom action */}
+        <View style={styles.footer}>
+          {step === 1 ? (
+            <Pressable
+              onPress={handleContinue}
+              disabled={!picked}
+              style={({pressed}) => [
+                styles.primaryBtn,
+                !picked && styles.primaryBtnDisabled,
+                {opacity: pressed ? 0.85 : 1},
+              ]}>
+              <Icon
+                name="Lock"
+                size={16}
+                color={picked ? T.accentInk : T.text3}
+                strokeWidth={2.2}
               />
-            ))}
-          </Picker>
+              <Text
+                style={[
+                  styles.primaryBtnText,
+                  !picked && styles.primaryBtnTextDisabled,
+                ]}>
+                {picked ? `Continue with ${picked.name}` : 'Choose an account type'}
+              </Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={handleCreate}
+              disabled={saving}
+              style={({pressed}) => [
+                styles.primaryBtn,
+                {opacity: pressed || saving ? 0.8 : 1},
+              ]}>
+              {saving ? (
+                <ActivityIndicator size="small" color={T.accentInk} />
+              ) : (
+                <Icon
+                  name="Check"
+                  size={16}
+                  color={T.accentInk}
+                  strokeWidth={2.5}
+                />
+              )}
+              <Text style={styles.primaryBtnText}>
+                {saving ? 'Creating…' : 'Create account'}
+              </Text>
+            </Pressable>
+          )}
         </View>
-
-        <View style={styles.switchContainer}>
-          <Text style={styles.switchText}>Automatic Tracking:</Text>
-          <Switch value={auto} onValueChange={setAuto} />
-        </View>
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#1E90FF',
-            padding: 12,
-            borderRadius: 10,
-            alignItems: 'center',
-            marginVertical: 8,
-          }}
-          onPress={handleSubmit(handleCreateAccount)}>
-          <Text style={{fontFamily: 'Poppins-Regular', color: 'white'}}>
-            Create Account
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
-    padding: 20,
-    flex: 1,
-    backgroundColor: COLORS.bgPrimary,
-    paddingBottom: 50,
-  },
-  errorText: {color: 'red', marginBottom: 10},
-  pickerContainer: {
-    borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 10,
-    marginVertical: 8,
-    fontFamily: 'Poppins-Regular',
-    paddingHorizontal: 10,
-  },
-  picker: {color: '#a19e9e', fontFamily: 'Poppins-Regular'},
-  switchContainer: {
+  root: {flex: 1, backgroundColor: T.bg},
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
-    marginHorizontal: 10,
-    marginTop: 10,
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: T.border,
   },
-  switchText: {
-    color: 'white',
-    marginRight: 10,
-    fontFamily: 'Poppins-Regular',
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 11,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
+  headerTitle: {fontFamily: FONTS.semibold, fontSize: 15, color: T.text},
+  headerSub: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3, marginTop: 1},
+  scroll: {padding: 16, paddingBottom: 24},
+  // Step 1
+  infoBanner: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+    backgroundColor: T.accentSoft,
+    borderRadius: R.card,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.2)',
+    padding: 14,
+    marginBottom: 20,
+  },
+  infoIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: T.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  infoText: {
+    flex: 1,
+    fontFamily: FONTS.regular,
+    fontSize: 12.5,
+    color: T.text2,
+    lineHeight: 19,
+  },
+  providerList: {gap: 10},
+  providerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: T.surface,
+    borderRadius: R.card,
+    borderWidth: 1,
+    borderColor: T.border,
+    padding: 14,
+  },
+  providerCardSelected: {
+    borderColor: T.accent,
+    backgroundColor: T.accentSoft,
+  },
+  providerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  providerName: {fontFamily: FONTS.semibold, fontSize: 14, color: T.text},
+  providerKind: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3, marginTop: 2},
+  radio: {
+    width: 22,
+    height: 22,
+    borderRadius: 99,
+    borderWidth: 2,
+    borderColor: T.border2,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  radioSelected: {
+    borderColor: T.accent,
+    backgroundColor: T.accent,
+  },
+  // Step 2
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(251,113,133,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,113,133,0.25)',
+    borderRadius: R.small,
+    padding: 11,
+    marginBottom: 16,
+  },
+  errorText: {fontFamily: FONTS.medium, fontSize: 13, color: T.expense, flex: 1},
+  form: {gap: 4},
+  field: {marginBottom: 16},
+  fieldLabel: {
+    fontFamily: FONTS.medium,
+    fontSize: 12.5,
+    color: T.text2,
+    marginBottom: 8,
+  },
+  optional: {fontFamily: FONTS.regular, color: T.text3},
+  fieldInput: {
+    backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: T.border2,
+    borderRadius: R.small,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontFamily: FONTS.regular,
+    fontSize: 14,
+    color: T.text,
+  },
+  fieldHint: {
+    fontFamily: FONTS.regular,
+    fontSize: 11.5,
+    color: T.text3,
+    marginTop: 6,
+  },
+  autoNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 9,
+    backgroundColor: T.accentSoft,
+    borderRadius: R.small,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.18)',
+    padding: 12,
+    marginTop: 8,
+  },
+  autoNoteText: {
+    flex: 1,
+    fontFamily: FONTS.regular,
+    fontSize: 12.5,
+    color: T.text2,
+    lineHeight: 18,
+  },
+  // Footer
+  footer: {
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: T.border,
+  },
+  primaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+    backgroundColor: T.accent,
+    borderRadius: R.card,
+    paddingVertical: 15,
+  },
+  primaryBtnDisabled: {
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  primaryBtnText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 15,
+    color: T.accentInk,
+  },
+  primaryBtnTextDisabled: {color: T.text3},
 });
-
-export default CreateAccountScreen;

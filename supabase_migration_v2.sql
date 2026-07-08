@@ -15,6 +15,9 @@ ALTER TABLE auto_records
   ADD COLUMN IF NOT EXISTS confidence real DEFAULT 0.5,
   ADD COLUMN IF NOT EXISTS source text DEFAULT 'sms';
 
+ALTER TABLE accounts
+  ADD COLUMN IF NOT EXISTS type text DEFAULT 'Bank';
+
 -- ── New tables ─────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS debts (

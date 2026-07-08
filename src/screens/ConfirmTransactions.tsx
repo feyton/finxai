@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import DatePicker from 'react-native-date-picker';
 import {ScrollView} from 'react-native-gesture-handler';
 import FloatingLabelInputRegular from '../Components/FloatingInputRegular';
@@ -375,7 +376,7 @@ function ConfirmTransactionsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {transactionsQuery.length === 0 && (
         <View style={{marginTop: 20}}>
           <Text style={{fontFamily: FONTS.bold, textAlign: 'center', color: 'white'}}>
@@ -406,7 +407,7 @@ function ConfirmTransactionsScreen() {
         handleIndicatorStyle={styles.sheetHandle}>
         <BottomSheetView>{renderBottomSheetContent()}</BottomSheetView>
       </BottomSheet>
-    </View>
+    </SafeAreaView>
   );
 }
 

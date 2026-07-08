@@ -1,5 +1,6 @@
 import React from 'react';
 import {FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {T, FONTS, R} from '../theme';
 import {Icon} from '../Components/ui';
 
@@ -29,7 +30,7 @@ const ICON_MAP: Record<string, {icon: string; color: string}> = {
 
 export default function NotificationsScreen({navigation}: any) {
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root}>
       <View style={styles.header}>
         <Pressable
           onPress={() => navigation.goBack()}
@@ -61,7 +62,7 @@ export default function NotificationsScreen({navigation}: any) {
           );
         }}
       />
-    </View>
+    </SafeAreaView>
   );
 }
 

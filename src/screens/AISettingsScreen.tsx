@@ -6,24 +6,31 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {FONTS, R, T} from '../theme';
 import {Icon} from '../Components/ui';
 import {
+  clearAnthropicKey,
   clearGeminiKey,
+  DEFAULT_ANTHROPIC_MODEL,
   DEFAULT_MODEL,
+  getAnthropicKey,
+  getAnthropicModel,
   getGeminiKey,
   getGeminiModel,
+  setAnthropicKey,
+  setAnthropicModel,
   setGeminiKey,
   setGeminiModel,
   validateGeminiKey,
 } from '../tools/aiConfig';
+import {validateAnthropicKey} from '../tools/anthropicClient';
 
 type TestState = 'idle' | 'testing' | 'ok' | 'error';
 
@@ -51,6 +58,7 @@ function SectionTitle({children}: {children: string}) {
 }
 
 export default function AISettingsScreen({navigation}: any) {
+  // ── Gemini state ────────────────────────────────────────────────
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [showKey, setShowKey] = useState(false);
@@ -59,6 +67,15 @@ export default function AISettingsScreen({navigation}: any) {
   const [saving, setSaving] = useState(false);
   const [hasKey, setHasKey] = useState(false);
   const inputRef = useRef<TextInput>(null);
+
+  // ── Anthropic state ─────────────────────────────────────────────
+  const [anthKey, setAnthKey] = useState('');
+  const [anthModel, setAnthModel] = useState(DEFAULT_ANTHROPIC_MODEL);
+  const [anthShowKey, setAnthShowKey] = useState(false);
+  const [anthTestState, setAnthTestState] = useState<TestState>('idle');
+  const [anthTestMsg, setAnthTestMsg] = useState('');
+  const [anthSaving, setAnthSaving] = useState(false);
+  const [anthHasKey, setAnthHasKey] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -69,6 +86,14 @@ export default function AISettingsScreen({navigation}: any) {
         setHasKey(true);
       }
       setModel(m);
+
+      const ak = await getAnthropicKey();
+      const am = await getAnthropicModel();
+      if (ak) {
+        setAnthKey(ak);
+        setAnthHasKey(true);
+      }
+      setAnthModel(am);
     })();
   }, []);
 
@@ -113,10 +138,58 @@ export default function AISettingsScreen({navigation}: any) {
     setTestMsg('');
   };
 
+  // ── Anthropic handlers ──────────────────────────────────────────
+  const handleAnthTest = async () => {
+    if (!anthKey.trim() || anthKey.trim().length < 10) {
+      setAnthTestState('error');
+      setAnthTestMsg('Enter a valid API key first');
+      return;
+    }
+    Keyboard.dismiss();
+    setAnthTestState('testing');
+    setAnthTestMsg('');
+    const result = await validateAnthropicKey(anthKey.trim());
+    if (result.ok) {
+      setAnthTestState('ok');
+      setAnthTestMsg('Connected successfully');
+    } else {
+      setAnthTestState('error');
+      setAnthTestMsg(result.error ?? 'Validation failed');
+    }
+  };
+
+  const handleAnthSave = async () => {
+    if (!anthKey.trim()) {return;}
+    setAnthSaving(true);
+    Keyboard.dismiss();
+    await setAnthropicKey(anthKey.trim());
+    await setAnthropicModel(anthModel.trim() || DEFAULT_ANTHROPIC_MODEL);
+    setAnthHasKey(true);
+    setAnthSaving(false);
+    setAnthTestState('idle');
+    setAnthTestMsg('');
+  };
+
+  const handleAnthClear = async () => {
+    await clearAnthropicKey();
+    setAnthKey('');
+    setAnthModel(DEFAULT_ANTHROPIC_MODEL);
+    setAnthHasKey(false);
+    setAnthTestState('idle');
+    setAnthTestMsg('');
+  };
+
   const testColor =
     testState === 'ok'
       ? T.income
       : testState === 'error'
+      ? T.expense
+      : T.text3;
+
+  const anthTestColor =
+    anthTestState === 'ok'
+      ? T.income
+      : anthTestState === 'error'
       ? T.expense
       : T.text3;
 
@@ -311,7 +384,133 @@ export default function AISettingsScreen({navigation}: any) {
                 {opacity: pressed ? 0.7 : 1},
               ]}>
               <Icon name="Trash2" size={15} color={T.expense} strokeWidth={2.2} />
-              <Text style={styles.clearText}>Remove API key</Text>
+              <Text style={styles.clearText}>Remove Gemini key</Text>
+            </Pressable>
+          )}
+
+          {/* ── Divider ─────────────────────────────────────────── */}
+          <View style={styles.divider} />
+
+          {/* ── Finance Coach (Claude) section ──────────────────── */}
+          <View style={[styles.statusChip, anthHasKey ? styles.statusActive : styles.statusInactive]}>
+            <Icon
+              name={anthHasKey ? 'CheckCircle' : 'AlertCircle'}
+              size={15}
+              color={anthHasKey ? T.income : T.warn}
+              strokeWidth={2.2}
+            />
+            <Text style={[styles.statusText, {color: anthHasKey ? T.income : T.warn}]}>
+              {anthHasKey ? 'Finance Coach is active — ready to chat' : 'No key — Finance Coach unavailable'}
+            </Text>
+          </View>
+
+          <SectionTitle>Finance Coach (Claude) API Key</SectionTitle>
+          <View style={styles.card}>
+            <View style={styles.inputWrap}>
+              <TextInput
+                style={styles.input}
+                value={anthKey}
+                onChangeText={t => {
+                  setAnthKey(t);
+                  setAnthTestState('idle');
+                  setAnthTestMsg('');
+                }}
+                placeholder="sk-ant-..."
+                placeholderTextColor={T.text3}
+                secureTextEntry={!anthShowKey}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="done"
+              />
+              <Pressable onPress={() => setAnthShowKey(v => !v)} style={styles.eyeBtn}>
+                <Icon
+                  name={anthShowKey ? 'EyeOff' : 'Eye'}
+                  size={17}
+                  color={T.text3}
+                  strokeWidth={2}
+                />
+              </Pressable>
+            </View>
+
+            {anthTestMsg !== '' && (
+              <View style={styles.testResult}>
+                <Icon
+                  name={anthTestState === 'ok' ? 'CheckCircle' : 'XCircle'}
+                  size={14}
+                  color={anthTestColor}
+                  strokeWidth={2.2}
+                />
+                <Text style={[styles.testMsg, {color: anthTestColor}]}>{anthTestMsg}</Text>
+              </View>
+            )}
+
+            <View style={styles.btnRow}>
+              <Pressable
+                onPress={handleAnthTest}
+                disabled={anthTestState === 'testing'}
+                style={({pressed}) => [
+                  styles.btnTest,
+                  {opacity: pressed || anthTestState === 'testing' ? 0.7 : 1},
+                ]}>
+                {anthTestState === 'testing' ? (
+                  <ActivityIndicator size="small" color={T.text2} />
+                ) : (
+                  <Text style={styles.btnTestText}>Test key</Text>
+                )}
+              </Pressable>
+              <Pressable
+                onPress={handleAnthSave}
+                disabled={anthSaving || !anthKey.trim()}
+                style={({pressed}) => [
+                  styles.btnSave,
+                  {opacity: pressed || anthSaving || !anthKey.trim() ? 0.6 : 1},
+                ]}>
+                {anthSaving ? (
+                  <ActivityIndicator size="small" color={T.accentInk} />
+                ) : (
+                  <Text style={styles.btnSaveText}>Save</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+
+          <SectionTitle>Model</SectionTitle>
+          <View style={styles.card}>
+            <Row
+              label="Active model"
+              value={
+                <TextInput
+                  style={[styles.input, styles.modelInput]}
+                  value={anthModel}
+                  onChangeText={setAnthModel}
+                  placeholder={DEFAULT_ANTHROPIC_MODEL}
+                  placeholderTextColor={T.text3}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="done"
+                />
+              }
+            />
+            <Text style={styles.hint}>
+              Default: {DEFAULT_ANTHROPIC_MODEL}. Change only if you have access to a different Claude model.
+            </Text>
+          </View>
+
+          <View style={styles.getKeyBox}>
+            <Icon name="ExternalLink" size={14} color={T.text3} strokeWidth={2} />
+            <Text style={styles.getKeyText}>
+              Get an API key at{' '}
+              <Text style={{color: T.accent}}>console.anthropic.com</Text>
+              {' '}→ API Keys
+            </Text>
+          </View>
+
+          {anthHasKey && (
+            <Pressable
+              onPress={handleAnthClear}
+              style={({pressed}) => [styles.clearBtn, {opacity: pressed ? 0.7 : 1}]}>
+              <Icon name="Trash2" size={15} color={T.expense} strokeWidth={2.2} />
+              <Text style={styles.clearText}>Remove Finance Coach key</Text>
             </Pressable>
           )}
         </ScrollView>
@@ -492,4 +691,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   clearText: {fontFamily: FONTS.semibold, fontSize: 13, color: T.expense},
+  divider: {
+    height: 1,
+    backgroundColor: T.border,
+    marginVertical: 24,
+  },
 });

@@ -1,17 +1,30 @@
-/* eslint-disable react-native/no-inline-styles */
 import {useQuery} from '@powersync/react-native';
+import {format} from 'date-fns';
 import React, {useMemo} from 'react';
-import {SectionList, StyleSheet, Text, View} from 'react-native';
-import {Path, Svg} from 'react-native-svg';
-import TransactionItem from '../Components/Transaction';
-import {COLORS} from '../assets/images';
+import {
+  Pressable,
+  SectionList,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import {TxRow} from '../Components/TxRow';
+import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
 
-interface AccountDetailsProps {
-  route: any;
+function dayLabel(dt: string): string {
+  const date = new Date(dt);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) {return 'Today';}
+  if (date.toDateString() === yesterday.toDateString()) {return 'Yesterday';}
+  return format(date, 'MMM d, yyyy');
 }
 
-const AccountDetails: React.FC<AccountDetailsProps> = ({route}) => {
+export default function AccountDetails({route, navigation}: any) {
   const {accountId} = route.params;
   const {userId} = useCurrentUser();
 
@@ -19,177 +32,230 @@ const AccountDetails: React.FC<AccountDetailsProps> = ({route}) => {
     'SELECT * FROM accounts WHERE id = ? AND owner_id = ?',
     [accountId, userId ?? ''],
   );
+
   const {data: transactions} = useQuery(
-    'SELECT t.*, a.name as account_name, a.logo as account_logo FROM transactions t LEFT JOIN accounts a ON t.account_id = a.id WHERE t.account_id = ? AND t.owner_id = ? ORDER BY t.date_time DESC',
-    [accountId, userId ?? ''],
-  );
-  const {data: unconfirmedTransactions} = useQuery(
-    'SELECT ar.*, a.name as account_name, a.logo as account_logo FROM auto_records ar LEFT JOIN accounts a ON ar.account_id = a.id WHERE ar.account_id = ? AND ar.owner_id = ?',
+    'SELECT t.*, a.name as account_name FROM transactions t LEFT JOIN accounts a ON t.account_id = a.id WHERE t.account_id = ? AND t.owner_id = ? ORDER BY t.date_time DESC',
     [accountId, userId ?? ''],
   );
 
-  const account = accounts?.[0];
+  const account = (accounts as any[])[0];
 
-  const {monthlyIncome, monthlyExpenses} = useMemo(() => {
-    const income = transactions
-      .filter((t: any) => t.transaction_type === 'income')
-      .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
-    const expenses = transactions
-      .filter((t: any) => t.transaction_type === 'expense')
-      .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
-    return {monthlyIncome: income, monthlyExpenses: expenses};
+  const {totalIncome, totalExpense, sections} = useMemo(() => {
+    let income = 0;
+    let expense = 0;
+    const groups: Record<string, any[]> = {};
+
+    for (const t of transactions as any[]) {
+      if (t.transaction_type === 'income') {income += t.amount ?? 0;}
+      else {expense += t.amount ?? 0;}
+
+      const key = dayLabel(t.date_time);
+      if (!groups[key]) {groups[key] = [];}
+      groups[key].push(t);
+    }
+
+    const secs = Object.entries(groups).map(([title, data]) => ({
+      title,
+      data,
+      dayIncome: data
+        .filter(t => t.transaction_type === 'income')
+        .reduce((s: number, t: any) => s + (t.amount ?? 0), 0),
+      dayExpense: data
+        .filter(t => t.transaction_type !== 'income')
+        .reduce((s: number, t: any) => s + (t.amount ?? 0), 0),
+    }));
+
+    return {totalIncome: income, totalExpense: expense, sections: secs};
   }, [transactions]);
-
-  const renderTransaction = ({item}: any) => (
-    <TransactionItem transaction={item} />
-  );
 
   if (!account) {
     return (
-      <View style={styles.container}>
-        <Text style={{color: 'white'}}>Account not found</Text>
-      </View>
+      <SafeAreaView style={styles.root}>
+        <View style={styles.notFound}>
+          <Text style={styles.notFoundText}>Account not found</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
-  const sections = [
-    {title: 'Recent Records ✅', data: transactions},
-    {title: 'Unconfirmed Records', data: unconfirmedTransactions},
-  ];
+  const tint = accountTint(account.name ?? '');
+  const icon = accountIcon(account.name ?? '', account.type ?? '');
 
   return (
-    <View style={styles.container}>
-      <View
-        style={{
-          padding: 16,
-          backgroundColor: '#2e2e2e',
-          marginHorizontal: 10,
-          borderRadius: 10,
-          marginBottom: 10,
-        }}>
-        <Text style={{fontFamily: 'Poppins-Bold', color: 'white'}}>
-          {account.name}
-        </Text>
-        <Text style={styles.totalText}>
-          RWF: {Number(account.available_balance).toLocaleString()}
-        </Text>
-        <View style={{flexDirection: 'row', gap: 30}}>
-          <View style={{flexDirection: 'row', gap: 2, alignItems: 'center'}}>
-            <Svg width="30px" height="30px" viewBox="0 0 24 24" fill="none">
-              <Path
-                opacity="0.5"
-                d="M11.9993 2C16.7133 2 19.0704 2 20.5348 3.46447C21.2923 4.22195 21.658 5.21824 21.8345 6.65598V10H2.16406V6.65598C2.3406 5.21824 2.70628 4.22195 3.46377 3.46447C4.92823 2 7.28525 2 11.9993 2Z"
-                fill="#737886"
-              />
-              <Path
-                fillRule="evenodd"
-                clipRule="evenodd"
-                d="M2 14C2 11.1997 2 9.79961 2.54497 8.73005C3.02433 7.78924 3.78924 7.02433 4.73005 6.54497C5.79961 6 7.19974 6 10 6H14C16.8003 6 18.2004 6 19.27 6.54497C20.2108 7.02433 20.9757 7.78924 21.455 8.73005C22 9.79961 22 11.1997 22 14C22 16.8003 22 18.2004 21.455 19.27C20.9757 20.2108 20.2108 20.9757 19.27 21.455C18.2004 22 16.8003 22 14 22H10C7.19974 22 5.79961 22 4.73005 21.455C3.78924 20.9757 3.02433 20.2108 2.54497 19.27C2 18.2004 2 16.8003 2 14ZM12.5303 10.4697C12.3897 10.329 12.1989 10.25 12 10.25C11.8011 10.25 11.6103 10.329 11.4697 10.4697L8.96967 12.9697C8.67678 13.2626 8.67678 13.7374 8.96967 14.0303C9.26256 14.3232 9.73744 14.3232 10.0303 14.0303L11.25 12.8107V17C11.25 17.4142 11.5858 17.75 12 17.75C12.4142 17.75 12.75 17.4142 12.75 17V12.8107L13.9697 14.0303C14.2626 14.3232 14.7374 14.3232 15.0303 14.0303C15.3232 13.7374 15.3232 13.2626 15.0303 12.9697L12.5303 10.4697Z"
-                fill="green"
-              />
-            </Svg>
-            <View style={{flexDirection: 'column', gap: 0}}>
-              <Text
-                style={{
-                  fontSize: 14,
-                  fontFamily: 'Poppins-Bold',
-                  marginBottom: -8,
-                  color: 'green',
-                }}>
-                {Number(monthlyIncome).toLocaleString()}
-              </Text>
-              <Text
-                style={{
-                  margin: 0,
-                  padding: 0,
-                  fontSize: 10,
-                  fontFamily: 'Poppins-Bold',
-                  color: 'white',
-                }}>
-                Rwf
-              </Text>
-            </View>
-          </View>
-          <View style={{flexDirection: 'row', gap: 2, alignItems: 'center'}}>
-            <Svg width="30px" height="30px" viewBox="0 0 24 24" fill="white">
-              <Path
-                opacity="0.5"
-                d="M11.9993 2C16.7133 2 19.0704 2 20.5348 3.46447C21.2923 4.22195 21.658 5.21824 21.8345 6.65598V10H2.16406V6.65598C2.3406 5.21824 2.70628 4.22195 3.46377 3.46447C4.92823 2 7.28525 2 11.9993 2Z"
-                fill="#cfbbba"
-              />
-              <Path
-                fillRule="evenodd"
-                clipRule="evenodd"
-                d="M2 14C2 11.1997 2 9.79961 2.54497 8.73005C3.02433 7.78924 3.78924 7.02433 4.73005 6.54497C5.79961 6 7.19974 6 10 6H14C16.8003 6 18.2004 6 19.27 6.54497C20.2108 7.02433 20.9757 7.78924 21.455 8.73005C22 9.79961 22 11.1997 22 14C22 16.8003 22 18.2004 21.455 19.27C20.9757 20.2108 20.2108 20.9757 19.27 21.455C18.2004 22 16.8003 22 14 22H10C7.19974 22 5.79961 22 4.73005 21.455C3.78924 20.9757 3.02433 20.2108 2.54497 19.27C2 18.2004 2 16.8003 2 14ZM12.75 11C12.75 10.5858 12.4142 10.25 12 10.25C11.5858 10.25 11.25 10.5858 11.25 11V15.1893L10.0303 13.9697C9.73744 13.6768 9.26256 13.6768 8.96967 13.9697C8.67678 14.2626 8.67678 14.7374 8.96967 15.0303L11.4697 17.5303C11.6103 17.671 11.8011 17.75 12 17.75C12.1989 17.75 12.3897 17.671 12.5303 17.5303L15.0303 15.0303C15.3232 14.7374 15.3232 14.2626 15.0303 13.9697C14.7374 13.6768 14.2626 13.6768 13.9697 13.9697L12.75 15.1893V11Z"
-                fill="red"
-              />
-            </Svg>
-            <View style={{flexDirection: 'column', gap: 0}}>
-              <Text
-                style={{
-                  fontSize: 14,
-                  fontFamily: 'Poppins-Bold',
-                  marginBottom: -8,
-                  color: 'red',
-                }}>
-                {Number(monthlyExpenses).toLocaleString()}
-              </Text>
-              <Text
-                style={{
-                  margin: 0,
-                  padding: 0,
-                  fontSize: 10,
-                  fontFamily: 'Poppins-Bold',
-                  color: 'white',
-                }}>
-                Rwf
-              </Text>
-            </View>
-          </View>
-        </View>
-      </View>
-
+    <SafeAreaView style={styles.root}>
       <SectionList
         sections={sections}
         keyExtractor={(item: any) => item.id}
-        renderItem={renderTransaction}
-        renderSectionHeader={({section: {title}}) => (
-          <Text style={styles.sectionTitle}>{title}</Text>
+        renderItem={({item}) => <TxRow tx={item} />}
+        renderSectionHeader={({section}: any) => (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionDate}>{section.title}</Text>
+            <View style={styles.dayTotals}>
+              {section.dayIncome > 0 && (
+                <Text style={styles.dayIn}>+{fmtAmount(section.dayIncome)}</Text>
+              )}
+              {section.dayExpense > 0 && (
+                <Text style={styles.dayOut}>-{fmtAmount(section.dayExpense)}</Text>
+              )}
+            </View>
+          </View>
         )}
-        renderSectionFooter={({section: {data}}) =>
-          data.length === 0 ? (
-            <Text style={styles.noTransactions}>No transactions</Text>
-          ) : null
+        ListHeaderComponent={
+          <>
+            {/* Back + title */}
+            <View style={styles.header}>
+              <Pressable
+                onPress={() => navigation.goBack()}
+                style={({pressed}) => [styles.backBtn, {opacity: pressed ? 0.7 : 1}]}>
+                <Icon name="ArrowLeft" size={18} color={T.text} strokeWidth={2.2} />
+              </Pressable>
+              <Text style={styles.headerTitle} numberOfLines={1}>{account.name}</Text>
+              <View style={{width: 36}} />
+            </View>
+
+            {/* Account summary card */}
+            <View style={styles.summaryCard}>
+              <View style={styles.summaryTop}>
+                <View style={[styles.accountIcon, {backgroundColor: tint + '22'}]}>
+                  <Icon name={icon} size={22} color={tint} strokeWidth={2} />
+                </View>
+                <View style={{flex: 1}}>
+                  <Text style={styles.accountName}>{account.name}</Text>
+                  <Text style={styles.accountType}>{account.type ?? 'Account'}</Text>
+                </View>
+              </View>
+              <Text style={styles.balanceLabel}>Current balance</Text>
+              <Text style={styles.balanceValue}>
+                RWF {fmtAmount(account.available_balance ?? 0)}
+              </Text>
+              <View style={styles.statsRow}>
+                <View style={styles.stat}>
+                  <Icon name="TrendingUp" size={14} color={T.income} strokeWidth={2.2} />
+                  <View>
+                    <Text style={styles.statLabel}>Total income</Text>
+                    <Text style={[styles.statValue, {color: T.income}]}>
+                      +RWF {fmtAmount(totalIncome)}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.stat}>
+                  <Icon name="TrendingDown" size={14} color={T.expense} strokeWidth={2.2} />
+                  <View>
+                    <Text style={styles.statLabel}>Total expenses</Text>
+                    <Text style={[styles.statValue, {color: T.expense}]}>
+                      -RWF {fmtAmount(totalExpense)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* Section label */}
+            {(transactions as any[]).length > 0 && (
+              <Text style={styles.sectionLabel}>All transactions</Text>
+            )}
+          </>
         }
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Icon name="Receipt" size={38} color={T.text3} strokeWidth={1.4} />
+            <Text style={styles.emptyText}>No transactions yet</Text>
+          </View>
+        }
+        contentContainerStyle={styles.list}
+        stickySectionHeadersEnabled={false}
       />
-    </View>
+    </SafeAreaView>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  root: {flex: 1, backgroundColor: T.bg},
+  list: {paddingBottom: 80},
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
+    gap: 10,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 11,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  headerTitle: {flex: 1, fontFamily: FONTS.semibold, fontSize: 16, color: T.text, textAlign: 'center'},
+  summaryCard: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: T.surface,
+    borderRadius: R.card,
+    borderWidth: 1,
+    borderColor: T.border,
     padding: 16,
-    backgroundColor: COLORS.bgPrimary,
+    gap: 4,
   },
-  totalText: {
-    fontSize: 24,
-    color: '#fff',
-    marginBottom: 10,
-    fontFamily: 'Poppins-Bold',
+  summaryTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
   },
-  sectionTitle: {
-    fontSize: 18,
-    color: '#fff',
-    marginBottom: 10,
-    fontFamily: 'Poppins-Bold',
+  accountIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  noTransactions: {
-    color: '#fff',
-    textAlign: 'center',
-    padding: 16,
-    fontFamily: 'Poppins-Regular',
+  accountName: {fontFamily: FONTS.semibold, fontSize: 14.5, color: T.text},
+  accountType: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3, marginTop: 1},
+  balanceLabel: {fontFamily: FONTS.medium, fontSize: 12, color: T.text3},
+  balanceValue: {fontFamily: FONTS.bold, fontSize: 26, color: T.text, marginBottom: 12},
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: T.border,
+    paddingTop: 12,
+    marginTop: 4,
   },
+  stat: {flexDirection: 'row', flex: 1, gap: 8, alignItems: 'center'},
+  statDivider: {width: 1, height: 32, backgroundColor: T.border, marginHorizontal: 12},
+  statLabel: {fontFamily: FONTS.regular, fontSize: 11, color: T.text3},
+  statValue: {fontFamily: FONTS.semibold, fontSize: 13},
+  sectionLabel: {
+    fontFamily: FONTS.semibold,
+    fontSize: 12,
+    color: T.text3,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 4,
+  },
+  sectionDate: {fontFamily: FONTS.semibold, fontSize: 12, color: T.text3, textTransform: 'uppercase', letterSpacing: 0.5},
+  dayTotals: {flexDirection: 'row', gap: 10},
+  dayIn: {fontFamily: FONTS.semibold, fontSize: 12, color: T.income},
+  dayOut: {fontFamily: FONTS.semibold, fontSize: 12, color: T.expense},
+  empty: {alignItems: 'center', paddingTop: 40, gap: 8},
+  emptyText: {fontFamily: FONTS.regular, fontSize: 14, color: T.text3},
+  notFound: {flex: 1, alignItems: 'center', justifyContent: 'center'},
+  notFoundText: {fontFamily: FONTS.regular, fontSize: 14, color: T.text2},
 });
-
-export default AccountDetails;

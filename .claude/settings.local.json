@@ -29,7 +29,8 @@
       "PowerShell(node -e \"const d=require\\('E:/finxai/node_modules/tailwindcss/package.json'\\); console.log\\('tailwindcss version:', d.version\\)\" 2>&1)",
       "PowerShell(node -e \"const r = require\\('E:/finxai/node_modules/realm'\\); console.log\\('OpenRealmBehaviorType:', r.OpenRealmBehaviorType\\); console.log\\('keys:', Object.keys\\(r\\).filter\\(k => k.includes\\('Behavior'\\) || k.includes\\('Open'\\)\\)\\)\" 2>&1)",
       "PowerShell(keytool -list -v -keystore \"$env:USERPROFILE\\\\.android\\\\debug.keystore\" -alias androiddebugkey -storepass android -keypass android 2>&1 | Select-String \"SHA1|SHA256|Certificate|Alias\")",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Skill(claude-api)"
     ]
   }
 }

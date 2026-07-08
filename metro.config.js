@@ -1,6 +1,4 @@
-const path = require('path');
 const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
-const {withNativeWind} = require('nativewind/metro');
 
 /**
  * Metro configuration
@@ -10,12 +8,10 @@ const {withNativeWind} = require('nativewind/metro');
  */
 const config = {
   resolver: {
-    nodeModulesPaths: [
-      path.resolve(__dirname, 'node_modules/nativewind/node_modules'),
-    ],
+    // Gradle's native builds churn temp dirs under android/.cxx and android/build;
+    // watching them crashes Metro's fallback watcher (ENOENT) mid-build.
+    blockList: [/[\\/]android[\\/]\.cxx[\\/]/, /[\\/]android[\\/]build[\\/]/],
   },
 };
 
-module.exports = withNativeWind(mergeConfig(getDefaultConfig(__dirname), config), {
-  input: './global.css',
-});
+module.exports = mergeConfig(getDefaultConfig(__dirname), config);

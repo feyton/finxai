@@ -7,6 +7,7 @@ import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {PowerSyncContext} from '@powersync/react-native';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
+import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {ToastProvider} from 'react-native-toast-notifications';
 import {Session} from '@supabase/supabase-js';
 
@@ -78,9 +79,10 @@ function App(): React.JSX.Element {
   }
 
   return (
-    <PowerSyncContext.Provider value={db}>
-      <GestureHandlerRootView style={{flex: 1}}>
-        <ToastProvider>
+    <SafeAreaProvider>
+      <PowerSyncContext.Provider value={db}>
+        <GestureHandlerRootView style={{flex: 1}}>
+          <ToastProvider>
           <NavigationContainer>
             {!session ? (
               <LoginScreen />
@@ -110,9 +112,10 @@ function App(): React.JSX.Element {
               </Stack.Navigator>
             )}
           </NavigationContainer>
-        </ToastProvider>
-      </GestureHandlerRootView>
-    </PowerSyncContext.Provider>
+          </ToastProvider>
+        </GestureHandlerRootView>
+      </PowerSyncContext.Provider>
+    </SafeAreaProvider>
   );
 }
 

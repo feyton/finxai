@@ -8,7 +8,7 @@
     "lint": "eslint .",
     "start": "npx react-native start",
     "test": "jest",
-    "build": "npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res/ && cd android && ./gradlew assembleRelease"
+    "build": "cd android && gradlew assembleRelease"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

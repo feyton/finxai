@@ -4,6 +4,7 @@ import {Picker} from '@react-native-picker/picker';
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useState} from 'react';
 import {Button, StyleSheet, View} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import DatePicker from 'react-native-date-picker';
 import {ScrollView} from 'react-native-gesture-handler';
 import FloatingLabelInputRegular from '../Components/FloatingInputRegular';
@@ -64,7 +65,8 @@ const AddPlannedPaymentScreen = ({navigation}: any) => {
   };
 
   return (
-    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
+    <SafeAreaView style={styles.container}>
+      <ScrollView keyboardShouldPersistTaps="handled">
       <View style={{padding: 20, backgroundColor: COLORS.bgPrimary, flex: 1}}>
         <FloatingLabelInputRegular
           value={name}
@@ -127,7 +129,8 @@ const AddPlannedPaymentScreen = ({navigation}: any) => {
         />
         <Button title="Add Scheduled Payment" onPress={addScheduledPayment} />
       </View>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 };
 
