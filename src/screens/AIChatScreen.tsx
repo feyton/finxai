@@ -1,7 +1,8 @@
-import {useQuery} from '@powersync/react-native';
+import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -20,12 +21,14 @@ import {
   getAnthropicKey,
   getAnthropicModel,
 } from '../tools/aiConfig';
-import {AnthropicApiMessage, askClaude} from '../tools/anthropicClient';
+import {ToolMessage, askClaudeTools} from '../tools/anthropicClient';
+import {AiAction, anthropicToolSchemas, findAction} from '../tools/aiActions';
 
 interface Message {
   id: string;
   who: 'ai' | 'me';
   text: string;
+  kind?: 'action';
 }
 
 const SEED: Message[] = [
@@ -69,6 +72,14 @@ function Bubble({msg}: {msg: Message}) {
       </View>
     );
   }
+  if (msg.kind === 'action') {
+    return (
+      <View style={styles.actionCard}>
+        <Icon name="CheckCircle2" size={16} color={T.accent} strokeWidth={2.2} />
+        <Text style={styles.actionText}>{msg.text}</Text>
+      </View>
+    );
+  }
   return (
     <View style={styles.bubbleAi}>
       <Text style={styles.bubbleAiText}>{richText(msg.text)}</Text>
@@ -94,6 +105,7 @@ function monthStartISO() {
 export default function AIChatScreen({navigation}: any) {
   const {firstName, userId} = useCurrentUser();
   const uid = userId ?? '';
+  const db = usePowerSync();
 
   const ms = useMemo(() => monthStartISO(), []);
 
@@ -198,17 +210,20 @@ ${budgetLines}
 ## Debts
 ${debtLines}
 
+You can TAKE ACTIONS with the provided tools — add a transaction, recategorize one, create a budget, schedule a recurring payment, and look up exact spending. Prefer doing the action with a tool over telling the user to do it by hand. The app automatically asks the user to confirm any action that changes their data, so you don't need to ask permission first — just call the tool with your best interpretation. Use the read tools when you need exact figures beyond the summary above.
+
 Guidelines:
 - Respond in English or Kinyarwanda matching the user's language
 - Keep answers to 2-4 sentences unless the user asks for detail
 - Bold key figures with **asterisks**
 - Give actionable, specific advice
+- After taking an action, briefly confirm what you did
 - If asked about data you don't have, say so honestly`;
   }, [firstName, accounts, totalBalance, monthlyIncome, monthlyExpenses, topCats, recentTxns, budgets, debts]);
 
   // ── Chat state ─────────────────────────────────────────────────
   const [msgs, setMsgs] = useState<Message[]>(SEED);
-  const [apiHistory, setApiHistory] = useState<AnthropicApiMessage[]>([]);
+  const [apiHistory, setApiHistory] = useState<ToolMessage[]>([]);
   const [typing, setTyping] = useState(false);
   const [input, setInput] = useState('');
   const [apiKey, setApiKeyState] = useState('');
@@ -228,7 +243,21 @@ Guidelines:
     listRef.current?.scrollToEnd({animated: true});
   }, [msgs, typing]);
 
-  const send = (text?: string) => {
+  // Ask the user to confirm a data-changing action before it runs.
+  const confirmWrite = (action: AiAction, actionInput: any) =>
+    new Promise<boolean>(resolve => {
+      Alert.alert(
+        'Confirm action',
+        action.summary ? action.summary(actionInput) : `Run ${action.name}?`,
+        [
+          {text: 'Cancel', style: 'cancel', onPress: () => resolve(false)},
+          {text: 'Do it', onPress: () => resolve(true)},
+        ],
+        {cancelable: true, onDismiss: () => resolve(false)},
+      );
+    });
+
+  const send = async (text?: string) => {
     const q = (text ?? input).trim();
     if (!q) {return;}
 
@@ -238,33 +267,90 @@ Guidelines:
     }
 
     setInput('');
-    const userMsg: Message = {id: 'u' + Date.now(), who: 'me', text: q};
-    setMsgs(m => [...m, userMsg]);
+    setMsgs(m => [...m, {id: 'u' + Date.now(), who: 'me', text: q}]);
 
-    const newHistory: AnthropicApiMessage[] = [
-      ...apiHistory,
-      {role: 'user', content: q},
-    ];
-    setApiHistory(newHistory);
+    let history: ToolMessage[] = [...apiHistory, {role: 'user', content: q}];
     setTyping(true);
 
-    const capped = newHistory.slice(-20);
-    const snap = systemPrompt;
-    const keySnap = apiKey;
-    const modelSnap = model;
+    const tools = anthropicToolSchemas();
+    const ctx = {db, userId: uid};
 
-    askClaude(capped, snap, keySnap, modelSnap)
-      .then(reply => {
-        setMsgs(m => [...m, {id: 'a' + Date.now(), who: 'ai', text: reply}]);
-        setApiHistory(prev => [...prev, {role: 'assistant', content: reply}]);
-      })
-      .catch((e: any) => {
-        const errText = e?.message?.includes('Invalid')
-          ? 'API key rejected. Go to AI Settings to update it.'
-          : `Something went wrong: ${e?.message ?? 'unknown error'}`;
-        setMsgs(m => [...m, {id: 'err' + Date.now(), who: 'ai', text: errText}]);
-      })
-      .finally(() => setTyping(false));
+    try {
+      // Agentic loop: model may call tools; execute and feed results back.
+      for (let step = 0; step < 6; step++) {
+        const turn = await askClaudeTools(
+          history.slice(-24),
+          systemPrompt,
+          apiKey,
+          model,
+          tools,
+        );
+        history = [...history, {role: 'assistant', content: turn.content}];
+
+        const textParts = turn.content
+          .filter((b: any) => b.type === 'text')
+          .map((b: any) => b.text)
+          .join('\n')
+          .trim();
+        if (textParts) {
+          setMsgs(m => [...m, {id: `a${Date.now()}_${step}`, who: 'ai', text: textParts}]);
+        }
+
+        const toolUses = turn.content.filter((b: any) => b.type === 'tool_use');
+        if (turn.stopReason !== 'tool_use' || toolUses.length === 0) {
+          break;
+        }
+
+        const results: any[] = [];
+        for (const tu of toolUses) {
+          const action = findAction(tu.name);
+          let content = '';
+          let isError = false;
+          if (!action) {
+            content = `Unknown action "${tu.name}".`;
+            isError = true;
+          } else if (action.kind === 'write') {
+            const ok = await confirmWrite(action, tu.input);
+            if (!ok) {
+              content = 'The user declined this action. Acknowledge and continue.';
+            } else {
+              try {
+                content = await action.run(ctx, tu.input);
+                setMsgs(m => [
+                  ...m,
+                  {id: `act${Date.now()}`, who: 'ai', kind: 'action', text: content},
+                ]);
+              } catch (e: any) {
+                content = `Action failed: ${e?.message ?? 'unknown error'}`;
+                isError = true;
+              }
+            }
+          } else {
+            try {
+              content = await action.run(ctx, tu.input);
+            } catch (e: any) {
+              content = `Lookup failed: ${e?.message ?? 'unknown error'}`;
+              isError = true;
+            }
+          }
+          results.push({
+            type: 'tool_result',
+            tool_use_id: tu.id,
+            content,
+            is_error: isError,
+          });
+        }
+        history = [...history, {role: 'user', content: results}];
+      }
+      setApiHistory(history);
+    } catch (e: any) {
+      const errText = e?.message?.includes('Invalid') || e?.message?.includes('key')
+        ? 'API key rejected. Go to AI Settings to update it.'
+        : `Something went wrong: ${e?.message ?? 'unknown error'}`;
+      setMsgs(m => [...m, {id: 'err' + Date.now(), who: 'ai', text: errText}]);
+    } finally {
+      setTyping(false);
+    }
   };
 
   return (
@@ -423,6 +509,20 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 5,
   },
   bubbleAiText: {fontFamily: FONTS.regular, fontSize: 13.5, color: T.text, lineHeight: 22},
+  actionCard: {
+    alignSelf: 'flex-start',
+    maxWidth: '88%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: T.accentSoft,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.25)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  actionText: {flex: 1, fontFamily: FONTS.medium, fontSize: 12.5, color: T.text, lineHeight: 18},
   dot: {width: 7, height: 7, borderRadius: 7, backgroundColor: T.text3},
   noKeyBanner: {
     flexDirection: 'row',

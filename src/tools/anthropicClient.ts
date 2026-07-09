@@ -7,6 +7,52 @@ export interface AnthropicApiMessage {
   content: string;
 }
 
+// Content may be a plain string or an array of content blocks (text / tool_use
+// / tool_result) once tool use is in play.
+export interface ToolMessage {
+  role: 'user' | 'assistant';
+  content: any;
+}
+
+export interface ClaudeToolTurn {
+  stopReason: string;
+  content: any[]; // assistant content blocks (text + tool_use)
+}
+
+// A single tool-use-capable turn. The caller runs the agentic loop: inspect
+// stopReason, execute any tool_use blocks, append tool_result, call again.
+export async function askClaudeTools(
+  messages: ToolMessage[],
+  systemPrompt: string,
+  apiKey: string,
+  model: string,
+  tools: any[],
+): Promise<ClaudeToolTurn> {
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': VERSION,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1024,
+      system: [{type: 'text', text: systemPrompt, cache_control: {type: 'ephemeral'}}],
+      messages,
+      tools,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error?.message ?? `API error ${res.status}`);
+  }
+
+  const data = await res.json();
+  return {stopReason: data.stop_reason, content: data.content ?? []};
+}
+
 export async function askClaude(
   messages: AnthropicApiMessage[],
   systemPrompt: string,
