@@ -1,13 +1,13 @@
 import {
   AlertCircle, ArrowDownLeft, ArrowLeft, ArrowUpRight,
-  Bell, Brain, Building2, Calendar, CalendarPlus, Car, Check, CheckCircle, CheckCircle2,
+  Bell, Bike, Brain, Building2, Calendar, CalendarPlus, Car, Check, CheckCircle, CheckCircle2,
   ChevronDown, ChevronLeft, ChevronRight, Clock, CreditCard,
   Coins, Delete, ExternalLink, Eye, EyeOff, Filter, Flame, Gift, Globe, Handshake, Heart, Home, Info,
   Key, Landmark, Lock, MessageSquare, Mic, MoreHorizontal, PenLine, Pencil,
   Phone, PieChart, Plus, Receipt, RefreshCcw, Repeat,
   Search, Send, Settings2, Share2, Shield, ShoppingBag, ShoppingCart,
   SlidersHorizontal, Sparkles, Star, Tag, Target,
-  Trash2, TrendingDown, TrendingUp, UtensilsCrossed, Users, UserPlus,
+  Trash2, TrendingDown, TrendingUp, User, UtensilsCrossed, Users, UserPlus,
   Wallet, X, XCircle, Zap, Scissors,
 } from 'lucide-react-native';
 import React from 'react';
@@ -34,6 +34,7 @@ const MAP: Record<string, any> = {
   Calendar,
   CalendarPlus,
   Users,
+  User,
   UserPlus,
   Tag,
   CreditCard,
@@ -81,6 +82,7 @@ const MAP: Record<string, any> = {
   Delete,
   Pencil,
   Handshake,
+  Bike,
 };
 
 interface IconProps {

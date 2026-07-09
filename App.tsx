@@ -23,6 +23,8 @@ import CreateBudgetScreen from './src/screens/CreateBudget';
 import AddPlannedPaymentScreen from './src/screens/AddPlannedPayment';
 import BudgetDetails from './src/screens/BudgetDetails';
 import CreateRecord from './src/screens/CreateRecord';
+import DebtScreen from './src/screens/DebtScreen';
+import AddDebt from './src/screens/AddDebt';
 import LoginScreen from './src/screens/LoginScreen';
 import ScheduledPaymentsScreen from './src/screens/PlannedPaymentsScreen';
 import ProfilePage from './src/screens/ProfilePage';
@@ -105,7 +107,8 @@ function App(): React.JSX.Element {
                 <Stack.Screen name="ScheduledPayment" component={ScheduledPaymentsScreen} />
                 <Stack.Screen name="AddPlannedPayment" component={AddPlannedPaymentScreen} />
                 <Stack.Screen name="UserProfile" component={ProfilePage} />
-                <Stack.Screen name="Debt" component={ComingSoonScreen} />
+                <Stack.Screen name="Debt" component={DebtScreen} />
+                <Stack.Screen name="AddDebt" component={AddDebt} />
                 <Stack.Screen name="Shopping" component={ComingSoonScreen} />
                 <Stack.Screen name="Shared" component={ComingSoonScreen} />
                 <Stack.Screen name="Schedule" component={ComingSoonScreen} />
