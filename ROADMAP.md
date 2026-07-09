@@ -1,0 +1,158 @@
+# FinXAI — Roadmap & architecture plan
+
+Living plan for the bigger pieces: a synced **web app**, **location tagging**,
+**account transfers**, and **payment-channel intelligence** (learn the seller +
+channel + fee so we can re-initiate a payment later). Written so the Android app
+and everything new stay in sync around one backend.
+
+---
+
+## 0. The backbone we already have
+
+- **Supabase (Postgres)** is the single source of truth.
+- **PowerSync** streams that Postgres data to the Android app's local SQLite and
+  uploads local writes back (see `SupabaseConnector.ts`).
+- Everything is scoped by `owner_id`.
+
+Two things to harden before we fan out to the web:
+
+1. **Row-Level Security (RLS).** Today the app relies on `owner_id = ?` in every
+   query with the anon key. For a web client (and safety generally) add RLS
+   policies on every table: `USING (owner_id = auth.uid())` for select/update/
+   delete and `WITH CHECK (owner_id = auth.uid())` for insert. Then neither
+   client can ever read another user's rows even if a query forgets the filter.
+2. **A schema-change procedure** (see §5) so new columns don't break sync.
+
+---
+
+## 1. Web version (synced with Android)
+
+**Goal:** richer data management + accessibility on a big screen, same data.
+
+**Recommended shape:** a **monorepo** with npm workspaces:
+
+```
+finxai/
+  packages/core/     # shared, framework-agnostic logic (no RN, no DOM)
+  apps/mobile/       # the current React Native app
+  apps/web/          # new — Vite + React (or Next.js)
+```
+
+- **`packages/core`** — extract the pure logic both clients share so they never
+  drift: `theme` tokens, `resolveCat` + category data (`data.json`), `fmtAmount`,
+  the **AI action catalog** (`aiActions.ts` — schemas are UI-agnostic), the
+  Anthropic client, and TypeScript types for every table. Mobile and web both
+  import from here.
+- **Web data layer — go direct to Supabase**, not PowerSync. The web is online-
+  first, so `@supabase/supabase-js` with **Realtime subscriptions** gives live
+  updates without PowerSync's local-DB complexity. (PowerSync also has a web SDK
+  via wa-sqlite/IndexedDB — only reach for it if we later need offline web.)
+- **Auth** — same Google sign-in through Supabase; the session works across both.
+- **What the web unlocks:** bulk edit/categorize, CSV/PDF export, big-screen
+  charts and filters, budget management, merchant/channel rule management, and an
+  admin view of the AI's learned rules.
+
+**Migration path (low-risk, incremental):**
+1. Stand up the monorepo; move the current app under `apps/mobile` (paths only).
+2. Extract `packages/core` a slice at a time (start with types + `theme` +
+   `resolveCat` + `data.json`), pointing mobile imports at it.
+3. Scaffold `apps/web` (Vite + React + supabase-js), reuse `core`, ship a
+   read-only dashboard first, then editing.
+4. Add RLS before the web writes anything.
+
+---
+
+## 2. Location tagging (pin the shop)
+
+**Constraint:** SMS carries **no location**. So we capture it on our side.
+
+**Feasible in three tiers, ship incrementally:**
+
+- **Tier 1 — foreground capture (easy, do first).** When a transaction is
+  created/confirmed in-app, grab the current GPS fix (`ACCESS_FINE_LOCATION`,
+  requested at that moment), store `lat`/`lng`/`accuracy`, reverse-geocode to a
+  place name. Covers manual entries and confirmations.
+- **Tier 2 — merchant→place memory (high value, cheap).** Once a merchant is seen
+  at a location, remember it (a `merchant_places` table or the existing merchant
+  memory). Future transactions from that same merchant — **including background
+  SMS ones** — inherit the pin with no GPS needed. This is what makes "pinpoint
+  the shop" work without draining the battery.
+- **Tier 3 — background capture on SMS arrival (optional, heavier).** SMS is
+  received via a broadcast even in the background; to tag it live we'd need
+  `ACCESS_BACKGROUND_LOCATION` and a headless task reading last-known location.
+  Battery + Play-policy cost is real — only if Tier 2 proves insufficient.
+
+**Schema:** add `lat REAL`, `lng REAL`, `place TEXT` to `transactions`; optional
+`merchant_places(pattern, lat, lng, place, owner_id)`. Reverse-geocode with
+Google Geocoding or OpenStreetMap Nominatim. The web map view (Tier 1+2 data)
+then plots spending by shop.
+
+---
+
+## 3. Account transfers (bank ↔ wallet)
+
+The `transfers` table already exists (from/to account, amount, fee). To finish:
+
+- **Manual transfer UI** — a "Transfer" mode: from-account → to-account, amount,
+  fee; on save, debit source, credit destination, write a `transfers` row.
+- **AI action** — `create_transfer` in `aiActions.ts` so the coach can move money
+  on request ("move 50k from BK to MoMo"), gated by the usual confirm.
+- **SMS/AI-sorter context** — teach the parser that a debit on one own-account
+  paired with a credit on another (or narrations like "transfer to own account",
+  "wallet top-up") is a **transfer, not an expense**, so it nets to zero across
+  net worth. Match by account number when possible; otherwise surface as a
+  suggested transfer for the user to confirm.
+
+---
+
+## 4. Payment-channel intelligence + re-initiate payment
+
+**Vision:** learn per seller — the **channel** (MoMoPay / Bank transfer / Direct
+transfer / Airtime / Bill), the **code** (e.g. MoMoPay merchant code), and the
+**fee** — so later you can search a seller and fire a new payment down the same
+rail (`*182*8*1*<code>#` for MoMoPay, the bank flow for transfers).
+
+**Data model (needs the §5 schema procedure):**
+- `transactions.channel TEXT`, `transactions.pay_code TEXT` (fee already exists).
+- Extend merchant memory: `merchant_rules` (or a new `merchant_channels`) learns
+  `channel` + `pay_code` per normalized seller, the same way category is learned
+  today. The **Fix sheet** gains channel + code fields; confirming trains it.
+- Local-first option (no backend change) to start: store channel/code in the
+  device-local merchant memory (like the current sender→account channel memory),
+  then promote to synced columns once the migration lands.
+
+**Parser training:** extend the Gemini prompt to also extract `channel` and `fee`
+from the SMS (BK/MoMo narrations are distinctive), and pass known
+seller→channel rules as context so it self-corrects — mirroring how category
+rules are already fed in.
+
+**Re-initiate payment (later):** a "Pay again" action on a seller builds the USSD
+string from the learned channel + code and dials it via `Linking.openURL('tel:'
++ encodeURIComponent('*182*8*1*<code>#'))`. Fees are tracked from the parsed
+`fees`, so we can show the true cost per rail.
+
+---
+
+## 5. How to add a column without breaking sync (do this in order)
+
+Adding a field to a synced table is a 3-step dance — wrong order = failed uploads:
+
+1. **Supabase first:** `ALTER TABLE <t> ADD COLUMN <c> ...;` (add to
+   `supabase_migration_v2.sql` and run it).
+2. **PowerSync Sync Rules:** add the column to the table's rule so it streams
+   down (PowerSync dashboard).
+3. **Client schema last:** add `column.<type>` to `PowerSyncSchema.ts`.
+
+Only after 1+2 should the client start *writing* the column, or the connector's
+upsert will 400 on an unknown Supabase column and retry forever.
+
+---
+
+## Suggested sequence
+
+1. RLS policies + schema procedure baked in (unblocks everything).
+2. Transfers (manual UI + AI action + sorter context) — table already exists.
+3. Payment-channel learning (local-first → synced columns) + fee tracking.
+4. `packages/core` extraction, then `apps/web` read-only dashboard → editing.
+5. Location Tier 1 + Tier 2 (foreground + merchant→place memory), web map view.
+6. Location Tier 3 and USSD "Pay again" as the payoffs once data is flowing.
