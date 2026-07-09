@@ -360,7 +360,7 @@ export default function HomeScreen({navigation}: any) {
                     key={txn.id}
                     txn={txn}
                     divider={i < recentTxns.length - 1}
-                    onPress={() => {}} // Transaction detail — Phase 5
+                    onPress={() => navigate('Transactions', {openTxId: txn.id})}
                   />
                 ))}
               </Card>

@@ -5,7 +5,7 @@ import BottomSheet, {
 import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import {format} from 'date-fns';
-import React, {useCallback, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Pressable,
   SectionList,
@@ -257,7 +257,7 @@ const FILTERS: {key: FilterType; label: string}[] = [
   {key: 'ai', label: 'AI-tagged'},
 ];
 
-export default function RecordsPage({navigation}: any) {
+export default function RecordsPage({navigation, route}: any) {
   const {userId} = useCurrentUser();
   const db = usePowerSync();
 
@@ -337,6 +337,25 @@ export default function RecordsPage({navigation}: any) {
     setSelected(tx);
     sheetRef.current?.snapToIndex(0);
   };
+
+  // Deeplink: open a transaction's detail when navigated with openTxId
+  // (e.g. tapping a recent transaction on the Home landing page).
+  useEffect(() => {
+    const id = route?.params?.openTxId;
+    if (!id) {
+      return;
+    }
+    const list = txns as any[];
+    if (!list.length) {
+      return; // wait for the query to load, then this effect re-runs
+    }
+    const tx = list.find(t => t.id === id);
+    if (tx) {
+      openDetail(tx);
+    }
+    navigation.setParams({openTxId: undefined});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params?.openTxId, txns]);
 
   const deleteSelected = useCallback(async () => {
     if (!selected) {return;}
