@@ -216,6 +216,7 @@ Guidelines:
 - Respond in English or Kinyarwanda matching the user's language
 - Keep answers to 2-4 sentences unless the user asks for detail
 - Bold key figures with **asterisks**
+- Do NOT use markdown tables or "#" headers — the chat renders plain text. Use short lines and "•" bullets instead.
 - Give actionable, specific advice
 - After taking an action, briefly confirm what you did
 - If asked about data you don't have, say so honestly`;
@@ -387,6 +388,7 @@ Guidelines:
         {/* Thread */}
         <FlatList
           ref={listRef}
+          style={styles.threadList}
           data={msgs}
           keyExtractor={m => m.id}
           renderItem={({item}) => <Bubble msg={item} />}
@@ -411,6 +413,7 @@ Guidelines:
           horizontal
           data={SUGGESTIONS}
           keyExtractor={s => s}
+          style={styles.chipsList}
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chips}
           renderItem={({item}) => (
@@ -486,6 +489,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {fontFamily: FONTS.semibold, fontSize: 14.5, color: T.text},
   statusDot: {width: 6, height: 6, borderRadius: 6},
+  threadList: {flex: 1},
   thread: {padding: 14, gap: 12, paddingBottom: 8},
   bubbleMe: {
     alignSelf: 'flex-end',
@@ -543,6 +547,7 @@ const styles = StyleSheet.create({
     color: T.warn,
     lineHeight: 17,
   },
+  chipsList: {flexGrow: 0},
   chips: {gap: 8, paddingHorizontal: 14, paddingBottom: 10},
   chip: {
     flexShrink: 0,
