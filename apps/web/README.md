@@ -63,3 +63,6 @@ cd apps/web && npm ci && npm run build && pm2 reload finxai-web
 ```
 
 Nginx reverse-proxies `app.feyton.co.rw` → `127.0.0.1:3011` (TLS via Certbot).
+See [`deploy/nginx.conf`](deploy/nginx.conf) for the reference vhost — note the
+**required** large `proxy_buffer_size` (Supabase auth cookies overflow Nginx's
+default header buffer and 502 the callback otherwise).
