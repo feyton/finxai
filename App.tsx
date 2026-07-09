@@ -16,7 +16,6 @@ import AIChatScreen from './src/screens/AIChatScreen';
 import AISettingsScreen from './src/screens/AISettingsScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 import SMSReviewScreen from './src/screens/SMSReviewScreen';
-import ComingSoonScreen from './src/screens/ComingSoonScreen';
 import CategoryManagementScreen from './src/screens/CategoryManagementScreen';
 import ConfirmTransactionsScreen from './src/screens/ConfirmTransactions';
 import CreateBudgetScreen from './src/screens/CreateBudget';
@@ -25,6 +24,9 @@ import BudgetDetails from './src/screens/BudgetDetails';
 import CreateRecord from './src/screens/CreateRecord';
 import DebtScreen from './src/screens/DebtScreen';
 import AddDebt from './src/screens/AddDebt';
+import ShoppingScreen from './src/screens/ShoppingScreen';
+import SharedScreen from './src/screens/SharedScreen';
+import ScheduleScreen from './src/screens/ScheduleScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import ScheduledPaymentsScreen from './src/screens/PlannedPaymentsScreen';
 import ProfilePage from './src/screens/ProfilePage';
@@ -109,9 +111,9 @@ function App(): React.JSX.Element {
                 <Stack.Screen name="UserProfile" component={ProfilePage} />
                 <Stack.Screen name="Debt" component={DebtScreen} />
                 <Stack.Screen name="AddDebt" component={AddDebt} />
-                <Stack.Screen name="Shopping" component={ComingSoonScreen} />
-                <Stack.Screen name="Shared" component={ComingSoonScreen} />
-                <Stack.Screen name="Schedule" component={ComingSoonScreen} />
+                <Stack.Screen name="Shopping" component={ShoppingScreen} />
+                <Stack.Screen name="Shared" component={SharedScreen} />
+                <Stack.Screen name="Schedule" component={ScheduleScreen} />
               </Stack.Navigator>
             )}
           </NavigationContainer>
