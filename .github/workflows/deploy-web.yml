@@ -1,0 +1,39 @@
+name: Deploy web
+
+# Auto-deploys apps/web to the Contabo VPS (app.feyton.co.rw) on push to main.
+# The server SSH key is locked to a forced command (/usr/local/bin/finxai-deploy.sh),
+# so this job can ONLY trigger that deploy script — it cannot open a shell.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger remote deploy over SSH
+        env:
+          SSH_KEY: ${{ secrets.CONTABO_SSH_KEY }}
+          HOST: ${{ secrets.CONTABO_HOST }}
+          USER: ${{ secrets.CONTABO_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # The forced command on the server runs the deploy regardless of the
+          # command sent here; 'deploy' is just a placeholder.
+          ssh -i ~/.ssh/deploy_key \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "$USER@$HOST" deploy
