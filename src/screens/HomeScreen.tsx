@@ -1,8 +1,9 @@
 import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {useQuery} from '@powersync/react-native';
-import React, {useMemo} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {
   FlatList,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +15,8 @@ import {T, FONTS, R, resolveCat, accountTint, accountIcon, fmtAmount} from '../t
 import {Avatar, Card, CatChip, Icon, Money, Pill, SectionHeader} from '../Components/ui';
 import SMSRetriever from '../Components/SMSRetriever';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {checkForUpdate, UpdateInfo} from '../tools/updateChecker';
+import {downloadAndInstall} from '../tools/updateInstaller';
 import {format} from 'date-fns';
 
 function monthStart() {
@@ -102,6 +105,32 @@ export default function HomeScreen({navigation}: any) {
     navigation.navigate(screen, params);
   };
 
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    checkForUpdate()
+      .then(info => info.available && setUpdate(info))
+      .catch(() => {});
+  }, []);
+
+  const installUpdate = async () => {
+    if (!update?.url || installing) {
+      return;
+    }
+    setInstalling(true);
+    setProgress(0);
+    try {
+      await downloadAndInstall(update.url, setProgress);
+    } catch {
+      // last-resort fallback: open the download page in the browser
+      Linking.openURL(update.url).catch(() => {});
+    } finally {
+      setInstalling(false);
+    }
+  };
+
   const tabBarHeight = useBottomTabBarHeight();
 
   return (
@@ -134,6 +163,37 @@ export default function HomeScreen({navigation}: any) {
         </View>
 
         <View style={styles.content}>
+          {/* Update banner */}
+          {update && !updateDismissed && (
+            <View style={styles.updateBanner}>
+              <View style={styles.updateIcon}>
+                <Icon name="RefreshCcw" size={17} color={T.accentInk} strokeWidth={2.4} />
+              </View>
+              <View style={{flex: 1}}>
+                <Text style={styles.updateTitle}>Update available</Text>
+                <Text style={styles.updateSub}>
+                  {installing
+                    ? `Downloading… ${Math.round(progress * 100)}%`
+                    : `Version ${update.latest} is ready to install`}
+                </Text>
+              </View>
+              <Pressable
+                onPress={installUpdate}
+                disabled={installing}
+                style={({pressed}) => [styles.updateBtn, {opacity: installing ? 0.6 : pressed ? 0.85 : 1}]}>
+                <Text style={styles.updateBtnText}>{installing ? '…' : 'Update'}</Text>
+              </Pressable>
+              {!installing && (
+                <Pressable
+                  onPress={() => setUpdateDismissed(true)}
+                  hitSlop={8}
+                  style={({pressed}) => [{opacity: pressed ? 0.6 : 1, padding: 2}]}>
+                  <Icon name="X" size={16} color={T.text3} strokeWidth={2.2} />
+                </Pressable>
+              )}
+            </View>
+          )}
+
           {/* AI sync banner */}
           {pendingSms > 0 && (
             <Pressable
@@ -356,6 +416,34 @@ const styles = StyleSheet.create({
     borderColor: T.surface2,
   },
   content: {gap: 14, paddingHorizontal: 16},
+  updateBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    padding: 12,
+    borderRadius: R.card,
+    backgroundColor: T.accentSoft,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.3)',
+    marginBottom: 12,
+  },
+  updateIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    backgroundColor: T.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  updateTitle: {fontFamily: FONTS.semibold, fontSize: 13.5, color: T.text},
+  updateSub: {fontFamily: FONTS.regular, fontSize: 11.5, color: T.text2, marginTop: 1},
+  updateBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: R.pill,
+    backgroundColor: T.accent,
+  },
+  updateBtnText: {fontFamily: FONTS.bold, fontSize: 12.5, color: T.accentInk},
   aiBanner: {
     flexDirection: 'row',
     alignItems: 'center',

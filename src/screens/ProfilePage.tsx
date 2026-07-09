@@ -20,6 +20,7 @@ import categoriesData from '../tools/data.json';
 import {clearMyData, hasSeededData, seedDemoData} from '../tools/seed';
 import {supabase} from '../tools/supabase';
 import {checkForUpdate} from '../tools/updateChecker';
+import {downloadAndInstall} from '../tools/updateInstaller';
 
 function Row({
   icon,
@@ -132,7 +133,14 @@ export default function ProfilePage({navigation}: any) {
           `Version ${info.latest} is ready (you have ${info.current}).`,
           [
             {text: 'Later', style: 'cancel'},
-            {text: 'Download', onPress: () => info.url && Linking.openURL(info.url)},
+            {
+              text: 'Install',
+              onPress: () =>
+                info.url &&
+                downloadAndInstall(info.url).catch(
+                  () => info.url && Linking.openURL(info.url),
+                ),
+            },
           ],
         );
       } else {

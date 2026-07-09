@@ -86,7 +86,8 @@ async function main() {
   // 4. Publish GitHub Release with the APK
   const asset = `finxai-${tag}.apk`;
   run(`cp ${REPO_APK} ${asset}`, {shell: 'bash'});
-  run('git push origin main');
+  // --no-verify so the pre-push hook doesn't recurse into another release prompt
+  run('git push --no-verify origin main');
   run(`gh release create ${tag} ${asset} --title ${tag} --generate-notes --target main`);
   run(`rm -f ${asset}`, {shell: 'bash'});
 
