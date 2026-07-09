@@ -80,7 +80,7 @@ async function main() {
 
   // 3. Build signed arm64 APK (single ABI = ~40MB, not the ~130MB universal)
   console.log('\n→ Building signed arm64 APK…\n');
-  run('gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a --console=plain', {
+  run('.\\gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a --console=plain', {
     cwd: 'android',
   });
 
