@@ -1,3 +1,4 @@
+import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {useQuery} from '@powersync/react-native';
 import {format} from 'date-fns';
 import React, {useMemo} from 'react';
@@ -27,6 +28,7 @@ function dayLabel(dt: string): string {
 export default function AccountDetails({route, navigation}: any) {
   const {accountId} = route.params;
   const {userId} = useCurrentUser();
+  const tabBarHeight = useBottomTabBarHeight();
 
   const {data: accounts} = useQuery(
     'SELECT * FROM accounts WHERE id = ? AND owner_id = ?',
@@ -163,7 +165,7 @@ export default function AccountDetails({route, navigation}: any) {
             <Text style={styles.emptyText}>No transactions yet</Text>
           </View>
         }
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, {paddingBottom: tabBarHeight + 28}]}
         stickySectionHeadersEnabled={false}
       />
     </SafeAreaView>

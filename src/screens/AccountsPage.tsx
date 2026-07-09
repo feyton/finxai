@@ -1,4 +1,5 @@
 import BottomSheet, {BottomSheetView} from '@gorhom/bottom-sheet';
+import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {
@@ -84,6 +85,8 @@ export default function AccountsPage({navigation}: any) {
     setToDelete(null);
   }, [db, toDelete]);
 
+  const tabBarHeight = useBottomTabBarHeight();
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       {/* Header */}
@@ -129,7 +132,7 @@ export default function AccountsPage({navigation}: any) {
             </Pressable>
           </View>
         }
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, {paddingBottom: tabBarHeight + 28}]}
       />
 
       {/* Delete confirm sheet */}

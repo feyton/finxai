@@ -1,4 +1,5 @@
 import BottomSheet, {BottomSheetView} from '@gorhom/bottom-sheet';
+import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import {format} from 'date-fns';
 import React, {useCallback, useMemo, useRef, useState} from 'react';
@@ -98,6 +99,7 @@ export default function RecordsPage({navigation}: any) {
     [userId ?? ''],
   );
 
+  const tabBarHeight = useBottomTabBarHeight();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
   const [selected, setSelected] = useState<any>(null);
@@ -267,7 +269,7 @@ export default function RecordsPage({navigation}: any) {
             <Text style={styles.emptyHint}>Add one with the + button above</Text>
           </View>
         }
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, {paddingBottom: tabBarHeight + 28}]}
         stickySectionHeadersEnabled={false}
       />
 

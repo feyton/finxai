@@ -1,3 +1,4 @@
+import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {useQuery} from '@powersync/react-native';
 import React, {useMemo, useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
@@ -61,6 +62,7 @@ function AvatarStack({people}: {people: any[]}) {
 
 export default function BudgetScreen({navigation}: any) {
   const {userId} = useCurrentUser();
+  const tabBarHeight = useBottomTabBarHeight();
   const [tab, setTab] = useState<'spending' | 'shared'>('spending');
 
   const {data: items} = useQuery(
@@ -144,7 +146,9 @@ export default function BudgetScreen({navigation}: any) {
         ))}
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, {paddingBottom: tabBarHeight + 28}]}
+        showsVerticalScrollIndicator={false}>
         {tab === 'spending' && (
           <View style={{gap: 14}}>
             {budgets.list.length === 0 ? (

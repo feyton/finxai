@@ -1,3 +1,4 @@
+import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {useQuery} from '@powersync/react-native';
 import React, {useMemo} from 'react';
 import {
@@ -101,12 +102,14 @@ export default function HomeScreen({navigation}: any) {
     navigation.navigate(screen, params);
   };
 
+  const tabBarHeight = useBottomTabBarHeight();
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <SMSRetriever />
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scroll}>
+        contentContainerStyle={[styles.scroll, {paddingBottom: tabBarHeight + 28}]}>
 
         {/* Top bar */}
         <View style={styles.topBar}>
