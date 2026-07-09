@@ -65,6 +65,16 @@ const PROVIDERS = [
     auto: true,
   },
   {
+    id: 'mokash',
+    name: 'MoKash Savings',
+    kind: 'Auto-reads MoKash SMS',
+    icon: 'Target',
+    tint: '#2DD4BF',
+    address: 'MoKash',
+    type: 'Savings',
+    auto: true,
+  },
+  {
     id: 'cash',
     name: 'Cash wallet',
     kind: 'Track spending manually',

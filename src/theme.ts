@@ -76,6 +76,7 @@ export function resolveCat(raw: string): CategoryId {
 // Account brand helpers
 export function accountTint(name: string): string {
   const n = name.toLowerCase();
+  if (n.includes('mokash')) return '#2DD4BF';
   if (n.includes('mtn') || n.includes('momo')) return '#FFCC00';
   if (n.includes('bank of kigali') || n.includes(' bk')) return '#1E73BE';
   if (n.includes('cash') || n.includes('wallet')) return '#22C55E';
@@ -86,6 +87,7 @@ export function accountTint(name: string): string {
 
 export function accountIcon(name: string, type: string): string {
   const n = name.toLowerCase();
+  if (n.includes('mokash') || type === 'Savings') return 'Target';
   if (n.includes('cash') || n.includes('wallet')) return 'Coins';
   if (n.includes('momo') || n.includes('airtel') || type === 'Mobile Money') return 'Phone';
   return 'Landmark';
