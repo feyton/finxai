@@ -24,14 +24,27 @@ function num(s: string | undefined): number {
   return s ? parseInt(s.replace(/[^0-9]/g, ''), 10) || 0 : 0;
 }
 
+// Authoritative post-transaction balance the SMS reports. Handles all the
+// Rwandan variants: "Balance: 61,811 RWF", "Balance:5582 RWF",
+// "Balance: 64761RWF", "Available Balance: RWF2,427", "Mokash balance is RWF 3120".
+export function extractBalance(raw: string): number | null {
+  const m = raw.match(
+    /(?:available\s+balance|new\s+balance|mokash\s+balance|balance)\s*(?:is)?\s*:?\s*(?:RWF|FRW)?\s*([\d,]+)/i,
+  );
+  if (!m) {
+    return null;
+  }
+  const n = parseInt(m[1].replace(/[^0-9]/g, ''), 10);
+  return Number.isNaN(n) ? null : n;
+}
+
 export function regexExtract(raw: string) {
   const isCredit = /received|credited|you have received|deposit/i.test(raw);
   const amt = raw.match(/(?:RWF|FRW)\s*([\d,]+)|([\d,]+)\s*(?:RWF|FRW)/i);
   const amount = num(amt?.[1] ?? amt?.[2]);
   const fee = num(raw.match(/fee[:=\s]*([\d,]+)/i)?.[1]);
-  const balance_after =
-    num(raw.match(/(?:new balance|avail(?:able)? bal(?:ance)?|balance)\s*(?:is\s*)?(?:RWF\s*)?([\d,]+)/i)?.[1]) || null;
-  const txn_ref = raw.match(/(?:TxId|Ref|Txn ID|transaction id)[:\s#]*([A-Za-z0-9]+)/i)?.[1] ?? null;
+  const balance_after = extractBalance(raw);
+  const txn_ref = raw.match(/(?:TxId|FT Id|Ref|Txn ID|transaction id)[:\s#]*([A-Za-z0-9]+)/i)?.[1] ?? null;
   return {
     direction: (isCredit ? 'credit' : 'debit') as 'credit' | 'debit',
     amount,

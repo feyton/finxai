@@ -160,12 +160,24 @@ const SMSRetriever: React.FC = () => {
                   ],
                 );
 
-                // Update account balance
-                const sign = txType === 'income' ? 1 : -1;
-                await db.execute(
-                  'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-                  [sign * parsed.amount, account.id],
-                );
+                // Prefer the bank's own balance from the SMS (authoritative,
+                // self-healing); only fall back to incrementing when absent.
+                if (parsed.balance_after != null) {
+                  await db.execute(
+                    'UPDATE accounts SET available_balance = ? WHERE id = ?',
+                    [parsed.balance_after, account.id],
+                  );
+                } else {
+                  // fees reduce the balance too → a debit costs amount + fee
+                  const delta =
+                    txType === 'income'
+                      ? parsed.amount
+                      : -(parsed.amount + (parsed.fee ?? 0));
+                  await db.execute(
+                    'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
+                    [delta, account.id],
+                  );
+                }
               } else {
                 // Needs review — goes to auto_records
                 const txType = parsed.direction === 'credit' ? 'income' : 'expense';

@@ -16,6 +16,7 @@ import {CATS, CategoryId, FONTS, R, T, accountIcon, accountTint, resolveCat} fro
 import {CatChip, ConfPill, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {recordChannel, recordConfirmation, recordCorrection} from '../tools/merchantMemory';
+import {extractBalance} from '../tools/claudeParser';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -309,11 +310,23 @@ export default function SMSReviewScreen({navigation}: any) {
         ],
       );
 
-      const sign = txType === 'income' ? 1 : -1;
-      await db.execute(
-        'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-        [sign * (record.amount ?? 0), record.account_id],
-      );
+      // Prefer the SMS's own balance (authoritative); else increment.
+      const bal = extractBalance(record.sms ?? '');
+      if (bal != null) {
+        await db.execute(
+          'UPDATE accounts SET available_balance = ? WHERE id = ?',
+          [bal, record.account_id],
+        );
+      } else {
+        const delta =
+          txType === 'income'
+            ? record.amount ?? 0
+            : -((record.amount ?? 0) + (record.fees ?? 0));
+        await db.execute(
+          'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
+          [delta, record.account_id],
+        );
+      }
 
       await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
 
@@ -356,11 +369,24 @@ export default function SMSReviewScreen({navigation}: any) {
         ],
       );
 
-      const sign = txType === 'income' ? 1 : -1;
-      await db.execute(
-        'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-        [sign * (record.amount ?? 0), accountId],
-      );
+      // Use the SMS balance only if the account wasn't reassigned in the fix;
+      // otherwise the SMS balance belongs to a different account — increment.
+      const bal = extractBalance(record.sms ?? '');
+      if (bal != null && accountId === record.account_id) {
+        await db.execute(
+          'UPDATE accounts SET available_balance = ? WHERE id = ?',
+          [bal, accountId],
+        );
+      } else {
+        const delta =
+          txType === 'income'
+            ? record.amount ?? 0
+            : -((record.amount ?? 0) + (record.fees ?? 0));
+        await db.execute(
+          'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
+          [delta, accountId],
+        );
+      }
 
       await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
 
