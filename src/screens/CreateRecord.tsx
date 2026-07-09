@@ -1,20 +1,16 @@
-import {Picker} from '@react-native-picker/picker';
 import {useQuery, usePowerSync} from '@powersync/react-native';
-import React, {useState} from 'react';
-import {Controller, useForm, useWatch} from 'react-hook-form';
+import React, {useMemo, useState} from 'react';
 import {
-  KeyboardAvoidingView,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
-import {SafeAreaView} from 'react-native-safe-area-context';
-
-import FloatingLabelInput from '../Components/FloatingInput';
-import {COLORS} from '../assets/images';
+import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
+import {CatChip, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {CATS, CategoryId, FONTS, R, T, accountIcon, accountTint, fmtAmount, resolveCat} from '../theme';
 import categoriesData from '../tools/data.json';
 
 function generateUUID(): string {
@@ -24,215 +20,348 @@ function generateUUID(): string {
   });
 }
 
-interface Props {
-  navigation: any;
-}
+const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '000', '0', 'del'];
 
-const CreateRecord: React.FC<Props> = ({navigation}) => {
+type TxType = 'expense' | 'income';
+
+export default function CreateRecord({navigation}: any) {
   const db = usePowerSync();
   const {userId} = useCurrentUser();
+  const insets = useSafeAreaInsets();
+
   const {data: accounts} = useQuery(
     'SELECT * FROM accounts WHERE owner_id = ? ORDER BY name',
     [userId ?? ''],
   );
-  const {data: budgets} = useQuery(
-    'SELECT * FROM budgets WHERE owner_id = ? ORDER BY name',
-    [userId ?? ''],
-  );
 
-  const {
-    control,
-    handleSubmit,
-    setValue,
-    formState: {errors},
-  } = useForm();
+  const [type, setType] = useState<TxType>('expense');
+  const [amount, setAmount] = useState('0');
+  const [accountId, setAccountId] = useState<string>('');
+  const [category, setCategory] = useState<string>('');
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const transactionType = useWatch({control, name: 'transaction_type'});
-  const categoryName = useWatch({control, name: 'category'});
+  // default to the first account once loaded
+  const accountList = accounts as any[];
+  const activeAccount = accountId || accountList[0]?.id || '';
 
-  const filteredCategories = categoriesData.categories.filter(cat => {
-    if (!transactionType) {return true;}
-    if (transactionType === 'income') {return cat.type === 'income';}
-    return cat.type === 'expense';
-  });
-
-  const selectedCategory = categoriesData.categories.find(
-    cat => cat.name === categoryName,
+  const cats = useMemo(
+    () =>
+      categoriesData.categories.filter(c =>
+        type === 'income' ? c.type === 'income' : c.type === 'expense',
+      ),
+    [type],
   );
 
-  const createRecord = async (data: any) => {
-    if (!data.amount || !data.account || !data.transaction_type) {
-      setError('Amount, account and type are required');
+  const press = (k: string) => {
+    setError('');
+    if (k === 'del') {
+      setAmount(a => (a.length <= 1 ? '0' : a.slice(0, -1)));
       return;
     }
+    setAmount(a => {
+      const next = a === '0' ? k.replace(/^0+/, '') || '0' : a + k;
+      // cap length to avoid overflow
+      return next.replace(/\D/g, '').slice(0, 12) || '0';
+    });
+  };
+
+  const numericAmount = parseInt(amount, 10) || 0;
+  const canSave = numericAmount > 0 && !!activeAccount && !saving;
+
+  const save = async () => {
+    if (!activeAccount) {
+      setError('Add an account first');
+      return;
+    }
+    if (numericAmount <= 0) {
+      setError('Enter an amount');
+      return;
+    }
+    setSaving(true);
     try {
       const now = new Date().toISOString();
       await db.execute(
-        'INSERT INTO transactions (id, amount, account_id, category, subcategory, date_time, confirmed, currency, payee, transaction_type, note, fees, budget_id, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO transactions (id, amount, account_id, category, subcategory, date_time, confirmed, currency, payee, merchant, transaction_type, note, fees, budget_id, source, confidence, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           generateUUID(),
-          parseFloat(data.amount),
-          data.account,
-          data.category || '',
-          data.subcategory || '',
+          numericAmount,
+          activeAccount,
+          category || '',
+          '',
           now,
           1,
           'RWF',
-          data.payee || '',
-          data.transaction_type,
-          data.note || '',
+          '',
+          '',
+          type,
+          '',
           0,
-          data.budget || null,
+          null,
+          'manual',
+          1,
           userId ?? '',
           now,
         ],
       );
-
-      // Update account balance
-      if (data.transaction_type === 'income') {
+      if (type === 'income') {
         await db.execute(
           'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-          [parseFloat(data.amount), data.account],
+          [numericAmount, activeAccount],
         );
-      } else if (data.transaction_type === 'expense') {
+      } else {
         await db.execute(
           'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
-          [parseFloat(data.amount), data.account],
+          [numericAmount, activeAccount],
         );
       }
-
       navigation.goBack();
-    } catch (err: any) {
-      setError('Error: ' + err.message);
+    } catch (e: any) {
+      setError(e?.message ?? 'Something went wrong');
+      setSaving(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView style={{flex: 1}} behavior="padding">
+    <SafeAreaView style={styles.root} edges={['top']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={({pressed}) => [styles.iconBtn, {opacity: pressed ? 0.7 : 1}]}>
+          <Icon name="ArrowLeft" size={18} color={T.text} strokeWidth={2.2} />
+        </Pressable>
+        <Text style={styles.title}>Add transaction</Text>
+        <View style={styles.typeToggle}>
+          {(['expense', 'income'] as TxType[]).map(t => (
+            <Pressable
+              key={t}
+              onPress={() => {
+                setType(t);
+                setCategory('');
+              }}
+              style={[styles.typeBtn, type === t && styles.typeBtnActive]}>
+              <Text style={[styles.typeText, type === t && styles.typeTextActive]}>
+                {t === 'expense' ? 'Out' : 'In'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+
+      {/* Amount */}
+      <View style={styles.amountWrap}>
+        <Text
+          style={[
+            styles.amount,
+            {color: type === 'income' ? T.income : numericAmount > 0 ? T.expense : T.text},
+          ]}>
+          {type === 'income' ? '+' : numericAmount > 0 ? '-' : ''}
+          {fmtAmount(numericAmount)}
+          <Text style={styles.amountUnit}> RWF</Text>
+        </Text>
+      </View>
+
       <ScrollView
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.scrollContainer}>
-        <Text style={styles.header}>Create Record</Text>
-        {error ? <Text style={{color: 'red', marginBottom: 8}}>{error}</Text> : null}
-        <FloatingLabelInput control={control} name="amount" label="Amount" />
-        <Controller
-          name="transaction_type"
-          control={control}
-          rules={{required: 'Transaction type is required'}}
-          render={({field: {onChange, value}}: any) => (
-            <View style={styles.pickerContainer}>
-              <Picker selectedValue={value} onValueChange={onChange} style={styles.picker}>
-                <Picker.Item label={'Select type'} value={''} />
-                <Picker.Item label={'Income'} value={'income'} />
-                <Picker.Item label={'Expense'} value={'expense'} />
-                <Picker.Item label={'Transfer'} value={'transfer'} />
-              </Picker>
-              {errors.transaction_type && (
-                <Text style={{color: 'red'}}>{String(errors.transaction_type.message)}</Text>
-              )}
-            </View>
-          )}
-        />
-        <Controller
-          name="account"
-          control={control}
-          rules={{required: 'Account is required'}}
-          render={({field: {value}}: any) => (
-            <View style={styles.pickerContainer}>
-              <Picker
-                selectedValue={value}
-                onValueChange={v => setValue('account', v)}
-                style={styles.picker}>
-                <Picker.Item label="Select Account" value="" />
-                {accounts.map((account: any) => (
-                  <Picker.Item
-                    key={account.id}
-                    label={account.name}
-                    value={account.id}
-                  />
-                ))}
-              </Picker>
-            </View>
-          )}
-        />
-        <Controller
-          name="category"
-          control={control}
-          render={({field: {onChange, value}}: any) => (
-            <View style={styles.pickerContainer}>
-              <Picker selectedValue={value} onValueChange={onChange} style={styles.picker}>
-                <Picker.Item value="" label="Select Category" />
-                {filteredCategories.map((cat, i) => (
-                  <Picker.Item key={i} label={`${cat.icon} ${cat.name}`} value={cat.name} />
-                ))}
-              </Picker>
-            </View>
-          )}
-        />
-        {selectedCategory && selectedCategory.subcategories.length > 0 && (
-          <Controller
-            name="subcategory"
-            control={control}
-            render={({field: {onChange, value}}: any) => (
-              <View style={styles.pickerContainer}>
-                <Picker selectedValue={value} onValueChange={onChange} style={styles.picker}>
-                  <Picker.Item value={''} label="Select Subcategory" />
-                  {selectedCategory.subcategories.map((sub, i) => (
-                    <Picker.Item key={i} label={`${sub.icon} ${sub.name}`} value={sub.name} />
-                  ))}
-                </Picker>
-              </View>
-            )}
-          />
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{paddingBottom: 8}}>
+        {/* AI tip */}
+        <View style={styles.tip}>
+          <Icon name="Sparkles" size={15} color={T.accent} strokeWidth={2.2} />
+          <Text style={styles.tipText}>
+            Most expenses appear automatically from SMS — you rarely need this.
+          </Text>
+        </View>
+
+        {/* Accounts */}
+        {accountList.length > 0 && (
+          <>
+            <Text style={styles.sectionLabel}>Account</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.accountRow}>
+              {accountList.map(a => {
+                const on = activeAccount === a.id;
+                const tint = accountTint(a.name ?? '');
+                return (
+                  <Pressable
+                    key={a.id}
+                    onPress={() => setAccountId(a.id)}
+                    style={[styles.accountChip, on && {borderColor: tint, backgroundColor: tint + '18'}]}>
+                    <Icon name={accountIcon(a.name ?? '', a.type ?? '')} size={15} color={tint} strokeWidth={2} />
+                    <Text style={[styles.accountName, on && {color: T.text}]} numberOfLines={1}>
+                      {a.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </>
         )}
-        <FloatingLabelInput control={control} name="payee" label="Payee" />
-        <Controller
-          name="budget"
-          control={control}
-          render={({field: {onChange, value}}: any) => (
-            <View style={styles.pickerContainer}>
-              <Picker selectedValue={value} onValueChange={onChange} style={styles.picker}>
-                <Picker.Item label="No Budget" value="" />
-                {budgets.map((budget: any) => (
-                  <Picker.Item key={budget.id} label={budget.name} value={budget.id} />
-                ))}
-              </Picker>
-            </View>
-          )}
-        />
-        <FloatingLabelInput control={control} name="note" label="Note" />
-        <TouchableOpacity
-          style={styles.saveButton}
-          onPress={handleSubmit(createRecord)}>
-          <Text style={styles.saveButtonText}>Save Record</Text>
-        </TouchableOpacity>
+
+        {/* Categories */}
+        <Text style={styles.sectionLabel}>Category</Text>
+        <View style={styles.catGrid}>
+          {cats.map(c => {
+            const id = resolveCat(c.name) as CategoryId;
+            const meta = CATS[id];
+            const on = category === c.name;
+            return (
+              <Pressable
+                key={c.name}
+                onPress={() => setCategory(on ? '' : c.name)}
+                style={[styles.catCell, on && {borderColor: meta.color, backgroundColor: meta.color + '14'}]}>
+                <CatChip cat={id} size={34} />
+                <Text style={[styles.catLabel, on && {color: T.text}]} numberOfLines={1}>
+                  {c.name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </ScrollView>
-      </KeyboardAvoidingView>
+
+      {/* Keypad */}
+      <View style={styles.keypad}>
+        {KEYS.map(k => (
+          <Pressable
+            key={k}
+            onPress={() => press(k)}
+            style={({pressed}) => [styles.key, {opacity: pressed ? 0.6 : 1}]}>
+            {k === 'del' ? (
+              <Icon name="Delete" size={20} color={T.text2} strokeWidth={2} />
+            ) : (
+              <Text style={styles.keyText}>{k}</Text>
+            )}
+          </Pressable>
+        ))}
+      </View>
+
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      {/* Save */}
+      <Pressable
+        onPress={save}
+        disabled={!canSave}
+        style={({pressed}) => [
+          styles.saveBtn,
+          {opacity: !canSave ? 0.5 : pressed ? 0.85 : 1, marginBottom: insets.bottom + 12},
+        ]}>
+        <Icon name="Check" size={17} color={T.accentInk} strokeWidth={2.6} />
+        <Text style={styles.saveText}>{saving ? 'Saving…' : 'Save transaction'}</Text>
+      </Pressable>
     </SafeAreaView>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {flex: 1, backgroundColor: COLORS.bgPrimary},
-  scrollContainer: {padding: 16},
-  header: {fontSize: 24, fontWeight: 'bold', color: '#fff', marginBottom: 16},
-  pickerContainer: {
-    borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 10,
-    marginVertical: 8,
-  },
-  picker: {color: '#fff'},
-  saveButton: {
-    backgroundColor: '#1E90FF',
-    padding: 16,
-    borderRadius: 10,
+  root: {flex: 1, backgroundColor: T.bg},
+  header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 16,
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 4,
   },
-  saveButtonText: {color: '#fff', fontWeight: 'bold', fontSize: 18},
+  iconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: R.iconBtn,
+    backgroundColor: T.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: {flex: 1, fontFamily: FONTS.bold, fontSize: 17, color: T.text},
+  typeToggle: {
+    flexDirection: 'row',
+    backgroundColor: T.surface2,
+    borderRadius: R.pill,
+    padding: 3,
+    gap: 2,
+  },
+  typeBtn: {paddingHorizontal: 13, paddingVertical: 6, borderRadius: R.pill},
+  typeBtnActive: {backgroundColor: T.accent},
+  typeText: {fontFamily: FONTS.semibold, fontSize: 12.5, color: T.text2},
+  typeTextActive: {color: T.accentInk},
+  amountWrap: {alignItems: 'center', paddingVertical: 14},
+  amount: {fontFamily: FONTS.bold, fontSize: 34},
+  amountUnit: {fontFamily: FONTS.medium, fontSize: 15, color: T.text3},
+  tip: {
+    flexDirection: 'row',
+    gap: 9,
+    alignItems: 'flex-start',
+    marginHorizontal: 16,
+    marginBottom: 14,
+    padding: 12,
+    borderRadius: R.card,
+    backgroundColor: T.accentSoft,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.2)',
+  },
+  tipText: {flex: 1, fontFamily: FONTS.regular, fontSize: 12, color: T.text2, lineHeight: 17},
+  sectionLabel: {
+    fontFamily: FONTS.semibold,
+    fontSize: 12.5,
+    color: T.text2,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  accountRow: {gap: 8, paddingHorizontal: 16, paddingBottom: 14},
+  accountChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: R.small,
+    backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  accountName: {fontFamily: FONTS.medium, fontSize: 12.5, color: T.text2, maxWidth: 120},
+  catGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 16,
+  },
+  catCell: {
+    width: '31%',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: R.card,
+    backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  catLabel: {fontFamily: FONTS.medium, fontSize: 10.5, color: T.text3, paddingHorizontal: 4},
+  keypad: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+  },
+  key: {
+    width: '33.33%',
+    height: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  keyText: {fontFamily: FONTS.semibold, fontSize: 22, color: T.text},
+  error: {fontFamily: FONTS.medium, fontSize: 12.5, color: T.expense, textAlign: 'center', marginTop: 4},
+  saveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 8,
+    paddingVertical: 15,
+    borderRadius: R.card,
+    backgroundColor: T.accent,
+  },
+  saveText: {fontFamily: FONTS.bold, fontSize: 15.5, color: T.accentInk},
 });
-
-export default CreateRecord;

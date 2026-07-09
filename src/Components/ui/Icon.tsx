@@ -2,8 +2,8 @@ import {
   AlertCircle, ArrowDownLeft, ArrowLeft, ArrowUpRight,
   Bell, Brain, Building2, Calendar, CalendarPlus, Car, Check, CheckCircle, CheckCircle2,
   ChevronDown, ChevronLeft, ChevronRight, Clock, CreditCard,
-  Coins, ExternalLink, Eye, EyeOff, Filter, Flame, Gift, Globe, Heart, Home, Info,
-  Key, Landmark, Lock, MessageSquare, Mic, MoreHorizontal, PenLine,
+  Coins, Delete, ExternalLink, Eye, EyeOff, Filter, Flame, Gift, Globe, Handshake, Heart, Home, Info,
+  Key, Landmark, Lock, MessageSquare, Mic, MoreHorizontal, PenLine, Pencil,
   Phone, PieChart, Plus, Receipt, RefreshCcw, Repeat,
   Search, Send, Settings2, Share2, Shield, ShoppingBag, ShoppingCart,
   SlidersHorizontal, Sparkles, Star, Tag, Target,
@@ -78,6 +78,9 @@ const MAP: Record<string, any> = {
   Settings2,
   Trash2,
   XCircle,
+  Delete,
+  Pencil,
+  Handshake,
 };
 
 interface IconProps {

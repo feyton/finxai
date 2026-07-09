@@ -6,10 +6,48 @@
  * Top rules are passed to Gemini as context on each parse.
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {MerchantRule} from './geminiParser';
 
 function normalise(merchant: string): string {
   return merchant.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+// ── Channel memory (sender → preferred account) ────────────────
+// Stored device-locally: which account the user maps each SMS sender to.
+// The SMS parser can consult this to pick the right account automatically.
+const CHANNEL_KEY = 'finxai.channelRules';
+
+export async function recordChannel(
+  _db: any,
+  sender: string,
+  accountId: string,
+  _userId: string,
+): Promise<void> {
+  if (!sender || !accountId) {
+    return;
+  }
+  try {
+    const raw = await AsyncStorage.getItem(CHANNEL_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    map[sender] = accountId;
+    await AsyncStorage.setItem(CHANNEL_KEY, JSON.stringify(map));
+  } catch (e) {
+    console.warn('[MerchantMemory] recordChannel error:', e);
+  }
+}
+
+export async function getPreferredChannel(sender: string): Promise<string | null> {
+  if (!sender) {
+    return null;
+  }
+  try {
+    const raw = await AsyncStorage.getItem(CHANNEL_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    return map[sender] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Retrieve rules relevant to a merchant name ─────────────────
