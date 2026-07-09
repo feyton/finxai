@@ -345,15 +345,16 @@ export default function RecordsPage({navigation, route}: any) {
     if (!id) {
       return;
     }
-    const list = txns as any[];
-    if (!list.length) {
-      return; // wait for the query to load, then this effect re-runs
+    const tx = (txns as any[]).find(t => t.id === id);
+    if (!tx) {
+      return; // txns not loaded yet — effect re-runs when it is
     }
-    const tx = list.find(t => t.id === id);
-    if (tx) {
-      openDetail(tx);
-    }
-    navigation.setParams({openTxId: undefined});
+    setSelected(tx);
+    // Delay the snap: on first navigation into this tab the sheet may not be
+    // laid out yet, so an immediate snapToIndex gets dropped.
+    const t = setTimeout(() => sheetRef.current?.snapToIndex(0), 150);
+    navigation.setParams({openTxId: undefined}); // consume it (only after we found the tx)
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params?.openTxId, txns]);
 
@@ -512,6 +513,7 @@ export default function RecordsPage({navigation, route}: any) {
         }}>
         {selected && (
           <TxDetail
+            key={selected.id}
             tx={selected}
             accounts={accounts as any[]}
             onSave={saveEdit}
