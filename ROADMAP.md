@@ -82,6 +82,30 @@ finxai/
 4. Stand up `app.feyton.co.rw` on Contabo (Nginx + TLS + PM2); move `send-invite`
    into a Next.js route handler once it's live.
 
+**Status (2026-07-09) — Phase 3+4 read-only slice shipped:**
+- `apps/web` scaffolded (Next.js 15 App Router + Supabase SSR, Google OAuth,
+  cookie sessions). Read-only dashboard: overview, transactions, accounts,
+  budgets — app dark theme. Mobile app untouched (no `apps/mobile` move yet).
+- **Live at https://app.feyton.co.rw** — Contabo, PM2 (`finxai-web`, port 3011),
+  Nginx reverse-proxy, Let's Encrypt TLS (auto-renew).
+- **CI/CD:** push to `main` touching `apps/web/**` → GitHub Actions
+  (`.github/workflows/deploy-web.yml`) → SSH to VPS via a deploy key **locked to
+  a forced command** (`/usr/local/bin/finxai-deploy.sh`, cannot open a shell) →
+  `git pull && npm ci && next build && pm2 reload`.
+- Shared logic (`theme`, `resolveCat`, `fmtAmount`, table types) is **duplicated**
+  into `apps/web/src/lib` for now; promote to `packages/core` (step 2) later.
+- **Manual Supabase dashboard step still required** for OAuth (see below).
+
+**⚠ Required Supabase dashboard config (one-time, no API access from code):**
+- Auth → URL Configuration → **Site URL** = `https://app.feyton.co.rw`
+- Auth → URL Configuration → **Redirect URLs** → add `https://app.feyton.co.rw/**`
+  (keep `http://localhost:3000/**` for dev). Without this, Google OAuth falls
+  back to the Site URL and dumps users on localhost after sign-in.
+
+**Next on web:** editing (bulk categorize, budget mgmt), CSV/PDF export,
+server-side AI proxy + invite emailer route (holds Anthropic/Brevo creds as VPS
+env vars), then `packages/core` extraction.
+
 ---
 
 ## 2. Location tagging (pin the shop)
