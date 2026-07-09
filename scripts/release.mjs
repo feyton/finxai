@@ -31,9 +31,10 @@ function readVersion() {
 }
 
 function bump(v, kind) {
-  if (kind === 'major') {return `${v.maj + 1}.0.0`;}
+  // Keep the project's existing 2-part scheme (v1.3, v1.4); patch adds a 3rd part.
+  if (kind === 'major') {return `${v.maj + 1}.0`;}
   if (kind === 'patch') {return `${v.maj}.${v.min}.${v.patch + 1}`;}
-  return `${v.maj}.${v.min + 1}.0`; // minor (default)
+  return `${v.maj}.${v.min + 1}`; // minor (default)
 }
 
 async function main() {
