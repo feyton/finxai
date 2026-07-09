@@ -70,7 +70,7 @@ const PROVIDERS = [
     kind: 'Auto-reads MoKash SMS',
     icon: 'Target',
     tint: '#2DD4BF',
-    address: 'MoKash',
+    address: 'Mokash',
     type: 'Savings',
     auto: true,
   },
