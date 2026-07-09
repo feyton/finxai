@@ -24,6 +24,7 @@ are **inlined at build time**, so the env file must exist *before* `npm run buil
 |-----|-------|-------|
 | `NEXT_PUBLIC_SUPABASE_URL` | public | same as mobile |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | public | same as mobile; RLS protects data |
+| `NEXT_PUBLIC_SITE_URL` | public | canonical origin; authoritative base for auth redirects. `http://localhost:3000` in dev, `https://app.feyton.co.rw` in prod. Without it, redirects behind the proxy can strand users on `localhost:3011`. |
 
 Server-only vars (later phases — AI proxy, invite emailer) go in
 `.env.production.local` and must **never** be prefixed `NEXT_PUBLIC_`.

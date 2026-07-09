@@ -11,10 +11,13 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     const supabase = createClient();
+    const origin =
+      process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, '') ||
+      window.location.origin;
     const {error: err} = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${origin}/auth/callback`,
         queryParams: {access_type: 'offline', prompt: 'consent'},
       },
     });
