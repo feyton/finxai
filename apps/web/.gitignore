@@ -1,0 +1,26 @@
+# dependencies
+/node_modules
+package-lock.json.bak
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+
+# local env files
+.env
+.env*.local
+.env.production
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts.bak
