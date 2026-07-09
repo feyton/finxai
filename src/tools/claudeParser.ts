@@ -98,8 +98,28 @@ function extractJson(text: string): any {
   return JSON.parse(m[0]);
 }
 
+// Heuristic: is this money moving between the user's OWN accounts?
+// Signals: Mokash (a MoMo-linked savings pocket), an explicit "fund-transfer",
+// or the counterparty name overlapping the user's own name.
+export function detectTransfer(raw: string, userName?: string): boolean {
+  const s = raw.toLowerCase();
+  if (/mokash/.test(s)) {return true;}
+  if (/fund-?transfer|own number|to my (?:momo|bank|number)|self/.test(s)) {return true;}
+  if (userName) {
+    const tokens = userName
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(t => t.length >= 3);
+    // counterparty name (from/to) contains one of the user's name tokens
+    const party =
+      raw.match(/(?:from|to)\s+([A-Za-z][A-Za-z .]+?)(?:\s*\(|\s+\d|\.|,|$)/i)?.[1]?.toLowerCase() ?? '';
+    if (party && tokens.some(t => party.includes(t))) {return true;}
+  }
+  return false;
+}
+
 // ── Regex-only fallback ────────────────────────────────────────
-export function parseWithRegex(raw: string): ParsedSMS {
+export function parseWithRegex(raw: string, userName?: string): ParsedSMS {
   const f = regexExtract(raw);
   const {merchant, category} = regexClassify(raw, f.direction === 'credit');
   return {
@@ -113,6 +133,7 @@ export function parseWithRegex(raw: string): ParsedSMS {
     txn_ref: f.txn_ref,
     occurred_at: null,
     channel: f.channelHint,
+    isTransfer: detectTransfer(raw, userName),
   };
 }
 
@@ -122,6 +143,7 @@ export async function parseSmsWithClaude(
   rules: MerchantRule[],
   apiKey: string,
   merchantChannels: Record<string, MerchantChannel> = {},
+  userName?: string,
 ): Promise<ParsedSMS> {
   const f = regexExtract(raw);
 
@@ -136,16 +158,20 @@ export async function parseSmsWithClaude(
 
   const system = `You classify a single Rwandan mobile-money / bank SMS. Return ONLY a JSON object, no prose, no markdown.
 Fields:
-{"merchant": "<clean title-case seller/counterparty>", "category": "<one of: ${CATS}>", "channel": "<one of: ${CHANNELS}>", "confidence": <0..1>}
+{"merchant": "<clean title-case seller/counterparty>", "category": "<one of: ${CATS}>", "channel": "<one of: ${CHANNELS}>", "is_transfer": <true|false>, "confidence": <0..1>}
 Rules:
 - merchant is the shop or person, cleaned (e.g. "SAWA CITI LTD" → "Sawa Citi").
 - category is your best fit from the list.
 - channel is the payment rail.
+- is_transfer is TRUE when the money moved between the USER'S OWN accounts —
+  i.e. the counterparty is the user themselves (name matches the account holder),
+  a Mokash savings pocket, a bank↔wallet top-up, or an explicit "fund-transfer"
+  to the user's own number. It is FALSE for real payments to shops or other people.
 - If a learned rule matches the merchant, use its category and set confidence ≥ 0.95.
 - confidence reflects how sure you are of merchant + category.`;
 
   const user = `SMS: ${raw}
-
+${userName ? `\nAccount holder (the user): ${userName}` : ''}
 Deterministic facts (already extracted — do not change): direction=${f.direction}, amount=${f.amount} RWF, fee=${f.fee}, channelHint=${f.channelHint}
 ${ruleLines ? `\nLearned category rules:\n${ruleLines}` : ''}
 ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
@@ -174,6 +200,9 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
       confidence = Math.max(confidence, 0.72);
     }
 
+    // Transfer if Haiku says so OR our heuristic is confident.
+    const isTransfer = j.is_transfer === true || detectTransfer(raw, userName);
+
     return {
       direction: f.direction,
       amount: f.amount,
@@ -185,9 +214,10 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
       txn_ref: f.txn_ref,
       occurred_at: null,
       channel: String(j.channel || f.channelHint),
+      isTransfer,
     };
   } catch (e) {
     console.warn('[ClaudeParser] falling back to regex:', e);
-    return parseWithRegex(raw);
+    return parseWithRegex(raw, userName);
   }
 }

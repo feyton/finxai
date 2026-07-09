@@ -37,7 +37,7 @@ function getMonthStartEpoch(): number {
 
 const SMSRetriever: React.FC = () => {
   const db = usePowerSync();
-  const {userId} = useCurrentUser();
+  const {userId, name} = useCurrentUser();
   const processing = useRef(false);
 
   const {data: accounts} = useQuery(
@@ -69,9 +69,10 @@ const SMSRetriever: React.FC = () => {
         ? await getMerchantRules(db, '', userId!, 20)
         : [];
       const merchantChannels = useAI ? await getMerchantChannels() : {};
+      const userName = name ?? '';
 
       for (const account of accounts) {
-        await processAccountSms(account, useAI, apiKey, merchantRules, merchantChannels);
+        await processAccountSms(account, useAI, apiKey, merchantRules, merchantChannels, userName);
       }
 
       // Clean up orphaned auto_records
@@ -92,6 +93,7 @@ const SMSRetriever: React.FC = () => {
     apiKey: string,
     merchantRules: any[],
     merchantChannels: any,
+    userName: string,
   ): Promise<void> => {
     const filters = {
       box: 'inbox',
@@ -121,8 +123,8 @@ const SMSRetriever: React.FC = () => {
 
             try {
               const parsed = useAI
-                ? await parseSmsWithClaude(sms.body, merchantRules, apiKey, merchantChannels)
-                : parseWithRegex(sms.body);
+                ? await parseSmsWithClaude(sms.body, merchantRules, apiKey, merchantChannels, userName)
+                : parseWithRegex(sms.body, userName);
 
               // Remember the rail this merchant uses (for consistency + future
               // "pay again"), device-local so it needs no schema change.
@@ -135,7 +137,11 @@ const SMSRetriever: React.FC = () => {
 
               if (useAI && parsed.confidence >= THRESHOLD_AUTO_SAVE) {
                 // Auto-save directly to transactions — high confidence
-                const txType = parsed.direction === 'credit' ? 'income' : 'expense';
+                const txType = parsed.isTransfer
+                  ? 'transfer'
+                  : parsed.direction === 'credit'
+                  ? 'income'
+                  : 'expense';
                 await db.execute(
                   `INSERT INTO transactions
                      (id, amount, account_id, category, date_time, sms, sender,
@@ -168,9 +174,10 @@ const SMSRetriever: React.FC = () => {
                     [parsed.balance_after, account.id],
                   );
                 } else {
-                  // fees reduce the balance too → a debit costs amount + fee
+                  // Balance impact follows the SMS direction (not the type):
+                  // a debit costs amount + fee, a credit adds amount.
                   const delta =
-                    txType === 'income'
+                    parsed.direction === 'credit'
                       ? parsed.amount
                       : -(parsed.amount + (parsed.fee ?? 0));
                   await db.execute(
@@ -180,7 +187,11 @@ const SMSRetriever: React.FC = () => {
                 }
               } else {
                 // Needs review — goes to auto_records
-                const txType = parsed.direction === 'credit' ? 'income' : 'expense';
+                const txType = parsed.isTransfer
+                  ? 'transfer'
+                  : parsed.direction === 'credit'
+                  ? 'income'
+                  : 'expense';
                 await db.execute(
                   `INSERT INTO auto_records
                      (id, amount, account_id, category, date_time, sms, sender,

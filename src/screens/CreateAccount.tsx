@@ -168,6 +168,7 @@ export default function CreateAccount({navigation}: any) {
         </View>
 
         <ScrollView
+          style={{flex: 1}}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.scroll}>

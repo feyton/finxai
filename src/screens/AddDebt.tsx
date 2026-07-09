@@ -1,6 +1,8 @@
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useMemo, useState} from 'react';
 import {
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -138,10 +140,14 @@ export default function AddDebt({navigation}: any) {
         <Text style={styles.title}>New debt or loan</Text>
       </View>
 
+      <KeyboardAvoidingView
+        style={{flex: 1}}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView
+        style={{flex: 1}}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{padding: 16, gap: 14, paddingBottom: 16}}>
+        contentContainerStyle={{padding: 16, gap: 14, paddingBottom: 24}}>
         {/* Direction toggle */}
         <View style={styles.dirToggle}>
           {(['borrowed', 'lent'] as Dir[]).map(d => (
@@ -287,6 +293,7 @@ export default function AddDebt({navigation}: any) {
         <Icon name="Check" size={17} color={T.accentInk} strokeWidth={2.6} />
         <Text style={styles.saveText}>{saving ? 'Building…' : 'Create & build schedule'}</Text>
       </Pressable>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

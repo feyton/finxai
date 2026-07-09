@@ -13,6 +13,9 @@ export interface ParsedSMS {
   // Payment rail used, e.g. 'MoMoPay' | 'Send money' | 'Receive' |
   // 'Bank transfer' | 'Cash Power' | 'Airtime' | 'Bill' | 'Other'.
   channel?: string;
+  // True when the money moved between the user's OWN accounts (BK↔MoMo,
+  // MoMo↔Mokash, self-transfer) — net-zero across net worth, not spend/income.
+  isTransfer?: boolean;
 }
 
 export interface MerchantRule {

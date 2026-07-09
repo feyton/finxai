@@ -1,6 +1,8 @@
 import {usePowerSync} from '@powersync/react-native';
 import React, {useMemo, useState} from 'react';
 import {
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -143,10 +145,14 @@ export default function CreateBudget({navigation}: any) {
         <Text style={styles.title}>Create a budget</Text>
       </View>
 
+      <KeyboardAvoidingView
+        style={{flex: 1}}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView
+        style={{flex: 1}}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{padding: 16, gap: 16, paddingBottom: 16}}>
+        contentContainerStyle={{padding: 16, gap: 16, paddingBottom: 24}}>
         {/* Type grid */}
         <View style={styles.typeGrid}>
           {TYPES.map(ty => {
@@ -318,6 +324,7 @@ export default function CreateBudget({navigation}: any) {
         <Icon name="Check" size={17} color={T.accentInk} strokeWidth={2.6} />
         <Text style={styles.saveText}>{saving ? 'Creating…' : 'Create budget'}</Text>
       </Pressable>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

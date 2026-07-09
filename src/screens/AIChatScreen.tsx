@@ -145,12 +145,13 @@ export default function AIChatScreen({navigation}: any) {
     for (const t of monthTxns as any[]) {
       if (t.transaction_type === 'income') {
         income += t.amount ?? 0;
-      } else {
+      } else if (t.transaction_type === 'expense') {
         expenses += t.amount ?? 0;
         if (t.category) {
           catMap[t.category] = (catMap[t.category] ?? 0) + (t.amount ?? 0);
         }
       }
+      // transfers are net-zero movements between own accounts — ignored
     }
     const cats = Object.entries(catMap)
       .sort((a, b) => b[1] - a[1])

@@ -12,7 +12,10 @@ interface TxRowProps {
 export function TxRow({tx, onPress}: TxRowProps) {
   const cat = CATS[resolveCat(tx.category ?? '')];
   const label = tx.merchant || tx.payee || tx.category || 'Unknown';
+  const isTransfer = tx.transaction_type === 'transfer';
   const isIncome = tx.transaction_type === 'income';
+  const amountColor = isTransfer ? T.text2 : isIncome ? T.income : T.expense;
+  const sign = isTransfer ? '' : isIncome ? '+' : '-';
   const timeStr = tx.date_time
     ? format(new Date(tx.date_time), 'HH:mm')
     : '';
@@ -30,8 +33,8 @@ export function TxRow({tx, onPress}: TxRowProps) {
           {[tx.account_name, timeStr].filter(Boolean).join('  ·  ')}
         </Text>
       </View>
-      <Text style={[styles.amount, {color: isIncome ? T.income : T.expense}]}>
-        {isIncome ? '+' : '-'}RWF {fmtAmount(tx.amount ?? 0)}
+      <Text style={[styles.amount, {color: amountColor}]}>
+        {sign}RWF {fmtAmount(tx.amount ?? 0)}
       </Text>
     </Pressable>
   );

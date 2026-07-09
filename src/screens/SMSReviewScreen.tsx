@@ -16,7 +16,7 @@ import {CATS, CategoryId, FONTS, R, T, accountIcon, accountTint, resolveCat} fro
 import {CatChip, ConfPill, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {recordChannel, recordConfirmation, recordCorrection} from '../tools/merchantMemory';
-import {extractBalance} from '../tools/claudeParser';
+import {extractBalance, regexExtract} from '../tools/claudeParser';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -284,7 +284,11 @@ export default function SMSReviewScreen({navigation}: any) {
   const handleConfirm = async (record: any) => {
     try {
       const txType =
-        record.transaction_type === 'income' ? 'income' : 'expense';
+        record.transaction_type === 'income'
+          ? 'income'
+          : record.transaction_type === 'transfer'
+          ? 'transfer'
+          : 'expense';
       const now = new Date().toISOString();
       await db.execute(
         `INSERT INTO transactions
@@ -318,8 +322,9 @@ export default function SMSReviewScreen({navigation}: any) {
           [bal, record.account_id],
         );
       } else {
+        const dir = regexExtract(record.sms ?? '').direction;
         const delta =
-          txType === 'income'
+          dir === 'credit'
             ? record.amount ?? 0
             : -((record.amount ?? 0) + (record.fees ?? 0));
         await db.execute(
@@ -341,7 +346,11 @@ export default function SMSReviewScreen({navigation}: any) {
   const handleFix = async (record: any, fix: Fix) => {
     try {
       const txType =
-        record.transaction_type === 'income' ? 'income' : 'expense';
+        record.transaction_type === 'income'
+          ? 'income'
+          : record.transaction_type === 'transfer'
+          ? 'transfer'
+          : 'expense';
       const now = new Date().toISOString();
       const merchant = fix.merchant || record.merchant || record.payee || '';
       const accountId = fix.accountId || record.account_id;
@@ -378,8 +387,9 @@ export default function SMSReviewScreen({navigation}: any) {
           [bal, accountId],
         );
       } else {
+        const dir = regexExtract(record.sms ?? '').direction;
         const delta =
-          txType === 'income'
+          dir === 'credit'
             ? record.amount ?? 0
             : -((record.amount ?? 0) + (record.fees ?? 0));
         await db.execute(

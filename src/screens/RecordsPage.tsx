@@ -291,8 +291,8 @@ export default function RecordsPage({navigation, route}: any) {
       }
       if (t.transaction_type === 'income') {
         moneyIn += t.amount ?? 0;
-      } else {
-        moneyOut += t.amount ?? 0;
+      } else if (t.transaction_type === 'expense') {
+        moneyOut += t.amount ?? 0; // transfers are net-zero — excluded
       }
     }
     return {moneyIn, moneyOut};
@@ -328,7 +328,7 @@ export default function RecordsPage({navigation, route}: any) {
         .filter(t => t.transaction_type === 'income')
         .reduce((s: number, t: any) => s + (t.amount ?? 0), 0),
       dayExpense: data
-        .filter(t => t.transaction_type !== 'income')
+        .filter(t => t.transaction_type === 'expense')
         .reduce((s: number, t: any) => s + (t.amount ?? 0), 0),
     }));
   }, [txns, filter, search]);
