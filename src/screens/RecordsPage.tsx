@@ -1,4 +1,7 @@
-import BottomSheet, {BottomSheetView} from '@gorhom/bottom-sheet';
+import BottomSheet, {
+  BottomSheetScrollView,
+  BottomSheetTextInput,
+} from '@gorhom/bottom-sheet';
 import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import {format} from 'date-fns';
@@ -13,9 +16,25 @@ import {
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {TxRow} from '../Components/TxRow';
-import {Icon} from '../Components/ui';
+import {CatChip, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
-import {CATS, FONTS, R, T, fmtAmount, resolveCat} from '../theme';
+import {
+  CATS,
+  CategoryId,
+  FONTS,
+  R,
+  T,
+  accountIcon,
+  accountTint,
+  fmtAmount,
+  resolveCat,
+} from '../theme';
+
+const SOURCE_LABEL: Record<string, string> = {
+  sms: 'From SMS',
+  ai: 'AI added',
+  manual: 'Manual entry',
+};
 
 type FilterType = 'all' | 'income' | 'expense' | 'ai';
 
@@ -29,23 +48,158 @@ function dayLabel(dt: string): string {
   return format(date, 'MMM d, yyyy');
 }
 
+function InfoRow({label, value}: {label: string; value: string}) {
+  return (
+    <View style={styles.infoRow}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue} numberOfLines={1}>{value}</Text>
+    </View>
+  );
+}
+
 function TxDetail({
   tx,
+  accounts,
+  onSave,
   onDelete,
   onClose,
 }: {
   tx: any;
+  accounts: any[];
+  onSave: (updated: any) => Promise<void>;
   onDelete: () => void;
   onClose: () => void;
 }) {
-  const cat = CATS[resolveCat(tx.category ?? '')];
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount] = useState(String(Math.round(tx.amount ?? 0)));
+  const [category, setCategory] = useState<CategoryId>(resolveCat(tx.category ?? ''));
+  const [accountId, setAccountId] = useState<string>(tx.account_id ?? '');
+  const [merchant, setMerchant] = useState<string>(tx.merchant || tx.payee || '');
+  const [note, setNote] = useState<string>(tx.note || '');
+  const [busy, setBusy] = useState(false);
+
+  const catId = resolveCat(tx.category ?? '');
+  const cat = CATS[catId];
   const isIncome = tx.transaction_type === 'income';
-  const dateStr = tx.date_time
-    ? format(new Date(tx.date_time), 'MMM d, yyyy  HH:mm')
-    : '';
+  const dateStr = tx.date_time ? format(new Date(tx.date_time), 'MMM d, yyyy  ·  HH:mm') : '—';
+  const conf = tx.confidence != null && tx.confidence < 1 ? ` · ${Math.round(tx.confidence * 100)}%` : '';
+  const sourceStr = (SOURCE_LABEL[tx.source] ?? 'Manual entry') + conf;
+
+  const save = async () => {
+    const amt = Math.abs(parseInt(amount, 10) || 0);
+    if (amt <= 0) {
+      return;
+    }
+    setBusy(true);
+    await onSave({
+      id: tx.id,
+      transaction_type: tx.transaction_type,
+      orig_amount: tx.amount ?? 0,
+      orig_account_id: tx.account_id,
+      amount: amt,
+      account_id: accountId || tx.account_id,
+      category: CATS[category]?.label ?? category,
+      merchant,
+      note,
+    });
+    setBusy(false);
+  };
+
+  if (editing) {
+    return (
+      <BottomSheetScrollView contentContainerStyle={styles.editWrap}>
+        <Text style={styles.editTitle}>Edit transaction</Text>
+
+        <Text style={styles.editLabel}>Amount (RWF)</Text>
+        <BottomSheetTextInput
+          value={amount}
+          onChangeText={setAmount}
+          keyboardType="numeric"
+          style={styles.editInput}
+          placeholderTextColor={T.text3}
+        />
+
+        <Text style={styles.editLabel}>Merchant / payee</Text>
+        <BottomSheetTextInput
+          value={merchant}
+          onChangeText={setMerchant}
+          placeholder="Who"
+          style={styles.editInput}
+          placeholderTextColor={T.text3}
+        />
+
+        <Text style={styles.editLabel}>Category</Text>
+        <BottomSheetScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}>
+          {(Object.values(CATS) as {id: CategoryId; label: string; color: string}[]).map(c => {
+            const on = category === c.id;
+            return (
+              <Pressable
+                key={c.id}
+                onPress={() => setCategory(c.id)}
+                style={[styles.pickChip, on && {borderColor: c.color, backgroundColor: c.color + '18'}]}>
+                <CatChip cat={c.id} size={26} />
+                <Text style={[styles.pickChipText, on && {color: T.text}]} numberOfLines={1}>{c.label}</Text>
+              </Pressable>
+            );
+          })}
+        </BottomSheetScrollView>
+
+        {accounts.length > 0 && (
+          <>
+            <Text style={styles.editLabel}>Account</Text>
+            <BottomSheetScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRow}>
+              {accounts.map(a => {
+                const on = (accountId || tx.account_id) === a.id;
+                const tint = accountTint(a.name ?? '');
+                return (
+                  <Pressable
+                    key={a.id}
+                    onPress={() => setAccountId(a.id)}
+                    style={[styles.pickChip, on && {borderColor: tint, backgroundColor: tint + '18'}]}>
+                    <Icon name={accountIcon(a.name ?? '', a.type ?? '')} size={14} color={tint} strokeWidth={2} />
+                    <Text style={[styles.pickChipText, on && {color: T.text}]} numberOfLines={1}>{a.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </BottomSheetScrollView>
+          </>
+        )}
+
+        <Text style={styles.editLabel}>Note</Text>
+        <BottomSheetTextInput
+          value={note}
+          onChangeText={setNote}
+          placeholder="Optional"
+          style={styles.editInput}
+          placeholderTextColor={T.text3}
+        />
+
+        <View style={styles.detailBtns}>
+          <Pressable
+            onPress={() => setEditing(false)}
+            style={({pressed}) => [styles.closeBtn, {opacity: pressed ? 0.7 : 1}]}>
+            <Text style={styles.closeBtnText}>Cancel</Text>
+          </Pressable>
+          <Pressable
+            onPress={save}
+            disabled={busy}
+            style={({pressed}) => [styles.saveBtn, {opacity: busy ? 0.5 : pressed ? 0.85 : 1}]}>
+            <Icon name="Check" size={16} color={T.accentInk} strokeWidth={2.5} />
+            <Text style={styles.saveBtnText}>{busy ? 'Saving…' : 'Save'}</Text>
+          </Pressable>
+        </View>
+      </BottomSheetScrollView>
+    );
+  }
 
   return (
-    <View style={styles.detail}>
+    <BottomSheetScrollView contentContainerStyle={styles.detail}>
       <View style={styles.detailTop}>
         <View style={[styles.detailIcon, {backgroundColor: cat.color + '22'}]}>
           <Icon name={cat.icon} size={22} color={cat.color} strokeWidth={2} />
@@ -53,33 +207,46 @@ function TxDetail({
         <Text style={[styles.detailAmount, {color: isIncome ? T.income : T.expense}]}>
           {isIncome ? '+' : '-'}RWF {fmtAmount(tx.amount ?? 0)}
         </Text>
-        <Text style={styles.detailLabel}>
-          {tx.merchant || tx.payee || tx.category || '—'}
-        </Text>
-        <Text style={styles.detailSub}>
-          {cat.label}{'  ·  '}{dateStr}
-        </Text>
-        {tx.account_name ? (
-          <Text style={styles.detailSub}>{tx.account_name}</Text>
-        ) : null}
+        <Text style={styles.detailLabel}>{tx.merchant || tx.payee || cat.label}</Text>
+      </View>
+
+      <View style={styles.infoCard}>
+        <InfoRow label="Category" value={cat.label} />
+        <View style={styles.infoDivider} />
+        <InfoRow label="Account" value={tx.account_name ?? '—'} />
+        <View style={styles.infoDivider} />
+        <InfoRow label="When" value={dateStr} />
+        <View style={styles.infoDivider} />
+        <InfoRow label="Source" value={sourceStr} />
+        {tx.fees > 0 && (
+          <>
+            <View style={styles.infoDivider} />
+            <InfoRow label="Fee" value={`RWF ${fmtAmount(tx.fees)}`} />
+          </>
+        )}
         {tx.note ? (
-          <Text style={styles.detailNote}>{tx.note}</Text>
+          <>
+            <View style={styles.infoDivider} />
+            <InfoRow label="Note" value={tx.note} />
+          </>
         ) : null}
       </View>
+
       <View style={styles.detailBtns}>
+        <Pressable
+          onPress={() => setEditing(true)}
+          style={({pressed}) => [styles.editBtn, {opacity: pressed ? 0.8 : 1}]}>
+          <Icon name="Pencil" size={15} color={T.accent} strokeWidth={2.2} />
+          <Text style={styles.editBtnText}>Edit</Text>
+        </Pressable>
         <Pressable
           onPress={onDelete}
           style={({pressed}) => [styles.deleteBtn, {opacity: pressed ? 0.7 : 1}]}>
           <Icon name="Trash2" size={16} color={T.expense} strokeWidth={2} />
           <Text style={styles.deleteBtnText}>Delete</Text>
         </Pressable>
-        <Pressable
-          onPress={onClose}
-          style={({pressed}) => [styles.closeBtn, {opacity: pressed ? 0.7 : 1}]}>
-          <Text style={styles.closeBtnText}>Close</Text>
-        </Pressable>
       </View>
-    </View>
+    </BottomSheetScrollView>
   );
 }
 
@@ -99,12 +266,17 @@ export default function RecordsPage({navigation}: any) {
     [userId ?? ''],
   );
 
+  const {data: accounts} = useQuery(
+    'SELECT id, name, type FROM accounts WHERE owner_id = ? ORDER BY name',
+    [userId ?? ''],
+  );
+
   const tabBarHeight = useBottomTabBarHeight();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
   const [selected, setSelected] = useState<any>(null);
   const sheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['45%', '75%'], []);
+  const snapPoints = useMemo(() => ['60%', '92%'], []);
 
   const monthTotals = useMemo(() => {
     const start = new Date();
@@ -168,10 +340,45 @@ export default function RecordsPage({navigation}: any) {
 
   const deleteSelected = useCallback(async () => {
     if (!selected) {return;}
+    // reverse the transaction's effect on its account balance
+    const sign = selected.transaction_type === 'income' ? 1 : -1;
+    if (selected.account_id) {
+      await db.execute(
+        'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
+        [sign * (selected.amount ?? 0), selected.account_id],
+      );
+    }
     await db.execute('DELETE FROM transactions WHERE id = ?', [selected.id]);
     sheetRef.current?.close();
     setSelected(null);
   }, [db, selected]);
+
+  const saveEdit = useCallback(
+    async (u: any) => {
+      const sign = u.transaction_type === 'income' ? 1 : -1;
+      // revert original effect from the original account
+      if (u.orig_account_id) {
+        await db.execute(
+          'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
+          [sign * (u.orig_amount ?? 0), u.orig_account_id],
+        );
+      }
+      // apply new effect to the (possibly new) account
+      if (u.account_id) {
+        await db.execute(
+          'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
+          [sign * u.amount, u.account_id],
+        );
+      }
+      await db.execute(
+        'UPDATE transactions SET amount = ?, account_id = ?, category = ?, merchant = ?, note = ? WHERE id = ?',
+        [u.amount, u.account_id, u.category, u.merchant, u.note, u.id],
+      );
+      sheetRef.current?.close();
+      setSelected(null);
+    },
+    [db],
+  );
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -284,15 +491,15 @@ export default function RecordsPage({navigation}: any) {
         onChange={i => {
           if (i === -1) {setSelected(null);}
         }}>
-        <BottomSheetView style={styles.sheetWrap}>
-          {selected && (
-            <TxDetail
-              tx={selected}
-              onDelete={deleteSelected}
-              onClose={() => sheetRef.current?.close()}
-            />
-          )}
-        </BottomSheetView>
+        {selected && (
+          <TxDetail
+            tx={selected}
+            accounts={accounts as any[]}
+            onSave={saveEdit}
+            onDelete={deleteSelected}
+            onClose={() => sheetRef.current?.close()}
+          />
+        )}
       </BottomSheet>
     </SafeAreaView>
   );
@@ -392,8 +599,77 @@ const styles = StyleSheet.create({
   sheetBg: {backgroundColor: T.surface},
   handle: {backgroundColor: T.border2},
   sheetWrap: {flex: 1},
-  detail: {flex: 1, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between'},
-  detailTop: {alignItems: 'center', paddingVertical: 16, gap: 4},
+  detail: {paddingHorizontal: 20, paddingBottom: 28},
+  detailTop: {alignItems: 'center', paddingVertical: 8, gap: 4},
+  infoCard: {
+    backgroundColor: T.surface2,
+    borderRadius: R.card,
+    borderWidth: 1,
+    borderColor: T.border,
+    paddingHorizontal: 14,
+    marginTop: 8,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    gap: 12,
+  },
+  infoLabel: {fontFamily: FONTS.regular, fontSize: 12.5, color: T.text2},
+  infoValue: {fontFamily: FONTS.medium, fontSize: 13, color: T.text, flexShrink: 1, textAlign: 'right'},
+  infoDivider: {height: 1, backgroundColor: T.border},
+  editWrap: {paddingHorizontal: 20, paddingBottom: 28},
+  editTitle: {fontFamily: FONTS.bold, fontSize: 16, color: T.text, textAlign: 'center', paddingVertical: 6},
+  editLabel: {fontFamily: FONTS.semibold, fontSize: 12, color: T.text2, marginTop: 14, marginBottom: 7},
+  editInput: {
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: R.small,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+    fontFamily: FONTS.medium,
+    fontSize: 14,
+    color: T.text,
+  },
+  chipRow: {gap: 8, paddingVertical: 2, paddingRight: 8},
+  pickChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    borderRadius: R.small,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  pickChipText: {fontFamily: FONTS.medium, fontSize: 11.5, color: T.text3, maxWidth: 110},
+  editBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: R.card,
+    backgroundColor: T.accentSoft,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.25)',
+  },
+  editBtnText: {fontFamily: FONTS.semibold, fontSize: 13.5, color: T.accent},
+  saveBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: R.card,
+    backgroundColor: T.accent,
+  },
+  saveBtnText: {fontFamily: FONTS.bold, fontSize: 13.5, color: T.accentInk},
   detailIcon: {
     width: 54,
     height: 54,

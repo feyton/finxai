@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -229,7 +230,10 @@ Guidelines:
   const [input, setInput] = useState('');
   const [apiKey, setApiKeyState] = useState('');
   const [model, setModelState] = useState(DEFAULT_ANTHROPIC_MODEL);
+  const [loaded, setLoaded] = useState(false);
   const listRef = useRef<FlatList>(null);
+
+  const chatKey = `finxai.chat.${uid || 'anon'}`;
 
   useEffect(() => {
     (async () => {
@@ -239,6 +243,52 @@ Guidelines:
       setModelState(m);
     })();
   }, []);
+
+  // Restore the saved conversation once the user id is known.
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(chatKey);
+        if (raw) {
+          const saved = JSON.parse(raw);
+          if (Array.isArray(saved.msgs) && saved.msgs.length) {
+            setMsgs(saved.msgs);
+          }
+          if (Array.isArray(saved.apiHistory)) {
+            setApiHistory(saved.apiHistory);
+          }
+        }
+      } catch {}
+      setLoaded(true);
+    })();
+  }, [chatKey]);
+
+  // Persist the conversation on every change (after the initial restore).
+  useEffect(() => {
+    if (!loaded) {
+      return;
+    }
+    AsyncStorage.setItem(chatKey, JSON.stringify({msgs, apiHistory})).catch(() => {});
+  }, [msgs, apiHistory, loaded, chatKey]);
+
+  const clearChat = () => {
+    Alert.alert(
+      'Clear conversation?',
+      'This erases the chat history with your Finance Coach.',
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            setMsgs(SEED);
+            setApiHistory([]);
+            await AsyncStorage.removeItem(chatKey);
+          },
+        },
+      ],
+    );
+  };
 
   useEffect(() => {
     listRef.current?.scrollToEnd({animated: true});
@@ -375,6 +425,11 @@ Guidelines:
             </Text>
           </View>
         </View>
+        <Pressable
+          onPress={clearChat}
+          style={({pressed}) => [styles.headerBtn, {opacity: pressed ? 0.7 : 1}]}>
+          <Icon name="Trash2" size={16} color={T.text2} />
+        </Pressable>
         <Pressable
           onPress={() => navigation.navigate('AISettings')}
           style={({pressed}) => [styles.headerBtn, {opacity: pressed ? 0.7 : 1}]}>
