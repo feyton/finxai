@@ -50,6 +50,45 @@ export async function getPreferredChannel(sender: string): Promise<string | null
   }
 }
 
+// ── Merchant → payment-rail memory (sender-agnostic) ───────────
+// Learns which rail (MoMoPay, Bank transfer, …) and optional code a given
+// merchant is paid through, so the SMS parser stays consistent and a future
+// "pay again" can rebuild the USSD string.
+const MERCHANT_CHANNEL_KEY = 'finxai.merchantChannels';
+
+export interface MerchantChannel {
+  channel: string;
+  code?: string;
+}
+
+export async function recordMerchantChannel(
+  merchant: string,
+  channel: string,
+  code?: string,
+): Promise<void> {
+  const pattern = normalise(merchant);
+  if (!pattern || !channel) {
+    return;
+  }
+  try {
+    const raw = await AsyncStorage.getItem(MERCHANT_CHANNEL_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    map[pattern] = {channel, ...(code ? {code} : {})};
+    await AsyncStorage.setItem(MERCHANT_CHANNEL_KEY, JSON.stringify(map));
+  } catch (e) {
+    console.warn('[MerchantMemory] recordMerchantChannel error:', e);
+  }
+}
+
+export async function getMerchantChannels(): Promise<Record<string, MerchantChannel>> {
+  try {
+    const raw = await AsyncStorage.getItem(MERCHANT_CHANNEL_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
 // ── Retrieve rules relevant to a merchant name ─────────────────
 export async function getMerchantRules(
   db: any,

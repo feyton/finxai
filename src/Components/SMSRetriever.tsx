@@ -14,13 +14,14 @@ import React, {useEffect, useRef} from 'react';
 // @ts-ignore
 import SmsAndroid from 'react-native-get-sms-android';
 import {useCurrentUser} from '../hooks/useCurrentUser';
-import {getGeminiKey, getGeminiModel, hasGeminiKey} from '../tools/aiConfig';
+import {getAnthropicKey, hasAnthropicKey} from '../tools/aiConfig';
+import {THRESHOLD_AUTO_SAVE} from '../tools/geminiParser';
+import {parseSmsWithClaude, parseWithRegex} from '../tools/claudeParser';
 import {
-  THRESHOLD_AUTO_SAVE,
-  parseSmsWith,
-  parseWithFallback,
-} from '../tools/geminiParser';
-import {getMerchantRules} from '../tools/merchantMemory';
+  getMerchantChannels,
+  getMerchantRules,
+  recordMerchantChannel,
+} from '../tools/merchantMemory';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -62,15 +63,15 @@ const SMSRetriever: React.FC = () => {
   const processSms = async () => {
     processing.current = true;
     try {
-      const useAI = await hasGeminiKey();
-      const apiKey = useAI ? (await getGeminiKey())! : '';
-      const model = useAI ? await getGeminiModel() : '';
+      const useAI = await hasAnthropicKey();
+      const apiKey = useAI ? (await getAnthropicKey())! : '';
       const merchantRules = useAI
         ? await getMerchantRules(db, '', userId!, 20)
         : [];
+      const merchantChannels = useAI ? await getMerchantChannels() : {};
 
       for (const account of accounts) {
-        await processAccountSms(account, useAI, apiKey, model, merchantRules);
+        await processAccountSms(account, useAI, apiKey, merchantRules, merchantChannels);
       }
 
       // Clean up orphaned auto_records
@@ -89,8 +90,8 @@ const SMSRetriever: React.FC = () => {
     account: any,
     useAI: boolean,
     apiKey: string,
-    model: string,
     merchantRules: any[],
+    merchantChannels: any,
   ): Promise<void> => {
     const filters = {
       box: 'inbox',
@@ -120,8 +121,14 @@ const SMSRetriever: React.FC = () => {
 
             try {
               const parsed = useAI
-                ? await parseSmsWith(sms.body, merchantRules, apiKey, model)
-                : parseWithFallback(sms.body);
+                ? await parseSmsWithClaude(sms.body, merchantRules, apiKey, merchantChannels)
+                : parseWithRegex(sms.body);
+
+              // Remember the rail this merchant uses (for consistency + future
+              // "pay again"), device-local so it needs no schema change.
+              if (parsed.merchant && parsed.merchant !== 'Unknown' && parsed.channel) {
+                recordMerchantChannel(parsed.merchant, parsed.channel).catch(() => {});
+              }
 
               const now = new Date().toISOString();
               const occurredAt = parsed.occurred_at ?? new Date(parseInt(sms.date ?? '0', 10) || Date.now()).toISOString();

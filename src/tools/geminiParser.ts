@@ -10,6 +10,9 @@ export interface ParsedSMS {
   balance_after: number | null;
   txn_ref: string | null;
   occurred_at: string | null;
+  // Payment rail used, e.g. 'MoMoPay' | 'Send money' | 'Receive' |
+  // 'Bank transfer' | 'Cash Power' | 'Airtime' | 'Bill' | 'Other'.
+  channel?: string;
 }
 
 export interface MerchantRule {

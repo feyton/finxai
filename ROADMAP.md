@@ -14,14 +14,16 @@ and everything new stay in sync around one backend.
   uploads local writes back (see `SupabaseConnector.ts`).
 - Everything is scoped by `owner_id`.
 
-Two things to harden before we fan out to the web:
+Status / discipline:
 
-1. **Row-Level Security (RLS).** Today the app relies on `owner_id = ?` in every
-   query with the anon key. For a web client (and safety generally) add RLS
-   policies on every table: `USING (owner_id = auth.uid())` for select/update/
-   delete and `WITH CHECK (owner_id = auth.uid())` for insert. Then neither
-   client can ever read another user's rows even if a query forgets the filter.
-2. **A schema-change procedure** (see §5) so new columns don't break sync.
+1. **Row-Level Security (RLS) — already enabled** across all tables
+   (`owner_id = auth.uid()`), so both mobile and web are safe even if a query
+   forgets its filter. Keep every new table's policies in lockstep.
+2. **Migrations are the safety net.** `supabase_migration_v2.sql` (and future
+   migration files) are the single record of the schema. As we build, each new
+   column/table is added there **first**, RLS + PowerSync sync rules updated in
+   the same change, then the clients — so nothing is lost and scopes stay
+   correct (the procedure in §5).
 
 ---
 
@@ -29,36 +31,56 @@ Two things to harden before we fan out to the web:
 
 **Goal:** richer data management + accessibility on a big screen, same data.
 
-**Recommended shape:** a **monorepo** with npm workspaces:
+**Stack:** **Next.js (App Router)**, self-hosted on the **Contabo VPS at
+`app.feyton.co.rw`**. Next.js gives us a real server tier (API routes / server
+actions / server components + cron) — so secrets and server-side jobs can live on
+our own box instead of only Supabase Edge Functions.
+
+**Monorepo** with npm workspaces:
 
 ```
 finxai/
   packages/core/     # shared, framework-agnostic logic (no RN, no DOM)
   apps/mobile/       # the current React Native app
-  apps/web/          # new — Vite + React (or Next.js)
+  apps/web/          # new — Next.js (App Router)
 ```
 
 - **`packages/core`** — extract the pure logic both clients share so they never
   drift: `theme` tokens, `resolveCat` + category data (`data.json`), `fmtAmount`,
   the **AI action catalog** (`aiActions.ts` — schemas are UI-agnostic), the
-  Anthropic client, and TypeScript types for every table. Mobile and web both
-  import from here.
-- **Web data layer — go direct to Supabase**, not PowerSync. The web is online-
-  first, so `@supabase/supabase-js` with **Realtime subscriptions** gives live
-  updates without PowerSync's local-DB complexity. (PowerSync also has a web SDK
-  via wa-sqlite/IndexedDB — only reach for it if we later need offline web.)
-- **Auth** — same Google sign-in through Supabase; the session works across both.
+  Anthropic client, and TypeScript types for every table.
+- **Web data layer:**
+  - **Reads/writes:** `@supabase/supabase-js` against the same Postgres, honoring
+    the existing RLS. Use the **server client** in server components/route
+    handlers (service role stays server-only) and the **browser client** for
+    realtime subscriptions and user-scoped queries (anon key + RLS).
+  - The web is online-first, so no PowerSync on web — Supabase Realtime covers
+    live updates. (PowerSync-web via wa-sqlite is only for future offline web.)
+- **Server tier (Next.js on Contabo) can host:**
+  - the **invite emailer** (move `send-invite` from a Supabase Edge Function to a
+    Next.js route handler that holds the Brevo creds as VPS env vars — one fewer
+    moving part);
+  - an **AI proxy** so the Anthropic key lives server-side instead of on devices;
+  - **cron** (systemd timer / node-cron) for scheduled-payment reminders,
+    debt-installment nudges, and digest emails;
+  - **reverse-geocoding** for location tags (§2).
+- **Auth** — same Google sign-in through Supabase; sessions work across both
+  clients (Supabase SSR helpers for cookies on Next.js).
+- **Deploy on Contabo:** Node build behind **Nginx** at `app.feyton.co.rw` with
+  a Let's Encrypt cert; run via **PM2** or a **systemd** service (or Docker).
+  CI/CD later; manual `git pull && npm run build && pm2 reload` to start.
 - **What the web unlocks:** bulk edit/categorize, CSV/PDF export, big-screen
   charts and filters, budget management, merchant/channel rule management, and an
   admin view of the AI's learned rules.
 
 **Migration path (low-risk, incremental):**
-1. Stand up the monorepo; move the current app under `apps/mobile` (paths only).
-2. Extract `packages/core` a slice at a time (start with types + `theme` +
-   `resolveCat` + `data.json`), pointing mobile imports at it.
-3. Scaffold `apps/web` (Vite + React + supabase-js), reuse `core`, ship a
-   read-only dashboard first, then editing.
-4. Add RLS before the web writes anything.
+1. Monorepo: move the current app under `apps/mobile` (path-only change).
+2. Extract `packages/core` a slice at a time (types → `theme` → `resolveCat` +
+   `data.json`), repoint mobile imports.
+3. Scaffold `apps/web` (Next.js + Supabase SSR), ship a read-only dashboard, then
+   editing. RLS already protects writes.
+4. Stand up `app.feyton.co.rw` on Contabo (Nginx + TLS + PM2); move `send-invite`
+   into a Next.js route handler once it's live.
 
 ---
 
