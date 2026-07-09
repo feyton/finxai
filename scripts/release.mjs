@@ -11,7 +11,7 @@
  */
 import {execSync} from 'node:child_process';
 import {createInterface} from 'node:readline/promises';
-import {readFileSync, writeFileSync} from 'node:fs';
+import {copyFileSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {stdin, stdout} from 'node:process';
 
 const GRADLE = 'android/app/build.gradle';
@@ -85,11 +85,11 @@ async function main() {
 
   // 4. Publish GitHub Release with the APK
   const asset = `finxai-${tag}.apk`;
-  run(`cp ${REPO_APK} ${asset}`, {shell: 'bash'});
+  copyFileSync(REPO_APK, asset);
   // --no-verify so the pre-push hook doesn't recurse into another release prompt
   run('git push --no-verify origin main');
   run(`gh release create ${tag} ${asset} --title ${tag} --generate-notes --target main`);
-  run(`rm -f ${asset}`, {shell: 'bash'});
+  rmSync(asset, {force: true});
 
   const sizeMb = (readFileSync(REPO_APK).length / (1024 * 1024)).toFixed(1);
   console.log(`\n✓ Released ${tag} — ${asset} (${sizeMb} MB) is live on GitHub Releases.`);
