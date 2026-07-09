@@ -11,37 +11,67 @@
   If you lose them, devices with the app installed will refuse updates until they uninstall.
 - Play Store restricts `READ_SMS` apps heavily — side-loading avoids that fight entirely.
 
-## Build a release APK
+## Cut a release (primary path — local build)
+
+**One command:**
 
 ```bash
-npm run build          # = cd android && gradlew assembleRelease
-# Output: android/app/build/outputs/apk/release/app-release.apk
+npm run release            # asks major / minor / patch, then does everything
+# or non-interactive:
+npm run release -- minor
 ```
 
-Install on a device connected over USB (enable USB debugging):
+It bumps `versionCode` + `versionName` (and `src/appVersion.ts`), commits, tags,
+builds a **signed arm64-v8a APK** (~40 MB, not the ~130 MB universal build),
+pushes `main`, and publishes a GitHub Release with the APK attached via `gh`.
+
+Requirements: [`gh`](https://cli.github.com/) authenticated (`gh auth login`) and
+signing creds in `~/.gradle/gradle.properties`.
+
+### Why arm64-only?
+The old CI build was a **universal APK** bundling native libs for all four ABIs
+(arm64, armeabi-v7a, x86, x86_64) → ~130 MB. Real phones are arm64-v8a, so a
+single-ABI build is ~1/3 the size with zero downside for side-loading. The
+`-PreactNativeArchitectures=arm64-v8a` flag is baked into `npm run build` and the
+release script.
+
+### Version bump prompt on push
+`.githooks/pre-push` asks "is this a release? maj/min/patch/N" when you push
+`main`. Pick a bump type and it runs `npm run release <type>` for you; pick N and
+the push proceeds normally. Enable once (already done on this machine):
 
 ```bash
+git config core.hooksPath .githooks
+```
+
+## In-app self-update checker
+The app checks GitHub Releases on opening **Profile** and shows a **New** badge on
+"Check for updates" when a newer version is out; tapping it opens the APK
+download. `src/appVersion.ts` holds the running version (the release script keeps
+it in sync). No store needed.
+
+## Manual APK build / install
+
+```bash
+npm run build   # signed arm64 APK → android/app/build/outputs/apk/release/app-release.apk
 adb install -r android/app/build/outputs/apk/release/app-release.apk
 ```
 
-Or just copy the APK to the phone (Drive/WhatsApp/USB) and open it — allow
-"install unknown apps" for the file manager when prompted.
+Or copy the APK to the phone and open it — allow "install unknown apps".
 
-## Recommended update flow: GitHub Releases + Obtainium
+## Obtainium (auto-updates on device)
 
-1. Bump `versionCode` (and `versionName`) in `android/app/build.gradle` — Android
-   refuses to update unless `versionCode` increases.
-2. Tag and push: `git tag v1.1 && git push origin v1.1` — the GitHub Actions
-   workflow (`.github/workflows/release.yml`) builds the signed APK and attaches
-   it to a GitHub Release automatically.
-3. On your phone, install [Obtainium](https://github.com/ImranR98/Obtainium)
-   (an app that installs/updates apps directly from GitHub releases).
-   Add app → `https://github.com/feyton/finxai` — done. It notifies you and
-   updates whenever a new release appears.
-   - The repo is private? In Obtainium add a GitHub personal access token
-     (Settings → Source-specific → GitHub) with `repo` read scope.
+Install [Obtainium](https://github.com/ImranR98/Obtainium), add app →
+`https://github.com/feyton/finxai`. It installs/updates whenever a new Release
+appears. Private repo? Add a GitHub PAT with `repo` read scope in Obtainium
+settings.
 
-### CI secrets required (GitHub → repo → Settings → Secrets and variables → Actions)
+## CI (fallback only)
+`.github/workflows/release.yml` no longer runs on tags — it's a **manual**
+`workflow_dispatch` fallback (Actions tab) that uploads an arm64 APK artifact.
+Use it only when you can't build locally.
+
+### CI secrets (GitHub → repo → Settings → Secrets and variables → Actions)
 
 | Secret | Value |
 |---|---|

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Pre-push guard: when pushing main, ask whether this is a release so the
+# version gets bumped correctly. Heavy work (build + publish) is delegated to
+# `npm run release` so the hook itself stays fast and never blocks on a build.
+#
+# Enable once with:  git config core.hooksPath .githooks
+
+remote="$1"
+z40=0000000000000000000000000000000000000000
+
+# Only prompt when pushing the main branch.
+pushing_main=false
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main) pushing_main=true ;;
+  esac
+done
+
+[ "$pushing_main" = true ] || exit 0
+
+# Read the answer from the terminal (stdin is the git ref list, not a TTY).
+if [ ! -t 1 ] && [ ! -e /dev/tty ]; then
+  exit 0
+fi
+
+printf '\n📦 Pushing main. Is this a release? [maj / min / patch / N(o)]: ' > /dev/tty
+read -r answer < /dev/tty
+case "$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')" in
+  maj*) kind=major ;;
+  min*) kind=minor ;;
+  pat*) kind=patch ;;
+  *)    exit 0 ;;  # not a release — let the push through unchanged
+esac
+
+printf '\n→ Run the release now? This bumps the version, builds the APK, and publishes it.\n  Aborting this push so the release commit + tag go up together. [Y/n]: ' > /dev/tty
+read -r go < /dev/tty
+case "$(printf '%s' "$go" | tr '[:upper:]' '[:lower:]')" in
+  n*) exit 0 ;;
+esac
+
+printf '\n✋ Push aborted. Running: npm run release %s\n' "$kind" > /dev/tty
+npm run release -- "$kind" < /dev/tty > /dev/tty 2>&1
+# The release script pushes main + the tag itself, so we stop this push.
+exit 1

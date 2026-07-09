@@ -8,7 +8,8 @@
     "lint": "eslint .",
     "start": "npx react-native start",
     "test": "jest",
-    "build": "cd android && gradlew assembleRelease"
+    "build": "cd android && gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
