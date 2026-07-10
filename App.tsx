@@ -23,6 +23,7 @@ import CreateBudgetScreen from './src/screens/CreateBudget';
 import AddPlannedPaymentScreen from './src/screens/AddPlannedPayment';
 import BudgetDetails from './src/screens/BudgetDetails';
 import CreateRecord from './src/screens/CreateRecord';
+import EditTransaction from './src/screens/EditTransaction';
 import DebtScreen from './src/screens/DebtScreen';
 import AddDebt from './src/screens/AddDebt';
 import ShoppingScreen from './src/screens/ShoppingScreen';
@@ -103,6 +104,7 @@ function App(): React.JSX.Element {
                 <Stack.Screen name="SMSReview" component={SMSReviewScreen} />
                 <Stack.Screen name="Notifications" component={NotificationsScreen} />
                 <Stack.Screen name="CreateRecord" component={CreateRecord} />
+                <Stack.Screen name="EditTransaction" component={EditTransaction} />
                 <Stack.Screen name="CreateAccount" component={CreateAccountScreen} />
                 <Stack.Screen name="Confirm" component={ConfirmTransactionsScreen} />
                 <Stack.Screen name="CreateBudget" component={CreateBudgetScreen} />

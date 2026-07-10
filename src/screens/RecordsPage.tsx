@@ -1,7 +1,4 @@
-import BottomSheet, {
-  BottomSheetScrollView,
-  BottomSheetTextInput,
-} from '@gorhom/bottom-sheet';
+import BottomSheet, {BottomSheetScrollView} from '@gorhom/bottom-sheet';
 import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import {format} from 'date-fns';
@@ -16,27 +13,16 @@ import {
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {TxRow} from '../Components/TxRow';
-import {CatChip, Icon} from '../Components/ui';
+import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {
   CATS,
-  CategoryId,
   FONTS,
   R,
   T,
-  accountIcon,
-  accountTint,
   fmtAmount,
   resolveCat,
 } from '../theme';
-import categoriesData from '../tools/data.json';
-
-function uuid(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = (Math.random() * 16) | 0;
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  });
-}
 
 const SOURCE_LABEL: Record<string, string> = {
   sms: 'From SMS',
@@ -45,19 +31,6 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 type FilterType = 'all' | 'income' | 'expense' | 'transfer' | 'ai';
-
-// data.json subcategories for a resolved CategoryId (first matching category).
-function subcatsFor(catId: CategoryId): {name: string; icon: string}[] {
-  const match = (categoriesData.categories as any[]).find(
-    c => resolveCat(c.name) === catId,
-  );
-  return match?.subcategories ?? [];
-}
-
-interface SplitRow {
-  category: CategoryId;
-  amount: number;
-}
 
 function dayLabel(dt: string): string {
   const date = new Date(dt);
@@ -78,38 +51,19 @@ function InfoRow({label, value}: {label: string; value: string}) {
   );
 }
 
+// View-only detail — editing/splitting live on the EditTransaction screen
+// (horizontal chip rows inside the bottom sheet fought its pan gestures).
 function TxDetail({
   tx,
-  accounts,
   splits,
-  onSave,
-  onSaveSplits,
+  onEdit,
   onDelete,
 }: {
   tx: any;
-  accounts: any[];
   splits: any[];
-  onSave: (updated: any) => Promise<void>;
-  onSaveSplits: (rows: SplitRow[]) => Promise<void>;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
-  const [mode, setMode] = useState<'view' | 'edit' | 'split'>('view');
-  const [amount, setAmount] = useState(String(Math.round(tx.amount ?? 0)));
-  const [category, setCategory] = useState<CategoryId>(resolveCat(tx.category ?? ''));
-  const [subcategory, setSubcategory] = useState<string>(tx.subcategory ?? '');
-  const [txType, setTxType] = useState<string>(tx.transaction_type ?? 'expense');
-  const [accountId, setAccountId] = useState<string>(tx.account_id ?? '');
-  const [merchant, setMerchant] = useState<string>(tx.merchant || tx.payee || '');
-  const [note, setNote] = useState<string>(tx.note || '');
-  const [busy, setBusy] = useState(false);
-
-  // split editor state
-  const [parts, setParts] = useState<SplitRow[]>(
-    splits.map(s => ({category: resolveCat(s.category ?? ''), amount: s.amount ?? 0})),
-  );
-  const [partCat, setPartCat] = useState<CategoryId | null>(null);
-  const [partAmount, setPartAmount] = useState('');
-
   const catId = resolveCat(tx.category ?? '');
   const cat = CATS[catId];
   const isIncome = tx.transaction_type === 'income';
@@ -117,290 +71,6 @@ function TxDetail({
   const dateStr = tx.date_time ? format(new Date(tx.date_time), 'MMM d, yyyy  ·  HH:mm') : '—';
   const conf = tx.confidence != null && tx.confidence < 1 ? ` · ${Math.round(tx.confidence * 100)}%` : '';
   const sourceStr = (SOURCE_LABEL[tx.source] ?? 'Manual entry') + conf;
-  const subcats = subcatsFor(category);
-
-  const save = async () => {
-    const amt = Math.abs(parseInt(amount, 10) || 0);
-    if (amt <= 0) {
-      return;
-    }
-    setBusy(true);
-    await onSave({
-      id: tx.id,
-      transaction_type: txType,
-      orig_type: tx.transaction_type,
-      orig_transfer_direction: tx.transfer_direction,
-      orig_amount: tx.amount ?? 0,
-      orig_account_id: tx.account_id,
-      amount: amt,
-      account_id: accountId || tx.account_id,
-      category: CATS[category]?.label ?? category,
-      subcategory,
-      merchant,
-      note,
-    });
-    setBusy(false);
-  };
-
-  const partsTotal = parts.reduce((s, p) => s + p.amount, 0);
-  const remaining = Math.round(tx.amount ?? 0) - partsTotal;
-
-  const addPart = () => {
-    const amt = parseInt(partAmount.replace(/\D/g, ''), 10) || 0;
-    if (!partCat || amt <= 0) {
-      return;
-    }
-    setParts(prev => [...prev, {category: partCat, amount: amt}]);
-    setPartCat(null);
-    setPartAmount('');
-  };
-
-  const saveSplits = async () => {
-    setBusy(true);
-    await onSaveSplits(parts);
-    setBusy(false);
-    setMode('view');
-  };
-
-  if (mode === 'split') {
-    return (
-      <BottomSheetScrollView contentContainerStyle={styles.editWrap}>
-        <Text style={styles.editTitle}>Split transaction</Text>
-        <Text style={styles.splitHint}>
-          Break this {fmtAmount(tx.amount ?? 0)} RWF record across categories.
-          Reports use the parts instead of the single category.
-        </Text>
-
-        {parts.map((p, i) => {
-          const c = CATS[p.category];
-          return (
-            <View key={`${p.category}-${i}`} style={styles.splitRow}>
-              <CatChip cat={p.category} size={30} />
-              <Text style={styles.splitRowLabel} numberOfLines={1}>{c.label}</Text>
-              <Text style={styles.splitRowAmt}>{fmtAmount(p.amount)}</Text>
-              <Pressable onPress={() => setParts(prev => prev.filter((_, j) => j !== i))} hitSlop={8}>
-                <Icon name="X" size={15} color={T.text3} strokeWidth={2.2} />
-              </Pressable>
-            </View>
-          );
-        })}
-
-        <Text style={[styles.splitRemaining, {color: remaining === 0 ? T.accent : remaining < 0 ? T.expense : T.text2}]}>
-          {remaining === 0
-            ? 'Fully allocated'
-            : remaining > 0
-            ? `${fmtAmount(remaining)} RWF left to allocate`
-            : `${fmtAmount(-remaining)} RWF over the total`}
-        </Text>
-
-        <BottomSheetScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRow}>
-          {(Object.values(CATS) as {id: CategoryId; label: string; color: string}[]).map(c => {
-            const on = partCat === c.id;
-            return (
-              <Pressable
-                key={c.id}
-                onPress={() => setPartCat(c.id)}
-                style={[styles.pickChip, on && {borderColor: c.color, backgroundColor: c.color + '18'}]}>
-                <CatChip cat={c.id} size={26} />
-                <Text style={[styles.pickChipText, on && {color: T.text}]} numberOfLines={1}>{c.label}</Text>
-              </Pressable>
-            );
-          })}
-        </BottomSheetScrollView>
-
-        <View style={styles.splitAdderRow}>
-          <BottomSheetTextInput
-            value={partAmount}
-            onChangeText={setPartAmount}
-            keyboardType="numeric"
-            placeholder={partCat ? `Amount for ${CATS[partCat].label}` : 'Pick a category above'}
-            placeholderTextColor={T.text3}
-            style={[styles.editInput, {flex: 1}]}
-          />
-          <Pressable
-            onPress={addPart}
-            disabled={!partCat || !partAmount}
-            style={({pressed}) => [
-              styles.splitAddBtn,
-              {opacity: !partCat || !partAmount ? 0.4 : pressed ? 0.8 : 1},
-            ]}>
-            <Icon name="Plus" size={16} color={T.accentInk} strokeWidth={2.6} />
-          </Pressable>
-        </View>
-
-        <View style={styles.detailBtns}>
-          <Pressable
-            onPress={() => setMode('view')}
-            style={({pressed}) => [styles.closeBtn, {opacity: pressed ? 0.7 : 1}]}>
-            <Text style={styles.closeBtnText}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={saveSplits}
-            disabled={busy || (parts.length > 0 && remaining !== 0)}
-            style={({pressed}) => [
-              styles.saveBtn,
-              {opacity: busy || (parts.length > 0 && remaining !== 0) ? 0.5 : pressed ? 0.85 : 1},
-            ]}>
-            <Icon name="Check" size={16} color={T.accentInk} strokeWidth={2.5} />
-            <Text style={styles.saveBtnText}>
-              {busy ? 'Saving…' : parts.length === 0 ? 'Remove split' : 'Save split'}
-            </Text>
-          </Pressable>
-        </View>
-      </BottomSheetScrollView>
-    );
-  }
-
-  if (mode === 'edit') {
-    return (
-      <BottomSheetScrollView contentContainerStyle={styles.editWrap}>
-        <Text style={styles.editTitle}>Edit transaction</Text>
-
-        <Text style={styles.editLabel}>Type</Text>
-        <View style={styles.typeRow}>
-          {[
-            {id: 'expense', label: 'Money out'},
-            {id: 'income', label: 'Money in'},
-            {id: 'transfer', label: 'Transfer'},
-          ].map(t => {
-            const on = txType === t.id;
-            return (
-              <Pressable
-                key={t.id}
-                onPress={() => setTxType(t.id)}
-                style={[styles.typeChoice, on && styles.typeChoiceActive]}>
-                <Text style={[styles.typeChoiceText, on && {color: T.accent}]}>{t.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        {txType === 'transfer' && tx.transaction_type !== 'transfer' && (
-          <Text style={styles.typeHint}>
-            Transfers move money between your own accounts — excluded from
-            income & spending totals.
-          </Text>
-        )}
-
-        <Text style={styles.editLabel}>Amount (RWF)</Text>
-        <BottomSheetTextInput
-          value={amount}
-          onChangeText={setAmount}
-          keyboardType="numeric"
-          style={styles.editInput}
-          placeholderTextColor={T.text3}
-        />
-
-        <Text style={styles.editLabel}>Merchant / payee</Text>
-        <BottomSheetTextInput
-          value={merchant}
-          onChangeText={setMerchant}
-          placeholder="Who"
-          style={styles.editInput}
-          placeholderTextColor={T.text3}
-        />
-
-        {txType !== 'transfer' && (
-          <>
-            <Text style={styles.editLabel}>Category</Text>
-            <BottomSheetScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.chipRow}>
-              {(Object.values(CATS) as {id: CategoryId; label: string; color: string}[]).map(c => {
-                const on = category === c.id;
-                return (
-                  <Pressable
-                    key={c.id}
-                    onPress={() => {
-                      setCategory(c.id);
-                      setSubcategory('');
-                    }}
-                    style={[styles.pickChip, on && {borderColor: c.color, backgroundColor: c.color + '18'}]}>
-                    <CatChip cat={c.id} size={26} />
-                    <Text style={[styles.pickChipText, on && {color: T.text}]} numberOfLines={1}>{c.label}</Text>
-                  </Pressable>
-                );
-              })}
-            </BottomSheetScrollView>
-
-            {subcats.length > 0 && (
-              <>
-                <Text style={styles.editLabel}>Subcategory</Text>
-                <BottomSheetScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.chipRow}>
-                  {subcats.map(s => {
-                    const on = subcategory === s.name;
-                    return (
-                      <Pressable
-                        key={s.name}
-                        onPress={() => setSubcategory(on ? '' : s.name)}
-                        style={[styles.pickChip, on && {borderColor: T.accent, backgroundColor: T.accentSoft}]}>
-                        <Text style={{fontSize: 12}}>{s.icon}</Text>
-                        <Text style={[styles.pickChipText, on && {color: T.text}]} numberOfLines={1}>{s.name}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </BottomSheetScrollView>
-              </>
-            )}
-          </>
-        )}
-
-        {accounts.length > 0 && (
-          <>
-            <Text style={styles.editLabel}>Account</Text>
-            <BottomSheetScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.chipRow}>
-              {accounts.map(a => {
-                const on = (accountId || tx.account_id) === a.id;
-                const tint = accountTint(a.name ?? '');
-                return (
-                  <Pressable
-                    key={a.id}
-                    onPress={() => setAccountId(a.id)}
-                    style={[styles.pickChip, on && {borderColor: tint, backgroundColor: tint + '18'}]}>
-                    <Icon name={accountIcon(a.name ?? '', a.type ?? '')} size={14} color={tint} strokeWidth={2} />
-                    <Text style={[styles.pickChipText, on && {color: T.text}]} numberOfLines={1}>{a.name}</Text>
-                  </Pressable>
-                );
-              })}
-            </BottomSheetScrollView>
-          </>
-        )}
-
-        <Text style={styles.editLabel}>Note</Text>
-        <BottomSheetTextInput
-          value={note}
-          onChangeText={setNote}
-          placeholder="Optional"
-          style={styles.editInput}
-          placeholderTextColor={T.text3}
-        />
-
-        <View style={styles.detailBtns}>
-          <Pressable
-            onPress={() => setMode('view')}
-            style={({pressed}) => [styles.closeBtn, {opacity: pressed ? 0.7 : 1}]}>
-            <Text style={styles.closeBtnText}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={save}
-            disabled={busy}
-            style={({pressed}) => [styles.saveBtn, {opacity: busy ? 0.5 : pressed ? 0.85 : 1}]}>
-            <Icon name="Check" size={16} color={T.accentInk} strokeWidth={2.5} />
-            <Text style={styles.saveBtnText}>{busy ? 'Saving…' : 'Save'}</Text>
-          </Pressable>
-        </View>
-      </BottomSheetScrollView>
-    );
-  }
 
   return (
     <BottomSheetScrollView contentContainerStyle={styles.detail}>
@@ -477,19 +147,13 @@ function TxDetail({
 
       <View style={styles.detailBtns}>
         <Pressable
-          onPress={() => setMode('edit')}
+          onPress={onEdit}
           style={({pressed}) => [styles.editBtn, {opacity: pressed ? 0.8 : 1}]}>
           <Icon name="Pencil" size={15} color={T.accent} strokeWidth={2.2} />
-          <Text style={styles.editBtnText}>Edit</Text>
+          <Text style={styles.editBtnText}>
+            {isTransfer ? 'Edit' : 'Edit / Split'}
+          </Text>
         </Pressable>
-        {!isTransfer && (
-          <Pressable
-            onPress={() => setMode('split')}
-            style={({pressed}) => [styles.editBtn, {opacity: pressed ? 0.8 : 1}]}>
-            <Icon name="Scissors" size={15} color={T.accent} strokeWidth={2.2} />
-            <Text style={styles.editBtnText}>{splits.length > 0 ? 'Re-split' : 'Split'}</Text>
-          </Pressable>
-        )}
         <Pressable
           onPress={onDelete}
           style={({pressed}) => [styles.deleteBtn, {opacity: pressed ? 0.7 : 1}]}>
@@ -527,11 +191,6 @@ export default function RecordsPage({navigation, route}: any) {
 
   const {data: txns} = useQuery(
     'SELECT t.*, a.name as account_name FROM transactions t LEFT JOIN accounts a ON t.account_id = a.id WHERE t.owner_id = ? ORDER BY t.date_time DESC',
-    [userId ?? ''],
-  );
-
-  const {data: accounts} = useQuery(
-    'SELECT id, name, type FROM accounts WHERE owner_id = ? ORDER BY name',
     [userId ?? ''],
   );
 
@@ -643,55 +302,15 @@ export default function RecordsPage({navigation, route}: any) {
     setSelected(null);
   }, [db, selected]);
 
-  const saveEdit = useCallback(
-    async (u: any) => {
-      // Balance follows the ORIGINAL movement direction — switching the type
-      // (e.g. income → transfer) re-classifies the record without pretending
-      // the money moved differently.
-      const sign = movementSign(u.orig_type, u.orig_transfer_direction);
-      // revert original effect from the original account
-      if (u.orig_account_id) {
-        await db.execute(
-          'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
-          [sign * (u.orig_amount ?? 0), u.orig_account_id],
-        );
-      }
-      // apply new effect to the (possibly new) account
-      if (u.account_id) {
-        await db.execute(
-          'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-          [sign * u.amount, u.account_id],
-        );
-      }
-      // A manual type flip to 'transfer' keeps direction from the original
-      // movement so records stay explainable.
-      const transferDirection =
-        u.transaction_type === 'transfer'
-          ? u.orig_transfer_direction ?? (sign > 0 ? 'in' : 'out')
-          : null;
-      await db.execute(
-        'UPDATE transactions SET amount = ?, account_id = ?, category = ?, subcategory = ?, merchant = ?, note = ?, transaction_type = ?, transfer_direction = ? WHERE id = ?',
-        [u.amount, u.account_id, u.category, u.subcategory ?? '', u.merchant, u.note, u.transaction_type, transferDirection, u.id],
-      );
-      sheetRef.current?.close();
-      setSelected(null);
-    },
-    [db],
-  );
-
-  const saveSplits = useCallback(
-    async (rows: SplitRow[]) => {
-      if (!selected) {return;}
-      await db.execute('DELETE FROM split_details WHERE transaction_id = ?', [selected.id]);
-      for (const row of rows) {
-        await db.execute(
-          'INSERT INTO split_details (id, transaction_id, amount, category, subcategory, note, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [uuid(), selected.id, row.amount, CATS[row.category]?.label ?? row.category, '', '', userId ?? ''],
-        );
-      }
-    },
-    [db, selected, userId],
-  );
+  // Editing/splitting happen on the EditTransaction screen — the bottom
+  // sheet's pan gestures made in-sheet chip rows a hit-or-miss experience.
+  const editSelected = useCallback(() => {
+    if (!selected) {return;}
+    const id = selected.id;
+    sheetRef.current?.close();
+    setSelected(null);
+    navigation.navigate('EditTransaction', {txId: id});
+  }, [navigation, selected]);
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -808,10 +427,8 @@ export default function RecordsPage({navigation, route}: any) {
           <TxDetail
             key={selected.id}
             tx={selected}
-            accounts={accounts as any[]}
             splits={(selectedSplits as any[]) ?? []}
-            onSave={saveEdit}
-            onSaveSplits={saveSplits}
+            onEdit={editSelected}
             onDelete={deleteSelected}
           />
         )}
