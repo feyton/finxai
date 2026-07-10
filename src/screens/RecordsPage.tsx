@@ -84,8 +84,8 @@ function TxDetail({
   // sheet/scroll (activeOffsetX vs failOffsetY keeps the gestures apart).
   const swipe = Gesture.Pan()
     .runOnJS(true)
-    .activeOffsetX([-28, 28])
-    .failOffsetY([-16, 16])
+    .activeOffsetX([-15, 15])
+    .failOffsetY([-12, 12])
     .onEnd(e => {
       if (e.translationX <= -56) {
         onStep(1); // swipe left → next (older)
@@ -491,6 +491,12 @@ export default function RecordsPage({navigation, route}: any) {
         index={-1}
         snapPoints={snapPoints}
         enablePanDownToClose
+        // The sheet's pan must not fight the horizontal tx-swipe: only
+        // clearly-vertical drags move the sheet, and any horizontal movement
+        // makes the sheet's gesture FAIL outright (no more up/down jitter
+        // while swiping between transactions).
+        activeOffsetY={[-12, 12]}
+        failOffsetX={[-15, 15]}
         backgroundStyle={styles.sheetBg}
         handleIndicatorStyle={styles.handle}
         onChange={i => {
