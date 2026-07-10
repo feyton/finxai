@@ -4,10 +4,11 @@ import Link from 'next/link';
 import {usePathname} from 'next/navigation';
 
 const LINKS = [
-  {href: '/dashboard', label: 'Overview', icon: '📊'},
-  {href: '/dashboard/transactions', label: 'Transactions', icon: '🧾'},
-  {href: '/dashboard/accounts', label: 'Accounts', icon: '💳'},
-  {href: '/dashboard/budgets', label: 'Budgets', icon: '🎯'},
+  {href: '/dashboard', label: 'Overview', icon: '▦'},
+  {href: '/dashboard/transactions', label: 'Transactions', icon: '⇅'},
+  {href: '/dashboard/accounts', label: 'Accounts', icon: '▤'},
+  {href: '/dashboard/budgets', label: 'Budgets', icon: '◔'},
+  {href: '/dashboard/shared', label: 'Shared', icon: '⧉'},
 ];
 
 export function Nav() {
@@ -24,7 +25,7 @@ export function Nav() {
             key={l.href}
             href={l.href}
             className={`nav-link${active ? ' active' : ''}`}>
-            <span style={{fontSize: 16}}>{l.icon}</span>
+            <span className="w-4 text-center text-[13px] opacity-80">{l.icon}</span>
             <span>{l.label}</span>
           </Link>
         );

@@ -1,10 +1,10 @@
 'use client';
 
 import {format} from 'date-fns';
-import {useCallback, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
 import {createClient} from '@/lib/supabase/client';
-import {CATS, type CategoryId, T, fmtMoney, resolveCat} from '@/lib/theme';
-import type {Account, Transaction} from '@/lib/types';
+import {CATS, type CategoryId, T, builtinSubcats, fmtMoney, resolveCat} from '@/lib/theme';
+import type {Account, Subcategory, Transaction} from '@/lib/types';
 
 const CAT_LIST = Object.values(CATS);
 const TYPE_OPTIONS = ['expense', 'income', 'transfer'] as const;
@@ -22,6 +22,7 @@ type EditDraft = {
   id: string;
   merchant: string;
   category: CategoryId;
+  subcategory: string;
   transaction_type: string;
   amount: string;
   account_id: string;
@@ -44,6 +45,29 @@ export function TransactionsClient({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [customSubcats, setCustomSubcats] = useState<Subcategory[]>([]);
+
+  // Custom subcategories (synced table) merge with the built-ins in the picker.
+  useEffect(() => {
+    supabase
+      .from('subcategories')
+      .select('*')
+      .then(({data}) => setCustomSubcats((data ?? []) as Subcategory[]));
+  }, [supabase]);
+
+  const subcatOptions = useCallback(
+    (cat: CategoryId): {name: string; icon: string}[] => {
+      const list = [...builtinSubcats(cat)];
+      for (const s of customSubcats) {
+        if (resolveCat(s.category ?? '') !== cat) continue;
+        if (!list.some(x => x.name.toLowerCase() === (s.name ?? '').toLowerCase())) {
+          list.push({name: s.name, icon: s.icon || '🏷️'});
+        }
+      }
+      return list;
+    },
+    [customSubcats],
+  );
 
   const accName = useMemo(
     () => new Map(accounts.map(a => [a.id, a.name ?? 'Account'])),
@@ -93,6 +117,7 @@ export function TransactionsClient({
       id: t.id,
       merchant: t.merchant ?? t.payee ?? '',
       category: resolveCat(t.category ?? ''),
+      subcategory: t.subcategory ?? '',
       transaction_type: t.transaction_type ?? 'expense',
       amount: String(Math.round(t.amount ?? 0)),
       account_id: t.account_id ?? '',
@@ -127,6 +152,7 @@ export function TransactionsClient({
         amount,
         account_id: draft.account_id || null,
         category: categoryLabel,
+        subcategory: draft.subcategory || null,
         merchant: draft.merchant || null,
         transaction_type: draft.transaction_type,
         note: draft.note || null,
@@ -369,11 +395,30 @@ export function TransactionsClient({
                 className="select"
                 value={draft.category}
                 onChange={e =>
-                  setDraft({...draft, category: e.target.value as CategoryId})
+                  setDraft({
+                    ...draft,
+                    category: e.target.value as CategoryId,
+                    subcategory: '',
+                  })
                 }>
                 {CAT_LIST.map(c => (
                   <option key={c.id} value={c.id}>
                     {c.emoji} {c.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Subcategory</span>
+              <select
+                className="select"
+                value={draft.subcategory}
+                onChange={e => setDraft({...draft, subcategory: e.target.value})}>
+                <option value="">— none —</option>
+                {subcatOptions(draft.category).map(s => (
+                  <option key={s.name} value={s.name}>
+                    {s.icon} {s.name}
                   </option>
                 ))}
               </select>

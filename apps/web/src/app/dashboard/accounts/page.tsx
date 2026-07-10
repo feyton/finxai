@@ -1,21 +1,36 @@
 import {createClient} from '@/lib/supabase/server';
 import {T, fmtMoney, accountTint} from '@/lib/theme';
-import type {Account} from '@/lib/types';
+import type {Account, AccountShare} from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AccountsPage() {
   const supabase = await createClient();
-  const {data} = await supabase.from('accounts').select('*');
+  const {
+    data: {user},
+  } = await supabase.auth.getUser();
+  const uid = user?.id ?? '';
+  const [{data}, sharesRes] = await Promise.all([
+    supabase.from('accounts').select('*'),
+    supabase.from('account_shares').select('*'),
+  ]);
   const accounts = (data ?? []) as Account[];
-  const total = accounts.reduce((s, a) => s + (a.available_balance ?? 0), 0);
+  const shares = (sharesRes.data ?? []) as AccountShare[];
+  const sharedIn = new Set(
+    shares
+      .filter(s => s.shared_with_id === uid && s.status === 'active')
+      .map(s => s.account_id),
+  );
+  const total = accounts
+    .filter(a => a.owner_id === uid)
+    .reduce((s, a) => s + (a.available_balance ?? 0), 0);
 
   return (
     <>
       <div className="page-head">
         <div>
           <div className="page-title">Accounts</div>
-          <div className="page-sub">Total {fmtMoney(total)}</div>
+          <div className="page-sub">Total {fmtMoney(total)} (your accounts)</div>
         </div>
       </div>
 
@@ -42,10 +57,13 @@ export default async function AccountsPage() {
                     {a.auto ? '📡' : '💳'}
                   </div>
                   <div>
-                    <div style={{fontWeight: 600, fontSize: 15}}>
-                      {a.name ?? 'Account'}
+                    <div style={{fontWeight: 600, fontSize: 14}}>
+                      {a.name ?? 'Account'}{' '}
+                      {sharedIn.has(a.id) && (
+                        <span className="pill bg-accent-soft text-accent2">shared</span>
+                      )}
                     </div>
-                    <div style={{fontSize: 12.5, color: T.text3}}>
+                    <div style={{fontSize: 11.5, color: T.text3}}>
                       {a.type ?? '—'}
                       {a.number ? ` · ${a.number}` : ''}
                     </div>

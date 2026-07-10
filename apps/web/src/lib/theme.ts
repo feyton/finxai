@@ -1,23 +1,27 @@
 // Ported from the mobile app's src/theme.ts (pure logic, no RN).
 // Kept in sync manually for now; will move to packages/core in a later phase.
 
+// Web admin palette — dark-first, blue accent (mirrors globals.css @theme).
 export const T = {
-  bg: '#0A0D10',
-  surface: '#13171B',
-  surface2: '#1A1F24',
-  surface3: '#232A30',
-  border: 'rgba(255,255,255,0.07)',
-  border2: 'rgba(255,255,255,0.12)',
-  text: '#F2F4F5',
-  text2: '#A6AEB6',
-  text3: '#6B747C',
-  accent: '#22C55E',
-  accent600: '#16A34A',
-  accentSoft: 'rgba(34,197,94,0.14)',
+  bg: '#0B0E14',
+  surface: '#10141C',
+  surface2: '#151B26',
+  surface3: '#1B2330',
+  border: 'rgba(148,163,184,0.10)',
+  border2: 'rgba(148,163,184,0.20)',
+  text: '#E2E8F0',
+  text2: '#94A3B8',
+  text3: '#5B6B7F',
+  accent: '#3B82F6',
+  accent600: '#2563EB',
+  accentSoft: 'rgba(59,130,246,0.13)',
   income: '#34D399',
   expense: '#FB7185',
   warn: '#FBBF24',
   info: '#60A5FA',
+  // validated chart pair (dark surface) — money in / money out
+  chartIn: '#3B82F6',
+  chartOut: '#F43F5E',
 };
 
 export type CategoryId =
@@ -71,6 +75,22 @@ export function accountTint(name: string): string {
   if (n.includes('equity')) return '#E2231A';
   if (n.includes('airtel')) return '#E40000';
   return '#22C55E';
+}
+
+// Built-in subcategories per CategoryId (from the mobile app's data.json —
+// keep apps/web/src/lib/subcategories.json in lockstep). Custom ones come
+// from the `subcategories` table and are merged by the caller.
+import subcatData from './subcategories.json';
+
+export function builtinSubcats(cat: CategoryId): {name: string; icon: string}[] {
+  const out: {name: string; icon: string}[] = [];
+  for (const c of (subcatData as any).categories as any[]) {
+    if (resolveCat(c.name) !== cat) continue;
+    for (const s of c.subcategories ?? []) {
+      if (!out.some(x => x.name === s.name)) out.push({name: s.name, icon: s.icon});
+    }
+  }
+  return out;
 }
 
 export function fmtAmount(n: number): string {

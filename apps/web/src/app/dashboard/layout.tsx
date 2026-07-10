@@ -24,30 +24,31 @@ export default async function DashboardLayout({
 
   return (
     <div className="shell">
+      {/* Desktop sidebar */}
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">F</div>
           <span>FinXAI</span>
+          <span className="ml-auto rounded-md bg-accent-soft px-1.5 py-0.5 text-[9px] font-semibold text-accent2">
+            ADMIN
+          </span>
         </div>
         <Nav />
         <div className="nav-spacer" />
-        <div
-          style={{
-            padding: '10px 12px',
-            fontSize: 12.5,
-            color: 'var(--text3)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}>
-          {name}
-        </div>
+        <div className="truncate px-2.5 pb-2 text-[11px] text-ink3">{name}</div>
         <form action="/auth/signout" method="post">
-          <button className="btn-signout" type="submit" style={{width: '100%'}}>
+          <button className="btn-signout" type="submit">
             Sign out
           </button>
         </form>
       </aside>
+
+      {/* Mobile top bar */}
+      <div className="topbar">
+        <div className="brand-mark mr-1">F</div>
+        <Nav />
+      </div>
+
       <main className="main">{children}</main>
     </div>
   );

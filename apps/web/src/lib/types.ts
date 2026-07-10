@@ -68,6 +68,17 @@ export interface BudgetItem {
   owner_id: string;
 }
 
+export interface AccountShare {
+  id: string;
+  account_id: string;
+  owner_id: string;
+  invitee_email: string;
+  shared_with_id: string | null;
+  access: string; // 'view' | 'edit'
+  status: string; // 'pending' | 'active'
+  created_at: string | null;
+}
+
 export interface Subcategory {
   id: string;
   category: string; // CategoryId: 'food', 'transport', …
