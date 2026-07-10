@@ -30,6 +30,7 @@ import CreateRecord from './src/screens/CreateRecord';
 import EditTransaction from './src/screens/EditTransaction';
 import CategoryStats from './src/screens/CategoryStats';
 import DebtScreen from './src/screens/DebtScreen';
+import DebtDetails from './src/screens/DebtDetails';
 import AddDebt from './src/screens/AddDebt';
 import ShoppingScreen from './src/screens/ShoppingScreen';
 import SharedScreen from './src/screens/SharedScreen';
@@ -143,6 +144,7 @@ function App(): React.JSX.Element {
                 <Stack.Screen name="AddPlannedPayment" component={AddPlannedPaymentScreen} />
                 <Stack.Screen name="UserProfile" component={ProfilePage} />
                 <Stack.Screen name="Debt" component={DebtScreen} />
+                <Stack.Screen name="DebtDetails" component={DebtDetails} />
                 <Stack.Screen name="AddDebt" component={AddDebt} />
                 <Stack.Screen name="Shopping" component={ShoppingScreen} />
                 <Stack.Screen name="Shared" component={SharedScreen} />

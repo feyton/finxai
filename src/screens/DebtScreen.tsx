@@ -94,7 +94,11 @@ export default function DebtScreen({navigation}: any) {
               const pct = d.term > 0 ? Math.round(((d.paid ?? 0) / d.term) * 100) : 0;
               const tint = d.tint || (isOwe ? T.info : T.income);
               return (
-                <Card key={d.id} pad={14}>
+                <Pressable
+                  key={d.id}
+                  onPress={() => navigation.navigate('DebtDetails', {debtId: d.id})}>
+                  {({pressed}) => (
+                  <Card pad={14} style={{opacity: pressed ? 0.85 : 1}}>
                   <View style={{flexDirection: 'row', alignItems: 'center', gap: 11}}>
                     <View style={[styles.debtIcon, {backgroundColor: tint + '22'}]}>
                       <Icon name={d.icon || 'Landmark'} size={19} color={tint} strokeWidth={2} />
@@ -113,10 +117,11 @@ export default function DebtScreen({navigation}: any) {
                         {d.rate > 0 ? ` · ${d.rate}% p.a.` : ''}
                       </Text>
                     </View>
-                    <View style={{alignItems: 'flex-end'}}>
+                    <View style={{alignItems: 'flex-end', gap: 2}}>
                       <Text style={styles.outstanding}>{fmtAmount(d.outstanding ?? 0)}</Text>
                       <Text style={styles.ofPrincipal}>of {fmtAmount(d.principal ?? 0)}</Text>
                     </View>
+                    <Icon name="ChevronRight" size={16} color={T.text3} strokeWidth={2} />
                   </View>
                   <View style={{marginTop: 12}}>
                     <Progress value={d.paid ?? 0} max={d.term || 1} color={tint} />
@@ -130,7 +135,9 @@ export default function DebtScreen({navigation}: any) {
                       ) : null}
                     </View>
                   </View>
-                </Card>
+                  </Card>
+                  )}
+                </Pressable>
               );
             })}
           </>
