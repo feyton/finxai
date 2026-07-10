@@ -9,9 +9,13 @@ import type {Account, Transaction} from '@/lib/types';
 const CAT_LIST = Object.values(CATS);
 const TYPE_OPTIONS = ['expense', 'income', 'transfer'] as const;
 
-// Balance sign, mirroring the mobile app: income adds, everything else subtracts.
-function sign(type: string | null): number {
-  return type === 'income' ? 1 : -1;
+// Balance-movement sign of a transaction as originally recorded, mirroring
+// the mobile app: changing the TYPE re-classifies a record — it does not
+// move money again, so edits always use the ORIGINAL movement direction.
+function movementSign(type: string | null, transferDirection?: string | null): number {
+  if (type === 'income') return 1;
+  if (type === 'transfer') return transferDirection === 'in' ? 1 : -1;
+  return -1;
 }
 
 type EditDraft = {
@@ -105,14 +109,16 @@ export function TransactionsClient({
     setBusy(true);
     setErr(null);
     try {
-      // Net balance deltas per account: remove the original effect, add the new.
+      // Net balance deltas per account: remove the original effect, add the
+      // new — both with the ORIGINAL movement sign (type flips re-classify).
+      const s = movementSign(orig.transaction_type, orig.transfer_direction);
       const deltas = new Map<string, number>();
       const add = (acc: string | null, d: number) => {
         if (!acc) return;
         deltas.set(acc, (deltas.get(acc) ?? 0) + d);
       };
-      add(orig.account_id, -(sign(orig.transaction_type) * (orig.amount ?? 0)));
-      add(draft.account_id, sign(draft.transaction_type) * amount);
+      add(orig.account_id, -(s * (orig.amount ?? 0)));
+      add(draft.account_id, s * amount);
       for (const [acc, d] of deltas) {
         if (Math.round(d) !== 0) await adjustBalance(acc, d);
       }
@@ -150,7 +156,7 @@ export function TransactionsClient({
       // Reverse the transaction's effect on its account.
       await adjustBalance(
         orig.account_id,
-        -(sign(orig.transaction_type) * (orig.amount ?? 0)),
+        -(movementSign(orig.transaction_type, orig.transfer_direction) * (orig.amount ?? 0)),
       );
       const {error} = await supabase
         .from('transactions')
@@ -294,6 +300,7 @@ export function TransactionsClient({
                           className="pill"
                           style={{background: cat.color + '22', color: cat.color}}>
                           {cat.emoji} {cat.label}
+                          {t.subcategory ? ` · ${t.subcategory}` : ''}
                         </span>
                       </td>
                       <td style={{color: T.text2}}>

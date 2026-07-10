@@ -37,6 +37,8 @@ export interface Transaction {
   budget_id: string | null;
   source: string | null;
   confidence: number | null;
+  transfer_account_id: string | null; // counterparty account for transfers
+  transfer_direction: string | null; // 'in' | 'out' (transfers only)
   owner_id: string;
   created_at: string | null;
 }
@@ -59,9 +61,20 @@ export interface Budget {
 export interface BudgetItem {
   id: string;
   budget_id: string | null;
+  name: string | null; // user-facing item label, e.g. 'Cake'
   category: string | null;
   subcategory: string | null;
   amount: number | null;
+  owner_id: string;
+}
+
+export interface SplitDetail {
+  id: string;
+  transaction_id: string;
+  amount: number | null;
+  category: string | null;
+  subcategory: string | null;
+  note: string | null;
   owner_id: string;
 }
 
