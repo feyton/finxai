@@ -1,4 +1,5 @@
 import BottomSheet, {BottomSheetScrollView} from '@gorhom/bottom-sheet';
+import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import {format} from 'date-fns';
@@ -53,14 +54,21 @@ function InfoRow({label, value}: {label: string; value: string}) {
 
 // View-only detail — editing/splitting live on the EditTransaction screen
 // (horizontal chip rows inside the bottom sheet fought its pan gestures).
+// Swipe left/right (or use the arrows) to step through the filtered list.
 function TxDetail({
   tx,
   splits,
+  index,
+  total,
+  onStep,
   onEdit,
   onDelete,
 }: {
   tx: any;
   splits: any[];
+  index: number;
+  total: number;
+  onStep: (dir: 1 | -1) => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -72,8 +80,45 @@ function TxDetail({
   const conf = tx.confidence != null && tx.confidence < 1 ? ` · ${Math.round(tx.confidence * 100)}%` : '';
   const sourceStr = (SOURCE_LABEL[tx.source] ?? 'Manual entry') + conf;
 
+  // Horizontal swipe steps transactions; clearly-vertical drags stay with the
+  // sheet/scroll (activeOffsetX vs failOffsetY keeps the gestures apart).
+  const swipe = Gesture.Pan()
+    .runOnJS(true)
+    .activeOffsetX([-28, 28])
+    .failOffsetY([-16, 16])
+    .onEnd(e => {
+      if (e.translationX <= -56) {
+        onStep(1); // swipe left → next (older)
+      } else if (e.translationX >= 56) {
+        onStep(-1); // swipe right → previous (newer)
+      }
+    });
+
   return (
     <BottomSheetScrollView contentContainerStyle={styles.detail}>
+      <GestureDetector gesture={swipe}>
+      <View>
+      {/* Prev / next navigation */}
+      <View style={styles.navRow}>
+        <Pressable
+          onPress={() => onStep(-1)}
+          disabled={index <= 0}
+          hitSlop={10}
+          style={({pressed}) => [styles.navBtn, {opacity: index <= 0 ? 0.3 : pressed ? 0.7 : 1}]}>
+          <Icon name="ChevronLeft" size={18} color={T.text2} strokeWidth={2.2} />
+        </Pressable>
+        <Text style={styles.navPos}>
+          {index + 1} of {total}
+        </Text>
+        <Pressable
+          onPress={() => onStep(1)}
+          disabled={index >= total - 1}
+          hitSlop={10}
+          style={({pressed}) => [styles.navBtn, {opacity: index >= total - 1 ? 0.3 : pressed ? 0.7 : 1}]}>
+          <Icon name="ChevronRight" size={18} color={T.text2} strokeWidth={2.2} />
+        </Pressable>
+      </View>
+
       <View style={styles.detailTop}>
         <View style={[styles.detailIcon, {backgroundColor: (isTransfer ? T.info : cat.color) + '22'}]}>
           <Icon
@@ -161,6 +206,8 @@ function TxDetail({
           <Text style={styles.deleteBtnText}>Delete</Text>
         </Pressable>
       </View>
+      </View>
+      </GestureDetector>
     </BottomSheetScrollView>
   );
 }
@@ -204,7 +251,8 @@ export default function RecordsPage({navigation, route}: any) {
     [selected?.id ?? ''],
   );
   const sheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['60%', '92%'], []);
+  // Tall enough that the Edit/Delete actions are visible without dragging.
+  const snapPoints = useMemo(() => ['80%', '95%'], []);
 
   const monthTotals = useMemo(() => {
     const start = new Date();
@@ -226,7 +274,9 @@ export default function RecordsPage({navigation, route}: any) {
     return {moneyIn, moneyOut};
   }, [txns]);
 
-  const sections = useMemo(() => {
+  // flatList = the filtered rows in display order — powers prev/next
+  // navigation in the detail sheet.
+  const {sections, flatList} = useMemo(() => {
     let list = txns as any[];
     if (filter === 'ai') {
       list = list.filter(t => t.source === 'sms' || t.source === 'ai');
@@ -249,7 +299,7 @@ export default function RecordsPage({navigation, route}: any) {
       groups[key].push(t);
     }
 
-    return Object.entries(groups).map(([title, data]) => ({
+    const secs = Object.entries(groups).map(([title, data]) => ({
       title,
       data,
       dayIncome: data
@@ -259,12 +309,28 @@ export default function RecordsPage({navigation, route}: any) {
         .filter(t => t.transaction_type === 'expense')
         .reduce((s: number, t: any) => s + (t.amount ?? 0), 0),
     }));
+    return {sections: secs, flatList: list};
   }, [txns, filter, search]);
 
   const openDetail = (tx: any) => {
     setSelected(tx);
     sheetRef.current?.snapToIndex(0);
   };
+
+  // Prev / next within the current filter, for the detail sheet's swipe + arrows.
+  const selectedIndex = selected
+    ? flatList.findIndex((t: any) => t.id === selected.id)
+    : -1;
+  const goStep = useCallback(
+    (dir: 1 | -1) => {
+      if (selectedIndex < 0) {return;}
+      const next = flatList[selectedIndex + dir];
+      if (next) {
+        setSelected(next);
+      }
+    },
+    [flatList, selectedIndex],
+  );
 
   // Deeplink: open a transaction's detail when navigated with openTxId
   // (e.g. tapping a recent transaction on the Home landing page).
@@ -435,6 +501,9 @@ export default function RecordsPage({navigation, route}: any) {
             key={selected.id}
             tx={selected}
             splits={(selectedSplits as any[]) ?? []}
+            index={selectedIndex}
+            total={flatList.length}
+            onStep={goStep}
             onEdit={editSelected}
             onDelete={deleteSelected}
           />
@@ -548,6 +617,23 @@ const styles = StyleSheet.create({
   sheetWrap: {flex: 1},
   detail: {paddingHorizontal: 20, paddingBottom: 28},
   detailTop: {alignItems: 'center', paddingVertical: 8, gap: 4},
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 2,
+  },
+  navBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navPos: {fontFamily: FONTS.medium, fontSize: 11.5, color: T.text3},
   infoCard: {
     backgroundColor: T.surface2,
     borderRadius: R.card,

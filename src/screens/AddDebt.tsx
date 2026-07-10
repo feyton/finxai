@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import DatePicker from 'react-native-date-picker';
 import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
@@ -55,11 +56,33 @@ export default function AddDebt({navigation}: any) {
   const [cadence, setCadence] = useState('Monthly');
   const [installment, setInstallment] = useState('');
   const [term, setTerm] = useState('');
+  const [alreadyPaid, setAlreadyPaid] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // First due is the USER'S date — real loans have a contract schedule, not
+  // "one period after whenever I got around to adding this". The cadence only
+  // seeds a default until the user picks a date themselves.
+  const [firstDue, setFirstDue] = useState<Date>(() => addPeriod(new Date(), 'Monthly', 1));
+  const [dueTouched, setDueTouched] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const pickCadence = (c: string) => {
+    setCadence(c);
+    if (!dueTouched) {
+      setFirstDue(addPeriod(new Date(), c, 1));
+    }
+  };
+
   const activeAccount = accountId || accountList[0]?.id || '';
-  const firstDue = useMemo(() => addPeriod(new Date(), cadence, 1), [cadence]);
+  const paidN = cadence === 'One-off' ? 0 : Math.max(0, parseInt(alreadyPaid, 10) || 0);
+
+  // Schedule anchored to the chosen first-due date; entry n falls n-1 periods
+  // after it. Past dates are fine — that's how a loan taken months ago works.
+  const scheduleDates = useMemo(() => {
+    const termN = cadence === 'One-off' ? 1 : parseInt(term, 10) || 0;
+    return Array.from({length: termN}, (_, i) => addPeriod(firstDue, cadence, i));
+  }, [firstDue, cadence, term]);
 
   const save = async () => {
     const principalN = parseFloat(principal.replace(/,/g, '')) || 0;
@@ -78,12 +101,18 @@ export default function AddDebt({navigation}: any) {
       setError('Enter the number of payments');
       return;
     }
+    if (paidN >= Math.max(termN, 1)) {
+      setError('Already-paid must be less than the number of payments');
+      return;
+    }
     setSaving(true);
     try {
       const now = new Date().toISOString();
       const debtId = generateUUID();
-      const nextDue = firstDue.toISOString();
       const inst = installmentN || (termN > 0 ? Math.round(principalN / termN) : principalN);
+      const outstanding = Math.max(0, principalN - inst * paidN);
+      // next_due = the first UNPAID installment, not "today + a period"
+      const nextDue = scheduleDates[paidN] ?? firstDue;
       await db.execute(
         'INSERT INTO debts (id, dir, party, sub, principal, outstanding, rate, frequency, installment, next_due, account_id, term, paid, tint, icon, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
@@ -92,14 +121,14 @@ export default function AddDebt({navigation}: any) {
           party.trim(),
           dir === 'borrowed' ? 'Loan' : 'Lent out',
           principalN,
-          principalN,
+          outstanding,
           rateN,
           cadence,
           inst,
-          nextDue,
+          nextDue.toISOString(),
           activeAccount || null,
           termN,
-          0,
+          paidN,
           dir === 'borrowed' ? '#1E73BE' : '#38BDF8',
           dir === 'borrowed' ? 'Landmark' : 'Handshake',
           userId ?? '',
@@ -108,15 +137,16 @@ export default function AddDebt({navigation}: any) {
       );
       // Build the repayment schedule the AI will use for reminders + payoff.
       for (let n = 1; n <= termN; n++) {
+        const status = n <= paidN ? 'paid' : n === paidN + 1 ? 'due' : 'upcoming';
         await db.execute(
           'INSERT INTO debt_schedules (id, debt_id, n, due_date, amount, status, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
           [
             generateUUID(),
             debtId,
             n,
-            addPeriod(new Date(), cadence, n).toISOString(),
+            scheduleDates[n - 1].toISOString(),
             inst,
-            n === 1 ? 'due' : 'upcoming',
+            status,
             userId ?? '',
           ],
         );
@@ -227,7 +257,7 @@ export default function AddDebt({navigation}: any) {
             {CADENCES.map(c => {
               const on = cadence === c;
               return (
-                <Pressable key={c} onPress={() => setCadence(c)} style={[styles.cadenceBtn, on && styles.cadenceBtnActive]}>
+                <Pressable key={c} onPress={() => pickCadence(c)} style={[styles.cadenceBtn, on && styles.cadenceBtnActive]}>
                   <Text style={[styles.cadenceText, on && {color: T.accent}]}>{c}</Text>
                 </Pressable>
               );
@@ -249,10 +279,13 @@ export default function AddDebt({navigation}: any) {
             <Text style={styles.unit}>RWF</Text>
           </Field>
           <View style={styles.divider} />
-          <Field label="First due">
-            <Text style={[styles.input, {textAlign: 'right', color: T.text}]}>
-              {firstDue.toDateString().slice(4)}
-            </Text>
+          <Field label={cadence === 'One-off' ? 'Due date' : 'First due'}>
+            <Pressable
+              onPress={() => setPickerOpen(true)}
+              style={({pressed}) => [styles.dateBtn, {opacity: pressed ? 0.7 : 1}]}>
+              <Icon name="Calendar" size={14} color={T.accent} strokeWidth={2.2} />
+              <Text style={styles.dateText}>{firstDue.toDateString().slice(4)}</Text>
+            </Pressable>
           </Field>
           {cadence !== 'One-off' && (
             <>
@@ -267,9 +300,52 @@ export default function AddDebt({navigation}: any) {
                   style={styles.input}
                 />
               </Field>
+              <View style={styles.divider} />
+              <Field label="Already paid">
+                <TextInput
+                  value={alreadyPaid}
+                  onChangeText={setAlreadyPaid}
+                  placeholder="0"
+                  placeholderTextColor={T.text3}
+                  keyboardType="numeric"
+                  style={styles.input}
+                />
+              </Field>
             </>
           )}
         </View>
+
+        {/* Schedule preview so the dates are visible BEFORE saving */}
+        {scheduleDates.length > 0 && (
+          <View style={styles.previewCard}>
+            <Text style={styles.previewTitle}>
+              {scheduleDates.length} payment{scheduleDates.length === 1 ? '' : 's'}
+              {paidN > 0 ? ` · ${paidN} already settled` : ''}
+            </Text>
+            <Text style={styles.previewText}>
+              {scheduleDates[paidN]
+                ? `Next due ${scheduleDates[paidN].toDateString().slice(4)}`
+                : ''}
+              {scheduleDates.length > 1
+                ? ` · last ${scheduleDates[scheduleDates.length - 1].toDateString().slice(4)}`
+                : ''}
+            </Text>
+          </View>
+        )}
+
+        <DatePicker
+          modal
+          open={pickerOpen}
+          date={firstDue}
+          mode="date"
+          title={cadence === 'One-off' ? 'Due date' : 'First payment due'}
+          onConfirm={d => {
+            setFirstDue(d);
+            setDueTouched(true);
+            setPickerOpen(false);
+          }}
+          onCancel={() => setPickerOpen(false)}
+        />
 
         {/* AI note */}
         <View style={styles.aiNote}>
@@ -367,6 +443,23 @@ const styles = StyleSheet.create({
   },
   cadenceBtnActive: {backgroundColor: T.accentSoft, borderColor: 'rgba(34,197,94,0.3)'},
   cadenceText: {fontFamily: FONTS.semibold, fontSize: 12.5, color: T.text2},
+  dateBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 7,
+  },
+  dateText: {fontFamily: FONTS.semibold, fontSize: 13.5, color: T.text},
+  previewCard: {
+    backgroundColor: T.surface2,
+    borderRadius: R.small,
+    borderWidth: 1,
+    borderColor: T.border,
+    padding: 11,
+  },
+  previewTitle: {fontFamily: FONTS.semibold, fontSize: 12, color: T.text},
+  previewText: {fontFamily: FONTS.regular, fontSize: 11.5, color: T.text2, marginTop: 2},
   aiNote: {
     flexDirection: 'row',
     gap: 10,
