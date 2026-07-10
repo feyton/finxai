@@ -18,6 +18,7 @@ import NotificationsScreen from './src/screens/NotificationsScreen';
 import SMSReviewScreen from './src/screens/SMSReviewScreen';
 import CategoryManagementScreen from './src/screens/CategoryManagementScreen';
 import ConfirmTransactionsScreen from './src/screens/ConfirmTransactions';
+import CreateAccountScreen from './src/screens/CreateAccount';
 import CreateBudgetScreen from './src/screens/CreateBudget';
 import AddPlannedPaymentScreen from './src/screens/AddPlannedPayment';
 import BudgetDetails from './src/screens/BudgetDetails';
@@ -102,6 +103,7 @@ function App(): React.JSX.Element {
                 <Stack.Screen name="SMSReview" component={SMSReviewScreen} />
                 <Stack.Screen name="Notifications" component={NotificationsScreen} />
                 <Stack.Screen name="CreateRecord" component={CreateRecord} />
+                <Stack.Screen name="CreateAccount" component={CreateAccountScreen} />
                 <Stack.Screen name="Confirm" component={ConfirmTransactionsScreen} />
                 <Stack.Screen name="CreateBudget" component={CreateBudgetScreen} />
                 <Stack.Screen name="BudgetDetails" component={BudgetDetails} />
