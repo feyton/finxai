@@ -37,6 +37,8 @@ const transactions = new Table({
   budget_id: column.text,
   source: column.text,         // 'sms' | 'manual' | 'ai'
   confidence: column.real,     // 0..1 (AI confidence; 1 for manual)
+  transfer_account_id: column.text, // counterparty account for transfers
+  transfer_direction: column.text,  // 'in' | 'out' (transfers only)
   owner_id: column.text,
   created_at: column.text,
 });
@@ -66,6 +68,17 @@ const auto_records = new Table({
   fees: column.real,
   confidence: column.real,     // 0..1 AI confidence score
   source: column.text,         // 'sms' | 'ai'
+  transfer_account_id: column.text, // counterparty account for transfers
+  owner_id: column.text,
+  created_at: column.text,
+});
+
+// SMS the user (or the failed-transaction detector) chose to keep out of
+// records — dedupe checks this so they are never re-parsed.
+const ignored_sms = new Table({
+  sms: column.text,
+  sender: column.text,
+  reason: column.text,        // 'failed' | 'user'
   owner_id: column.text,
   created_at: column.text,
 });
@@ -98,6 +111,7 @@ const budgets = new Table({
 
 const budget_items = new Table({
   budget_id: column.text,
+  name: column.text,          // e.g. 'Cake' — user-facing item label
   category: column.text,
   subcategory: column.text,
   amount: column.real,
@@ -242,6 +256,7 @@ export const AppSchema = new Schema({
   transactions,
   split_details,
   auto_records,
+  ignored_sms,
   transfers,
   budgets,
   budget_items,

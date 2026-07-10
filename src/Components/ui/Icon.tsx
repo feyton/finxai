@@ -1,5 +1,5 @@
 import {
-  AlertCircle, ArrowDownLeft, ArrowLeft, ArrowUpRight,
+  AlertCircle, ArrowDownLeft, ArrowLeft, ArrowLeftRight, ArrowUpRight, Ban,
   Bell, Bike, Brain, Building2, Calendar, CalendarPlus, Car, Check, CheckCircle, CheckCircle2,
   ChevronDown, ChevronLeft, ChevronRight, Clock, CreditCard,
   Coins, Delete, ExternalLink, Eye, EyeOff, Filter, Flame, Gift, Globe, Handshake, Heart, Home, Info,
@@ -83,6 +83,8 @@ const MAP: Record<string, any> = {
   Pencil,
   Handshake,
   Bike,
+  ArrowLeftRight,
+  Ban,
 };
 
 interface IconProps {

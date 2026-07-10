@@ -159,22 +159,31 @@ function SmsCard({
   accounts,
   onConfirm,
   onFix,
+  onIgnore,
 }: {
   record: any;
   accounts: any[];
   onConfirm: () => Promise<void>;
   onFix: (fix: Fix) => Promise<void>;
+  onIgnore: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [fixSheet, setFixSheet] = useState(false);
   const localCat = (resolveCat(record.category ?? '') as CategoryId) ?? 'shopping';
   const isExpense = record.transaction_type === 'expense';
-  const sign = isExpense ? '-' : '+';
-  const amtColor = isExpense ? T.expense : T.income;
+  const isTransfer = record.transaction_type === 'transfer';
+  const sign = isTransfer ? '' : isExpense ? '-' : '+';
+  const amtColor = isTransfer ? T.text2 : isExpense ? T.expense : T.income;
 
   const handleConfirm = async () => {
     setBusy(true);
     await onConfirm();
+    setBusy(false);
+  };
+
+  const handleIgnore = async () => {
+    setBusy(true);
+    await onIgnore();
     setBusy(false);
   };
 
@@ -204,9 +213,17 @@ function SmsCard({
               {record.merchant || record.payee || 'Unknown'}
             </Text>
             <Text style={styles.catLabel}>
-              {CATS[localCat]?.label ?? localCat}
+              {isTransfer
+                ? 'Between your accounts'
+                : CATS[localCat]?.label ?? localCat}
             </Text>
           </View>
+          {isTransfer && (
+            <View style={styles.transferPill}>
+              <Icon name="ArrowLeftRight" size={11} color={T.info} strokeWidth={2.2} />
+              <Text style={styles.transferPillText}>Transfer</Text>
+            </View>
+          )}
           <View style={{alignItems: 'flex-end', gap: 4}}>
             <Text style={[styles.amount, {color: amtColor}]}>
               {sign}
@@ -223,6 +240,16 @@ function SmsCard({
 
       {/* Actions */}
       <View style={styles.actions}>
+        <Pressable
+          onPress={handleIgnore}
+          disabled={busy}
+          style={({pressed}) => [
+            styles.btnIgnore,
+            {opacity: pressed || busy ? 0.7 : 1},
+          ]}>
+          <Icon name="Ban" size={14} color={T.expense} strokeWidth={2.2} />
+          <Text style={styles.btnIgnoreText}>Ignore</Text>
+        </Pressable>
         <Pressable
           onPress={() => setFixSheet(true)}
           style={({pressed}) => [
@@ -281,6 +308,19 @@ export default function SMSReviewScreen({navigation}: any) {
     [userId ?? ''],
   );
 
+  // ignored_sms keeps the raw body so the retriever never re-parses it.
+  const handleIgnore = async (record: any) => {
+    try {
+      await db.execute(
+        'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [uuid(), record.sms ?? '', record.sender ?? '', 'user', userId, new Date().toISOString()],
+      );
+      await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
+    } catch (e) {
+      console.warn('[SMSReview] ignore error:', e);
+    }
+  };
+
   const handleConfirm = async (record: any) => {
     try {
       const txType =
@@ -290,12 +330,14 @@ export default function SMSReviewScreen({navigation}: any) {
           ? 'transfer'
           : 'expense';
       const now = new Date().toISOString();
+      const dir = regexExtract(record.sms ?? '').direction;
       await db.execute(
         `INSERT INTO transactions
            (id, amount, account_id, category, date_time, sms, sender,
             payee, merchant, transaction_type, fees, currency,
-            confirmed, source, confidence, owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?)`,
+            confirmed, source, confidence,
+            transfer_account_id, transfer_direction, owner_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?)`,
         [
           uuid(),
           record.amount,
@@ -309,6 +351,8 @@ export default function SMSReviewScreen({navigation}: any) {
           txType,
           record.fees ?? 0,
           record.confidence ?? 0,
+          txType === 'transfer' ? record.transfer_account_id ?? null : null,
+          txType === 'transfer' ? (dir === 'credit' ? 'in' : 'out') : null,
           userId,
           now,
         ],
@@ -322,7 +366,6 @@ export default function SMSReviewScreen({navigation}: any) {
           [bal, record.account_id],
         );
       } else {
-        const dir = regexExtract(record.sms ?? '').direction;
         const delta =
           dir === 'credit'
             ? record.amount ?? 0
@@ -354,12 +397,14 @@ export default function SMSReviewScreen({navigation}: any) {
       const now = new Date().toISOString();
       const merchant = fix.merchant || record.merchant || record.payee || '';
       const accountId = fix.accountId || record.account_id;
+      const fixDir = regexExtract(record.sms ?? '').direction;
       await db.execute(
         `INSERT INTO transactions
            (id, amount, account_id, category, date_time, sms, sender,
             payee, merchant, transaction_type, fees, currency,
-            confirmed, source, confidence, owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?)`,
+            confirmed, source, confidence,
+            transfer_account_id, transfer_direction, owner_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?)`,
         [
           uuid(),
           record.amount,
@@ -373,6 +418,8 @@ export default function SMSReviewScreen({navigation}: any) {
           txType,
           record.fees ?? 0,
           record.confidence ?? 0,
+          txType === 'transfer' ? record.transfer_account_id ?? null : null,
+          txType === 'transfer' ? (fixDir === 'credit' ? 'in' : 'out') : null,
           userId,
           now,
         ],
@@ -479,6 +526,7 @@ export default function SMSReviewScreen({navigation}: any) {
               accounts={accounts as any[]}
               onConfirm={() => handleConfirm(item)}
               onFix={fix => handleFix(item, fix)}
+              onIgnore={() => handleIgnore(item)}
             />
           )}
         />
@@ -609,6 +657,34 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     paddingTop: 6,
   },
+  btnIgnore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: R.small,
+    backgroundColor: 'rgba(251,113,133,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,113,133,0.22)',
+  },
+  btnIgnoreText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 13,
+    color: T.expense,
+  },
+  transferPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: R.pill,
+    backgroundColor: 'rgba(96,165,250,0.12)',
+    alignSelf: 'flex-start',
+  },
+  transferPillText: {fontFamily: FONTS.semibold, fontSize: 10.5, color: T.info},
   btnFix: {
     flex: 1,
     flexDirection: 'row',

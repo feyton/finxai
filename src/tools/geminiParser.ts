@@ -16,6 +16,12 @@ export interface ParsedSMS {
   // True when the money moved between the user's OWN accounts (BK↔MoMo,
   // MoMo↔Mokash, self-transfer) — net-zero across net worth, not spend/income.
   isTransfer?: boolean;
+  // 'failed' when the SMS reports a FAILED/REVERSED/DECLINED transaction —
+  // such messages must never become records (they go to ignored_sms).
+  status?: 'completed' | 'failed';
+  // When the counterparty account number matches another of the user's OWN
+  // accounts, this is that account's id (drives transfer_account_id).
+  transferAccountId?: string | null;
 }
 
 export interface MerchantRule {

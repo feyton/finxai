@@ -3,11 +3,13 @@
  * SMSRetriever — silent background component (renders nothing).
  *
  * On mount:
- * 1. Reads new SMS from Android for each linked account
- * 2. Calls Gemini to parse + categorize (if API key is set)
+ * 1. Reads new SMS from Android once (no per-sender native filter — matching
+ *    is done here case-insensitively, so 'Mokash' vs 'MoKash' can't miss)
+ * 2. Calls Claude Haiku to parse + categorize (if API key is set)
  * 3. Falls back to regex parser if no key / API error
- * 4. Auto-saves confident records (≥ THRESHOLD_AUTO_SAVE) to transactions
- * 5. Saves review-needed records to auto_records
+ * 4. FAILED transactions go to ignored_sms — never become records
+ * 5. Auto-saves confident records (≥ THRESHOLD_AUTO_SAVE) to transactions
+ * 6. Saves review-needed records to auto_records
  */
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useEffect, useRef} from 'react';
@@ -16,7 +18,11 @@ import SmsAndroid from 'react-native-get-sms-android';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {getAnthropicKey, hasAnthropicKey} from '../tools/aiConfig';
 import {THRESHOLD_AUTO_SAVE} from '../tools/geminiParser';
-import {parseSmsWithClaude, parseWithRegex} from '../tools/claudeParser';
+import {
+  ParseContext,
+  parseSmsWithClaude,
+  parseWithRegex,
+} from '../tools/claudeParser';
 import {
   getMerchantChannels,
   getMerchantRules,
@@ -35,30 +41,70 @@ function getMonthStartEpoch(): number {
   return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
 }
 
+// 'M-Money' → 'mmoney', 'MoKash' → 'mokash' — sender matching must survive
+// case and punctuation differences between what the user configured and what
+// Android reports.
+function normalizeSender(s: string | null | undefined): string {
+  return (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function senderMatches(smsAddress: string, accountAddress: string): boolean {
+  const a = normalizeSender(smsAddress);
+  const b = normalizeSender(accountAddress);
+  if (!a || !b) {
+    return false;
+  }
+  return a === b || a.includes(b) || b.includes(a);
+}
+
 const SMSRetriever: React.FC = () => {
   const db = usePowerSync();
   const {userId, name} = useCurrentUser();
   const processing = useRef(false);
 
+  // ALL accounts stream in — auto ones get SMS processing, and every account
+  // number participates in inter-account transfer matching.
   const {data: accounts} = useQuery(
-    'SELECT * FROM accounts WHERE owner_id = ? AND auto = 1',
+    'SELECT * FROM accounts WHERE owner_id = ?',
     [userId ?? ''],
   );
 
-  // Deduplicate: get already-stored SMS bodies to avoid reprocessing
+  // Deduplicate: get already-stored + ignored SMS bodies to avoid reprocessing
   const {data: existingRecords} = useQuery(
-    'SELECT sms FROM auto_records WHERE owner_id = ? UNION SELECT sms FROM transactions WHERE owner_id = ?',
-    [userId ?? '', userId ?? ''],
+    'SELECT sms FROM auto_records WHERE owner_id = ? UNION SELECT sms FROM transactions WHERE owner_id = ? UNION SELECT sms FROM ignored_sms WHERE owner_id = ?',
+    [userId ?? '', userId ?? '', userId ?? ''],
   );
 
+  const autoAccounts = (accounts as any[]).filter(a => a.auto === 1 && a.address);
+
   useEffect(() => {
-    if (!userId || accounts.length === 0 || processing.current) {return;}
+    if (!userId || autoAccounts.length === 0 || processing.current) {return;}
     processSms();
   }, [userId, accounts.length]);
 
   const existingSmsSet = new Set(
     (existingRecords ?? []).map((r: any) => r.sms).filter(Boolean),
   );
+
+  const fetchInbox = (
+    minDate: number,
+  ): Promise<{body: string; address: string; date: string}[]> =>
+    new Promise(resolve => {
+      SmsAndroid.list(
+        JSON.stringify({box: 'inbox', minDate, maxCount: 1500}),
+        (fail: string) => {
+          console.warn('[SMSRetriever] SMS list failed:', fail);
+          resolve([]);
+        },
+        (_count: number, smsListJson: string) => {
+          try {
+            resolve(JSON.parse(smsListJson));
+          } catch {
+            resolve([]);
+          }
+        },
+      );
+    });
 
   const processSms = async () => {
     processing.current = true;
@@ -69,10 +115,165 @@ const SMSRetriever: React.FC = () => {
         ? await getMerchantRules(db, '', userId!, 20)
         : [];
       const merchantChannels = useAI ? await getMerchantChannels() : {};
-      const userName = name ?? '';
 
-      for (const account of accounts) {
-        await processAccountSms(account, useAI, apiKey, merchantRules, merchantChannels, userName);
+      const ctxBase: ParseContext = {
+        userName: name ?? '',
+        accounts: (accounts as any[]).map(a => ({
+          id: a.id,
+          name: a.name ?? '',
+          number: a.number ?? '',
+        })),
+      };
+
+      // New accounts start their catalog from the 1st of the current month.
+      const floors = new Map<string, number>();
+      for (const account of autoAccounts) {
+        floors.set(account.id, account.log_date || getMonthStartEpoch());
+      }
+      const minDate = Math.min(...floors.values());
+      const fetchTime = Date.now();
+      const inbox = await fetchInbox(minDate);
+
+      for (const sms of inbox) {
+        if (!sms.body || existingSmsSet.has(sms.body)) {continue;}
+
+        const account = autoAccounts.find(a =>
+          senderMatches(sms.address, a.address),
+        );
+        if (!account) {continue;}
+
+        const smsDate = parseInt(sms.date ?? '0', 10) || 0;
+        if (smsDate < (floors.get(account.id) ?? 0)) {continue;}
+
+        try {
+          const ctx: ParseContext = {...ctxBase, currentAccountId: account.id};
+          const parsed = useAI
+            ? await parseSmsWithClaude(sms.body, merchantRules, apiKey, merchantChannels, ctx)
+            : parseWithRegex(sms.body, ctx);
+
+          const now = new Date().toISOString();
+
+          // FAILED transactions never become records — remember them so this
+          // SMS is not parsed again.
+          if (parsed.status === 'failed') {
+            await db.execute(
+              'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+              [uuid(), sms.body, account.name, 'failed', userId, now],
+            );
+            existingSmsSet.add(sms.body);
+            continue;
+          }
+
+          // Remember the rail this merchant uses (for consistency + future
+          // "pay again"), device-local so it needs no schema change.
+          if (parsed.merchant && parsed.merchant !== 'Unknown' && parsed.channel) {
+            recordMerchantChannel(parsed.merchant, parsed.channel).catch(() => {});
+          }
+
+          const occurredAt =
+            parsed.occurred_at ?? new Date(smsDate || Date.now()).toISOString();
+          const txType = parsed.isTransfer
+            ? 'transfer'
+            : parsed.direction === 'credit'
+            ? 'income'
+            : 'expense';
+          const transferAccountId = parsed.isTransfer
+            ? parsed.transferAccountId ?? null
+            : null;
+          const transferDirection = parsed.isTransfer
+            ? parsed.direction === 'credit'
+              ? 'in'
+              : 'out'
+            : null;
+
+          if (useAI && parsed.confidence >= THRESHOLD_AUTO_SAVE) {
+            // Auto-save directly to transactions — high confidence
+            await db.execute(
+              `INSERT INTO transactions
+                 (id, amount, account_id, category, date_time, sms, sender,
+                  payee, merchant, transaction_type, fees, currency,
+                  confirmed, source, confidence,
+                  transfer_account_id, transfer_direction, owner_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?)`,
+              [
+                uuid(),
+                parsed.amount,
+                account.id,
+                parsed.category,
+                occurredAt,
+                sms.body,
+                account.name,
+                parsed.merchant,
+                parsed.merchant,
+                txType,
+                parsed.fee,
+                parsed.confidence,
+                transferAccountId,
+                transferDirection,
+                userId,
+                now,
+              ],
+            );
+
+            // Prefer the bank's own balance from the SMS (authoritative,
+            // self-healing); only fall back to incrementing when absent.
+            if (parsed.balance_after != null) {
+              await db.execute(
+                'UPDATE accounts SET available_balance = ? WHERE id = ?',
+                [parsed.balance_after, account.id],
+              );
+            } else {
+              // Balance impact follows the SMS direction (not the type):
+              // a debit costs amount + fee, a credit adds amount.
+              const delta =
+                parsed.direction === 'credit'
+                  ? parsed.amount
+                  : -(parsed.amount + (parsed.fee ?? 0));
+              await db.execute(
+                'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
+                [delta, account.id],
+              );
+            }
+          } else {
+            // Needs review — goes to auto_records
+            await db.execute(
+              `INSERT INTO auto_records
+                 (id, amount, account_id, category, date_time, sms, sender,
+                  payee, merchant, transaction_type, fees, currency,
+                  confirmed, source, confidence, transfer_account_id,
+                  owner_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?)`,
+              [
+                uuid(),
+                parsed.amount,
+                account.id,
+                parsed.category,
+                occurredAt,
+                sms.body,
+                account.name,
+                parsed.merchant,
+                parsed.merchant,
+                txType,
+                parsed.fee,
+                parsed.confidence,
+                transferAccountId,
+                userId,
+                now,
+              ],
+            );
+          }
+          existingSmsSet.add(sms.body);
+        } catch (e) {
+          console.warn('[SMSRetriever] Failed to process SMS:', e);
+        }
+      }
+
+      // Advance every auto account's catalog cursor to this fetch.
+      for (const account of autoAccounts) {
+        await db.execute('UPDATE accounts SET log_date = ? WHERE id = ?', [
+          fetchTime,
+          account.id,
+        ]);
       }
 
       // Clean up orphaned auto_records
@@ -85,145 +286,6 @@ const SMSRetriever: React.FC = () => {
     } finally {
       processing.current = false;
     }
-  };
-
-  const processAccountSms = async (
-    account: any,
-    useAI: boolean,
-    apiKey: string,
-    merchantRules: any[],
-    merchantChannels: any,
-    userName: string,
-  ): Promise<void> => {
-    const filters = {
-      box: 'inbox',
-      minDate: account?.log_date || getMonthStartEpoch(),
-      address: account.address,
-    };
-
-    return new Promise(resolve => {
-      SmsAndroid.list(
-        JSON.stringify(filters),
-        (fail: string) => {
-          console.warn('[SMSRetriever] SMS list failed:', fail);
-          resolve();
-        },
-        async (_count: number, smsListJson: string) => {
-          const smsList: {body: string; address: string; date: string}[] =
-            JSON.parse(smsListJson);
-
-          // Update account log_date
-          await db.execute('UPDATE accounts SET log_date = ? WHERE id = ?', [
-            Date.now(),
-            account.id,
-          ]);
-
-          for (const sms of smsList) {
-            if (!sms.body || existingSmsSet.has(sms.body)) {continue;}
-
-            try {
-              const parsed = useAI
-                ? await parseSmsWithClaude(sms.body, merchantRules, apiKey, merchantChannels, userName)
-                : parseWithRegex(sms.body, userName);
-
-              // Remember the rail this merchant uses (for consistency + future
-              // "pay again"), device-local so it needs no schema change.
-              if (parsed.merchant && parsed.merchant !== 'Unknown' && parsed.channel) {
-                recordMerchantChannel(parsed.merchant, parsed.channel).catch(() => {});
-              }
-
-              const now = new Date().toISOString();
-              const occurredAt = parsed.occurred_at ?? new Date(parseInt(sms.date ?? '0', 10) || Date.now()).toISOString();
-
-              if (useAI && parsed.confidence >= THRESHOLD_AUTO_SAVE) {
-                // Auto-save directly to transactions — high confidence
-                const txType = parsed.isTransfer
-                  ? 'transfer'
-                  : parsed.direction === 'credit'
-                  ? 'income'
-                  : 'expense';
-                await db.execute(
-                  `INSERT INTO transactions
-                     (id, amount, account_id, category, date_time, sms, sender,
-                      payee, merchant, transaction_type, fees, currency,
-                      confirmed, source, confidence, owner_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?)`,
-                  [
-                    uuid(),
-                    parsed.amount,
-                    account.id,
-                    parsed.category,
-                    occurredAt,
-                    sms.body,
-                    account.name,
-                    parsed.merchant,
-                    parsed.merchant,
-                    txType,
-                    parsed.fee,
-                    parsed.confidence,
-                    userId,
-                    now,
-                  ],
-                );
-
-                // Prefer the bank's own balance from the SMS (authoritative,
-                // self-healing); only fall back to incrementing when absent.
-                if (parsed.balance_after != null) {
-                  await db.execute(
-                    'UPDATE accounts SET available_balance = ? WHERE id = ?',
-                    [parsed.balance_after, account.id],
-                  );
-                } else {
-                  // Balance impact follows the SMS direction (not the type):
-                  // a debit costs amount + fee, a credit adds amount.
-                  const delta =
-                    parsed.direction === 'credit'
-                      ? parsed.amount
-                      : -(parsed.amount + (parsed.fee ?? 0));
-                  await db.execute(
-                    'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-                    [delta, account.id],
-                  );
-                }
-              } else {
-                // Needs review — goes to auto_records
-                const txType = parsed.isTransfer
-                  ? 'transfer'
-                  : parsed.direction === 'credit'
-                  ? 'income'
-                  : 'expense';
-                await db.execute(
-                  `INSERT INTO auto_records
-                     (id, amount, account_id, category, date_time, sms, sender,
-                      payee, merchant, transaction_type, fees, currency,
-                      confirmed, source, confidence, owner_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?)`,
-                  [
-                    uuid(),
-                    parsed.amount,
-                    account.id,
-                    parsed.category,
-                    occurredAt,
-                    sms.body,
-                    account.name,
-                    parsed.merchant,
-                    parsed.merchant,
-                    txType,
-                    parsed.fee,
-                    parsed.confidence,
-                    userId,
-                    now,
-                  ],
-                );
-              }
-            } catch (e) {
-              console.warn('[SMSRetriever] Failed to process SMS:', e);
-            }
-          }
-          resolve();
-        },
-      );
-    });
   };
 
   return null; // Headless — UI lives in HomeScreen's AI banner
