@@ -101,6 +101,14 @@ export default function HomeScreen({navigation}: any) {
   const totalExpenses = expenseRows?.[0]?.total ?? 0;
   const pendingSms = (smsQueue?.[0] as any)?.cnt ?? 0;
 
+  // Month-over-month balance trend: the balance on the 1st is today's balance
+  // minus this month's net flow (transfers are internal — net zero).
+  const monthStartBalance = totalBalance - (totalIncome - totalExpenses);
+  const trendPct =
+    monthStartBalance > 0
+      ? ((totalBalance - monthStartBalance) / monthStartBalance) * 100
+      : null;
+
   const navigate = (screen: string, params?: any) => {
     navigation.navigate(screen, params);
   };
@@ -224,9 +232,14 @@ export default function HomeScreen({navigation}: any) {
                 <Icon name="Eye" size={14} color={T.text3} />
                 <Text style={styles.heroLabel}>Total balance</Text>
               </View>
-              <Pill icon="TrendingUp" color={T.accent} bg={T.accentSoft}>
-                +3.4% this month
-              </Pill>
+              {trendPct != null && (
+                <Pill
+                  icon={trendPct >= 0 ? 'TrendingUp' : 'TrendingDown'}
+                  color={trendPct >= 0 ? T.accent : T.expense}
+                  bg={trendPct >= 0 ? T.accentSoft : 'rgba(251,113,133,0.14)'}>
+                  {`${trendPct >= 0 ? '+' : ''}${trendPct.toFixed(1)}% this month`}
+                </Pill>
+              )}
             </View>
             <Text style={styles.heroAmount}>
               {fmtAmount(totalBalance)}
