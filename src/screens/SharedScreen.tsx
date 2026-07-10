@@ -1,256 +1,294 @@
+// Shared & Family — the sharing hub. Actual sharing happens from an
+// account's detail page (Share button); this screen shows both directions:
+// accounts shared TO you, and who you shared YOUR accounts with.
 import {useQuery, usePowerSync} from '@powersync/react-native';
-import React, {useMemo, useState} from 'react';
-import {
-  Alert,
-  Modal,
-  Pressable,
-  ScrollView,
-  Share,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import {formatDistanceToNowStrict} from 'date-fns';
+import React from 'react';
+import {Alert, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
-import {Avatar, Card, Icon, Pill} from '../Components/ui';
+import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
-import {FONTS, R, T} from '../theme';
-import {sendInviteEmail} from '../tools/invites';
-
-const APP_LINK = 'https://github.com/feyton/finxai/releases/latest';
-
-function uuid(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = (Math.random() * 16) | 0;
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  });
-}
-
-const TINTS = ['#F472B6', '#60A5FA', '#34D399', '#FBBF24', '#A78BFA', '#FB7185'];
-
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '?';
-}
+import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
 
 export default function SharedScreen({navigation}: any) {
   const db = usePowerSync();
-  const {userId, firstName} = useCurrentUser();
+  const {userId} = useCurrentUser();
+  const uid = userId ?? '';
 
-  const {data: people} = useQuery(
-    'SELECT * FROM shared_people WHERE owner_id = ? ORDER BY created_at DESC',
-    [userId ?? ''],
+  // Accounts other people shared to me (synced via the shared_accounts bucket)
+  const {data: received} = useQuery(
+    `SELECT s.id as share_id, s.access, s.created_at, a.*
+     FROM account_shares s
+     JOIN accounts a ON a.id = s.account_id
+     WHERE s.shared_with_id = ? AND s.status = 'active'
+     ORDER BY s.created_at DESC`,
+    [uid],
   );
-  const {data: accounts} = useQuery(
-    'SELECT id, name FROM accounts WHERE owner_id = ?',
-    [userId ?? ''],
+
+  // Shares I granted on my own accounts
+  const {data: given} = useQuery(
+    `SELECT s.*, a.name as account_name, a.type as account_type
+     FROM account_shares s
+     LEFT JOIN accounts a ON a.id = s.account_id
+     WHERE s.owner_id = ?
+     ORDER BY s.created_at DESC`,
+    [uid],
   );
 
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState('');
-  const [sending, setSending] = useState(false);
-
-  // Open the OS share sheet so the invite actually reaches the person via
-  // WhatsApp/SMS/etc. Used as the fallback when no email is given or email fails.
-  const shareInvite = (who: string) =>
-    Share.share({
-      message: `Hi ${who}! I'm using FinXAI to track our shared budget together. Install it here: ${APP_LINK} and I'll add you. — ${firstName ?? 'A FinXAI user'}`,
-    }).catch(() => {});
-
-  const accountName = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const a of accounts as any[]) {
-      map[a.id] = a.name;
-    }
-    return map;
-  }, [accounts]);
-
-  const invite = async () => {
-    const n = name.trim();
-    if (!n) {
-      return;
-    }
-    const e = email.trim();
-    setSending(true);
-    const tint = TINTS[(people as any[]).length % TINTS.length];
-    try {
-      await db.execute(
-        'INSERT INTO shared_people (id, name, role, initials, tint, access, accounts, status, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [uuid(), n, role.trim() || 'Family', initialsOf(n), tint, 'View only', '[]', 'pending', userId ?? '', new Date().toISOString()],
-      );
-      setName('');
-      setEmail('');
-      setRole('');
-      setOpen(false);
-
-      if (e) {
-        try {
-          await sendInviteEmail(e, firstName ?? 'A FinXAI user', n);
-          Alert.alert('Invitation sent', `We emailed ${e} an invite to join.`);
-          return;
-        } catch {
-          // email failed (function not deployed yet, offline…) → share sheet
-        }
-      }
-      await shareInvite(n);
-    } finally {
-      setSending(false);
-    }
+  const revoke = (share: any) => {
+    Alert.alert(
+      'Revoke access?',
+      `${share.invitee_email} will lose access to ${share.account_name ?? 'this account'} on their devices.`,
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {
+          text: 'Revoke',
+          style: 'destructive',
+          onPress: () =>
+            db.execute('DELETE FROM account_shares WHERE id = ?', [share.id]),
+        },
+      ],
+    );
   };
 
-  const list = people as any[];
+  const receivedList = received as any[];
+  const givenList = given as any[];
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <SafeAreaView style={styles.root}>
       <View style={styles.header}>
         <Pressable
           onPress={() => navigation.goBack()}
-          style={({pressed}) => [styles.iconBtn, {opacity: pressed ? 0.7 : 1}]}>
+          style={({pressed}) => [styles.backBtn, {opacity: pressed ? 0.7 : 1}]}>
           <Icon name="ArrowLeft" size={18} color={T.text} strokeWidth={2.2} />
         </Pressable>
         <View style={{flex: 1}}>
-          <Text style={styles.title}>Shared & family</Text>
-          <Text style={styles.subtitle}>Track money together, safely</Text>
+          <Text style={styles.title}>Shared & Family</Text>
+          <Text style={styles.subtitle}>Per-account access, both directions</Text>
         </View>
-        <Pressable
-          onPress={() => setOpen(true)}
-          style={({pressed}) => [styles.addBtn, {opacity: pressed ? 0.7 : 1}]}>
-          <Icon name="UserPlus" size={17} color={T.accent} strokeWidth={2.2} />
-        </Pressable>
       </View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{padding: 16, paddingTop: 4, gap: 14, paddingBottom: 40}}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        {/* Privacy note */}
         <View style={styles.banner}>
-          <Icon name="Shield" size={18} color={T.info} strokeWidth={2} />
+          <Icon name="Lock" size={15} color={T.info} strokeWidth={2.2} />
           <Text style={styles.bannerText}>
-            Invite your spouse or family to{' '}
-            <Text style={{color: T.text, fontFamily: FONTS.semibold}}>view or co-manage</Text>
-            {' '}a single account — for shared planning, not full access to everything.
+            Access is per-account. SMS parsing always stays on the owner's
+            phone — the other person only sees synced records.
           </Text>
         </View>
 
-        <Text style={styles.sectionLabel}>People</Text>
-        {list.map(p => {
-          let acctIds: string[] = [];
-          try {
-            acctIds = JSON.parse(p.accounts || '[]');
-          } catch {}
-          const acctLabel = acctIds.map(id => accountName[id]).filter(Boolean)[0];
-          const pending = p.status === 'pending';
-          return (
-            <Card key={p.id} pad={14} onPress={pending ? () => shareInvite(p.name) : undefined}>
-              <View style={{flexDirection: 'row', alignItems: 'center', gap: 12}}>
-                <Avatar initials={p.initials || initialsOf(p.name)} tint={p.tint || T.accent} size={44} />
-                <View style={{flex: 1, minWidth: 0}}>
-                  <View style={{flexDirection: 'row', alignItems: 'center', gap: 7}}>
-                    <Text style={styles.name} numberOfLines={1}>{p.name}</Text>
-                    {pending && <Pill size={9} color={T.warn} bg={T.warn + '22'}>Pending</Pill>}
+        {/* Shared with you */}
+        <Text style={styles.sectionLabel}>Shared with you</Text>
+        {receivedList.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Icon name="Users" size={26} color={T.text3} strokeWidth={1.6} />
+            <Text style={styles.emptyText}>
+              Nothing yet — when someone shares an account to your email, it
+              appears here and in your Accounts tab automatically.
+            </Text>
+          </View>
+        ) : (
+          <View style={{gap: 8}}>
+            {receivedList.map(a => {
+              const tint = accountTint(a.name ?? '');
+              return (
+                <Pressable
+                  key={a.share_id}
+                  onPress={() =>
+                    navigation.navigate('Home', {
+                      screen: 'AccountsStack',
+                      params: {screen: 'AccountDetails', params: {accountId: a.id}},
+                    })
+                  }
+                  style={({pressed}) => [styles.row, {opacity: pressed ? 0.85 : 1}]}>
+                  <View style={[styles.rowIcon, {backgroundColor: tint + '22'}]}>
+                    <Icon name={accountIcon(a.name ?? '', a.type ?? '')} size={18} color={tint} strokeWidth={2} />
                   </View>
-                  <Text style={styles.role}>{p.role} · {p.access}</Text>
-                  {acctLabel ? (
-                    <View style={styles.acctChip}>
-                      <Icon name="Landmark" size={11} color={T.text3} strokeWidth={2} />
-                      <Text style={styles.acctText}>{acctLabel}</Text>
-                    </View>
-                  ) : null}
-                </View>
-                {pending ? (
-                  <View style={styles.resend}>
-                    <Icon name="Share2" size={13} color={T.accent} strokeWidth={2.2} />
-                    <Text style={styles.resendText}>Resend</Text>
+                  <View style={{flex: 1, minWidth: 0}}>
+                    <Text style={styles.rowTitle} numberOfLines={1}>{a.name}</Text>
+                    <Text style={styles.rowSub}>
+                      {a.access === 'edit' ? 'You can view & edit' : 'View only'}
+                      {a.created_at
+                        ? ` · shared ${formatDistanceToNowStrict(new Date(a.created_at), {addSuffix: true})}`
+                        : ''}
+                    </Text>
                   </View>
-                ) : (
-                  <Icon name="ChevronRight" size={18} color={T.text3} />
-                )}
-              </View>
-            </Card>
-          );
-        })}
-
-        {list.length === 0 && (
-          <Card style={{alignItems: 'center', gap: 6}} pad={24}>
-            <Icon name="Users" size={36} color={T.text3} strokeWidth={1.5} />
-            <Text style={styles.emptyText}>No one shared with yet</Text>
-          </Card>
+                  <View style={{alignItems: 'flex-end', gap: 2}}>
+                    <Text style={styles.rowAmt}>RWF {fmtAmount(a.available_balance ?? 0)}</Text>
+                    <Icon name="ChevronRight" size={14} color={T.text3} strokeWidth={2} />
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
         )}
 
-        <Pressable
-          onPress={() => setOpen(true)}
-          style={({pressed}) => [styles.inviteBtn, {opacity: pressed ? 0.85 : 1}]}>
-          <Icon name="UserPlus" size={16} color={T.accent} strokeWidth={2.2} />
-          <Text style={styles.inviteText}>Invite someone</Text>
-        </Pressable>
-      </ScrollView>
-
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.overlay} onPress={() => setOpen(false)} />
-        <View style={styles.modalCard}>
-          <Text style={styles.modalTitle}>Invite someone</Text>
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            placeholder="Name"
-            placeholderTextColor={T.text3}
-            style={styles.modalInput}
-            autoFocus
-          />
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            placeholder="Email (we'll send an invitation)"
-            placeholderTextColor={T.text3}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            style={styles.modalInput}
-          />
-          <TextInput
-            value={role}
-            onChangeText={setRole}
-            placeholder="Relationship (e.g. Spouse)"
-            placeholderTextColor={T.text3}
-            style={styles.modalInput}
-          />
-          <Pressable
-            onPress={invite}
-            disabled={sending}
-            style={({pressed}) => [styles.modalBtn, {opacity: sending ? 0.5 : pressed ? 0.85 : 1}]}>
-            <Text style={styles.modalBtnText}>
-              {sending ? 'Sending…' : email.trim() ? 'Email invitation' : 'Share invite'}
+        {/* You shared */}
+        <Text style={styles.sectionLabel}>You shared</Text>
+        {givenList.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Icon name="Share2" size={26} color={T.text3} strokeWidth={1.6} />
+            <Text style={styles.emptyText}>
+              You haven't shared any account yet. Open an account and tap the
+              share icon in its header.
             </Text>
-          </Pressable>
-        </View>
-      </Modal>
+          </View>
+        ) : (
+          <View style={{gap: 8}}>
+            {givenList.map(s => (
+              <View key={s.id} style={styles.row}>
+                <View style={styles.shareAvatar}>
+                  <Text style={styles.shareAvatarText}>
+                    {(s.invitee_email ?? '?')[0]?.toUpperCase()}
+                  </Text>
+                </View>
+                <View style={{flex: 1, minWidth: 0}}>
+                  <Text style={styles.rowTitle} numberOfLines={1}>
+                    {s.account_name ?? 'Account'}
+                    <Text style={{color: T.text3}}>  →  {s.invitee_email}</Text>
+                  </Text>
+                  <Text style={styles.rowSub}>
+                    {s.access === 'edit' ? 'Can view & edit' : 'View only'}
+                    {' · '}
+                    {s.status === 'active' ? (
+                      <Text style={{color: T.income}}>active</Text>
+                    ) : (
+                      <Text style={{color: T.warn}}>waiting for first sign-in</Text>
+                    )}
+                  </Text>
+                </View>
+                <Pressable onPress={() => revoke(s)} hitSlop={10}>
+                  <Icon name="X" size={16} color={T.expense} strokeWidth={2.2} />
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* CTA — sharing starts from the account page */}
+        <Pressable
+          onPress={() => navigation.navigate('Home', {screen: 'AccountsStack'})}
+          style={({pressed}) => [styles.cta, {opacity: pressed ? 0.85 : 1}]}>
+          <Icon name="Share2" size={16} color={T.accentInk} strokeWidth={2.2} />
+          <Text style={styles.ctaText}>Share an account</Text>
+        </Pressable>
+        <Text style={styles.ctaHint}>
+          Pick an account, then tap the share icon in its header.
+        </Text>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   root: {flex: 1, backgroundColor: T.bg},
-  header: {flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4},
-  iconBtn: {width: 38, height: 38, borderRadius: R.iconBtn, backgroundColor: T.surface2, alignItems: 'center', justifyContent: 'center'},
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 10,
+  },
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: R.iconBtn,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   title: {fontFamily: FONTS.bold, fontSize: 17, color: T.text},
-  subtitle: {fontFamily: FONTS.regular, fontSize: 11.5, color: T.text2},
-  addBtn: {width: 38, height: 38, borderRadius: R.iconBtn, backgroundColor: T.accentSoft, alignItems: 'center', justifyContent: 'center'},
-  banner: {flexDirection: 'row', gap: 11, alignItems: 'flex-start', padding: 13, borderRadius: R.card, backgroundColor: 'rgba(96,165,250,0.10)', borderWidth: 1, borderColor: 'rgba(96,165,250,0.22)'},
-  bannerText: {flex: 1, fontFamily: FONTS.regular, fontSize: 12.5, color: T.text2, lineHeight: 18},
-  sectionLabel: {fontFamily: FONTS.bold, fontSize: 15, color: T.text, marginTop: 2},
-  name: {fontFamily: FONTS.semibold, fontSize: 14, color: T.text, flexShrink: 1},
-  role: {fontFamily: FONTS.regular, fontSize: 12, color: T.text2, marginTop: 1},
-  acctChip: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99, backgroundColor: T.surface2},
-  acctText: {fontFamily: FONTS.medium, fontSize: 10.5, color: T.text2},
-  resend: {flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 99, backgroundColor: T.accentSoft},
-  resendText: {fontFamily: FONTS.semibold, fontSize: 10.5, color: T.accent},
-  emptyText: {fontFamily: FONTS.semibold, fontSize: 14, color: T.text2},
-  inviteBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: R.card, backgroundColor: T.accentSoft, borderWidth: 1, borderColor: 'rgba(34,197,94,0.25)'},
-  inviteText: {fontFamily: FONTS.bold, fontSize: 14, color: T.accent},
-  overlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)'},
-  modalCard: {position: 'absolute', top: '34%', left: 24, right: 24, backgroundColor: T.surface, borderRadius: R.large, borderWidth: 1, borderColor: T.border, padding: 18, gap: 12},
-  modalTitle: {fontFamily: FONTS.bold, fontSize: 15, color: T.text},
-  modalInput: {paddingHorizontal: 14, paddingVertical: 11, borderRadius: R.small, backgroundColor: T.surface2, borderWidth: 1, borderColor: T.border, fontFamily: FONTS.medium, fontSize: 14, color: T.text},
-  modalBtn: {alignItems: 'center', paddingVertical: 12, borderRadius: R.card, backgroundColor: T.accent},
-  modalBtnText: {fontFamily: FONTS.bold, fontSize: 14, color: T.accentInk},
+  subtitle: {fontFamily: FONTS.regular, fontSize: 11.5, color: T.text3, marginTop: 1},
+  scroll: {padding: 16, paddingTop: 4, paddingBottom: 40},
+  banner: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+    padding: 12,
+    borderRadius: R.card,
+    backgroundColor: 'rgba(96,165,250,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(96,165,250,0.22)',
+    marginBottom: 6,
+  },
+  bannerText: {flex: 1, fontFamily: FONTS.regular, fontSize: 12, color: T.text2, lineHeight: 17},
+  sectionLabel: {
+    fontFamily: FONTS.semibold,
+    fontSize: 12,
+    color: T.text3,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyCard: {
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: T.surface,
+    borderRadius: R.card,
+    borderWidth: 1,
+    borderColor: T.border,
+    padding: 20,
+  },
+  emptyText: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: T.text3,
+    textAlign: 'center',
+    lineHeight: 17,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    backgroundColor: T.surface,
+    borderRadius: R.card,
+    borderWidth: 1,
+    borderColor: T.border,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  rowIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  rowTitle: {fontFamily: FONTS.semibold, fontSize: 13, color: T.text},
+  rowSub: {fontFamily: FONTS.regular, fontSize: 11, color: T.text3, marginTop: 2},
+  rowAmt: {fontFamily: FONTS.bold, fontSize: 12.5, color: T.text},
+  shareAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(96,165,250,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  shareAvatarText: {fontFamily: FONTS.bold, fontSize: 14, color: T.info},
+  cta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 20,
+    paddingVertical: 14,
+    borderRadius: R.card,
+    backgroundColor: T.accent,
+  },
+  ctaText: {fontFamily: FONTS.bold, fontSize: 14.5, color: T.accentInk},
+  ctaHint: {
+    fontFamily: FONTS.regular,
+    fontSize: 11.5,
+    color: T.text3,
+    textAlign: 'center',
+    marginTop: 8,
+  },
 });
