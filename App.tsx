@@ -1,7 +1,8 @@
 /* eslint-disable react/no-unstable-nested-components */
 import React, {useEffect, useState} from 'react';
-import {ActivityIndicator, Alert, PermissionsAndroid, Share, View} from 'react-native';
+import {ActivityIndicator, PermissionsAndroid, Share, View} from 'react-native';
 import 'react-native-get-random-values';
+import {AppDialogHost, appAlert} from './src/Components/AppDialog';
 import {installCrashReporter, takeLastCrash} from './src/tools/crashReporter';
 
 // Capture fatal JS errors as early as possible.
@@ -67,7 +68,7 @@ function App(): React.JSX.Element {
         return;
       }
       const head = crash.stack.split('\n').slice(0, 5).join('\n');
-      Alert.alert(
+      appAlert(
         `FinXAI crashed (v${crash.version})`,
         `${crash.message}\n\n${head}`,
         [
@@ -152,6 +153,7 @@ function App(): React.JSX.Element {
               </Stack.Navigator>
             )}
           </NavigationContainer>
+          <AppDialogHost />
           </ToastProvider>
         </GestureHandlerRootView>
       </PowerSyncContext.Provider>

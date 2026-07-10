@@ -3,7 +3,6 @@ import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -16,6 +15,7 @@ import {
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {appAlert} from '../Components/AppDialog';
 import {T, FONTS, R, fmtAmount} from '../theme';
 import {
   DEFAULT_ANTHROPIC_MODEL,
@@ -273,7 +273,7 @@ Guidelines:
   }, [msgs, apiHistory, loaded, chatKey]);
 
   const clearChat = () => {
-    Alert.alert(
+    appAlert(
       'Clear conversation?',
       'This erases the chat history with your Finance Coach.',
       [
@@ -298,14 +298,14 @@ Guidelines:
   // Ask the user to confirm a data-changing action before it runs.
   const confirmWrite = (action: AiAction, actionInput: any) =>
     new Promise<boolean>(resolve => {
-      Alert.alert(
+      appAlert(
         'Confirm action',
         action.summary ? action.summary(actionInput) : `Run ${action.name}?`,
         [
+          // dismissing the dialog runs the cancel handler → resolves false
           {text: 'Cancel', style: 'cancel', onPress: () => resolve(false)},
           {text: 'Do it', onPress: () => resolve(true)},
         ],
-        {cancelable: true, onDismiss: () => resolve(false)},
       );
     });
 

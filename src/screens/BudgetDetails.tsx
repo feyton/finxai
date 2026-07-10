@@ -2,7 +2,6 @@ import {usePowerSync, useQuery} from '@powersync/react-native';
 import {format} from 'date-fns';
 import React, {useMemo, useState} from 'react';
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -13,6 +12,7 @@ import {
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {CatChip, Icon, Progress} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {appAlert} from '../Components/AppDialog';
 import {CATS, CategoryId, FONTS, R, T, fmtAmount, resolveCat} from '../theme';
 import {computeBudgetSpend} from './BudgetScreen';
 
@@ -136,7 +136,7 @@ export default function BudgetDetails({route, navigation}: any) {
   };
 
   const deleteBudget = () => {
-    Alert.alert(
+    appAlert(
       'Delete budget?',
       'Claimed transactions stay in your records — they are just unlinked.',
       [

@@ -3,7 +3,6 @@ import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Linking,
   Pressable,
   ScrollView,
@@ -14,6 +13,7 @@ import {
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Avatar, Card, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {appAlert} from '../Components/AppDialog';
 import {APP_VERSION} from '../appVersion';
 import {FONTS, R, T} from '../theme';
 import categoriesData from '../tools/data.json';
@@ -106,7 +106,7 @@ export default function ProfilePage({navigation}: any) {
   }, []);
 
   const performLogout = () => {
-    Alert.alert('Log out?', 'You can sign back in anytime.', [
+    appAlert('Log out?', 'You can sign back in anytime.', [
       {text: 'Cancel', style: 'cancel'},
       {
         text: 'Log out',
@@ -128,7 +128,7 @@ export default function ProfilePage({navigation}: any) {
     try {
       await downloadAndInstall(url, f => setInstallPct(Math.round(f * 100)));
     } catch (e: any) {
-      Alert.alert(
+      appAlert(
         'Update failed',
         e?.message ?? 'The download did not complete.',
         [
@@ -152,7 +152,7 @@ export default function ProfilePage({navigation}: any) {
     try {
       const info = await checkForUpdate();
       if (info.available) {
-        Alert.alert(
+        appAlert(
           'Update available',
           `Version ${info.latest} is ready (you have ${info.current}).`,
           [
@@ -164,10 +164,10 @@ export default function ProfilePage({navigation}: any) {
           ],
         );
       } else {
-        Alert.alert("You're up to date", `FinXAI ${info.current} is the latest.`);
+        appAlert("You're up to date", `FinXAI ${info.current} is the latest.`);
       }
     } catch (e: any) {
-      Alert.alert('Check failed', e?.message ?? 'Could not reach GitHub.');
+      appAlert('Check failed', e?.message ?? 'Could not reach GitHub.');
     } finally {
       setChecking(false);
     }
@@ -177,7 +177,7 @@ export default function ProfilePage({navigation}: any) {
     if (!uid || busy) {
       return;
     }
-    Alert.alert(
+    appAlert(
       'Clear data & start over?',
       'This permanently deletes every account, transaction, budget, debt, list and setting you own — on this device and in the cloud. This cannot be undone.',
       [
@@ -187,7 +187,7 @@ export default function ProfilePage({navigation}: any) {
           style: 'destructive',
           onPress: () =>
             // second confirm — this is destructive
-            Alert.alert('Are you absolutely sure?', 'There is no way to recover this data.', [
+            appAlert('Are you absolutely sure?', 'There is no way to recover this data.', [
               {text: 'Keep my data', style: 'cancel'},
               {
                 text: 'Yes, wipe it all',
@@ -196,10 +196,10 @@ export default function ProfilePage({navigation}: any) {
                   setBusy(true);
                   try {
                     await clearMyData(db, uid);
-                    Alert.alert('Fresh start', 'All your data has been cleared.');
+                    appAlert('Fresh start', 'All your data has been cleared.');
                     navigation.navigate('Home');
                   } catch (e: any) {
-                    Alert.alert('Clear failed', e?.message ?? 'Unknown error');
+                    appAlert('Clear failed', e?.message ?? 'Unknown error');
                   } finally {
                     setBusy(false);
                   }
@@ -219,15 +219,15 @@ export default function ProfilePage({navigation}: any) {
       setBusy(true);
       try {
         await seedDemoData(db, uid);
-        Alert.alert('Done', 'Demo data seeded.');
+        appAlert('Done', 'Demo data seeded.');
       } catch (e: any) {
-        Alert.alert('Seed failed', e?.message ?? 'Unknown error');
+        appAlert('Seed failed', e?.message ?? 'Unknown error');
       } finally {
         setBusy(false);
       }
     };
     if (await hasSeededData(db, uid)) {
-      Alert.alert('Data already exists', 'Seed anyway (adds duplicates)?', [
+      appAlert('Data already exists', 'Seed anyway (adds duplicates)?', [
         {text: 'Cancel', style: 'cancel'},
         {text: 'Seed anyway', onPress: go},
       ]);
@@ -236,7 +236,7 @@ export default function ProfilePage({navigation}: any) {
     }
   };
 
-  const infoAlert = (title: string, body: string) => () => Alert.alert(title, body);
+  const infoAlert = (title: string, body: string) => () => appAlert(title, body);
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>

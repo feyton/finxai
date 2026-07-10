@@ -1,7 +1,6 @@
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useMemo, useState} from 'react';
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -13,6 +12,7 @@ import {
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Card, Icon, Pill} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {appAlert} from '../Components/AppDialog';
 import {FONTS, R, T, fmtAmount} from '../theme';
 
 function uuid(): string {
@@ -77,7 +77,7 @@ export default function ShoppingScreen({navigation}: any) {
   };
 
   const deleteItem = (item: any) => {
-    Alert.alert('Remove item?', item.text, [
+    appAlert('Remove item?', item.text, [
       {text: 'Cancel', style: 'cancel'},
       {
         text: 'Remove',
@@ -120,7 +120,7 @@ export default function ShoppingScreen({navigation}: any) {
 
   const deleteList = (list: any) => {
     setMenuList(null);
-    Alert.alert(
+    appAlert(
       'Delete list?',
       `"${list.name}" and its ${byList[list.id]?.length ?? 0} items will be removed.`,
       [

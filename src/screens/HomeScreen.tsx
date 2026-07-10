@@ -2,7 +2,6 @@ import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {useQuery} from '@powersync/react-native';
 import React, {useEffect, useMemo, useState} from 'react';
 import {
-  Alert,
   FlatList,
   Linking,
   Pressable,
@@ -16,6 +15,7 @@ import {T, FONTS, R, resolveCat, accountTint, accountIcon, fmtAmount} from '../t
 import {Avatar, Card, CatChip, Icon, Money, Pill, SectionHeader} from '../Components/ui';
 import SMSRetriever from '../Components/SMSRetriever';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {appAlert} from '../Components/AppDialog';
 import {checkForUpdate, UpdateInfo} from '../tools/updateChecker';
 import {downloadAndInstall} from '../tools/updateInstaller';
 import {format} from 'date-fns';
@@ -135,7 +135,7 @@ export default function HomeScreen({navigation}: any) {
     } catch (e: any) {
       // Never silently hand off to the browser — say what failed and let the
       // user choose the browser explicitly.
-      Alert.alert(
+      appAlert(
         'Update failed',
         e?.message ?? 'The download did not complete.',
         [

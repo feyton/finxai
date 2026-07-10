@@ -4,10 +4,11 @@
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import {formatDistanceToNowStrict} from 'date-fns';
 import React from 'react';
-import {Alert, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {appAlert} from '../Components/AppDialog';
 import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
 
 export default function SharedScreen({navigation}: any) {
@@ -36,7 +37,7 @@ export default function SharedScreen({navigation}: any) {
   );
 
   const revoke = (share: any) => {
-    Alert.alert(
+    appAlert(
       'Revoke access?',
       `${share.invitee_email} will lose access to ${share.account_name ?? 'this account'} on their devices.`,
       [
