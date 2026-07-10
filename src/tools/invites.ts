@@ -1,25 +1,29 @@
-// Sends a share invitation email via the Supabase Edge Function `send-invite`,
-// which holds the SMTP credentials server-side (never in the app). See
-// supabase/functions/send-invite/ for the function + deploy steps.
+// Sends a share invitation email via the web app's API (/api/invite on
+// app.feyton.co.rw), which holds the Mailjet credentials server-side.
+// The caller is authenticated with the user's Supabase access token.
 
-import {SUPABASE_ANON_KEY, SUPABASE_URL} from './supabase';
+import {supabase} from './supabase';
+
+const INVITE_ENDPOINT = 'https://app.feyton.co.rw/api/invite';
 
 export async function sendInviteEmail(
   email: string,
   inviterName: string,
   inviteeName: string,
 ): Promise<void> {
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/send-invite`, {
+  const {
+    data: {session},
+  } = await supabase.auth.getSession();
+  const res = await fetch(INVITE_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session?.access_token ?? ''}`,
     },
     body: JSON.stringify({email, inviterName, inviteeName}),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(body || `send-invite failed (${res.status})`);
+    throw new Error(body || `invite failed (${res.status})`);
   }
 }
