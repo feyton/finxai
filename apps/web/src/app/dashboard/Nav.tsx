@@ -2,13 +2,16 @@
 
 import Link from 'next/link';
 import {usePathname} from 'next/navigation';
+import {Icon} from '@/components/Icon';
 
 const LINKS = [
-  {href: '/dashboard', label: 'Overview', icon: '▦'},
-  {href: '/dashboard/transactions', label: 'Transactions', icon: '⇅'},
-  {href: '/dashboard/accounts', label: 'Accounts', icon: '▤'},
-  {href: '/dashboard/budgets', label: 'Budgets', icon: '◔'},
-  {href: '/dashboard/shared', label: 'Shared', icon: '⧉'},
+  {href: '/dashboard', label: 'Dashboard', icon: 'grid'},
+  {href: '/dashboard/transactions', label: 'Transactions', icon: 'receipt'},
+  {href: '/dashboard/accounts', label: 'Accounts', icon: 'wallet'},
+  {href: '/dashboard/budgets', label: 'Budgets', icon: 'pie'},
+  {href: '/dashboard/debts', label: 'Debts', icon: 'coins'},
+  {href: '/dashboard/analytics', label: 'Analytics', icon: 'bars'},
+  {href: '/dashboard/shared', label: 'Shared & Family', icon: 'users'},
 ];
 
 export function Nav() {
@@ -24,9 +27,19 @@ export function Nav() {
           <Link
             key={l.href}
             href={l.href}
-            className={`nav-link${active ? ' active' : ''}`}>
-            <span className="w-4 text-center text-[13px] opacity-80">{l.icon}</span>
-            <span>{l.label}</span>
+            className="press flex w-full items-center gap-[11px] whitespace-nowrap rounded-[10px] px-3 py-2.5 text-left text-[13.5px]"
+            style={{
+              background: active ? 'var(--sidebar-active-bg)' : 'transparent',
+              color: active ? '#fff' : 'var(--sidebar-text)',
+              fontWeight: active ? 600 : 500,
+            }}>
+            <Icon
+              name={l.icon}
+              size={18}
+              sw={active ? 2.2 : 1.8}
+              color={active ? 'var(--accent)' : 'var(--sidebar-text-2)'}
+            />
+            {l.label}
           </Link>
         );
       })}

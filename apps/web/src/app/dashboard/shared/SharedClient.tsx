@@ -106,16 +106,6 @@ export function SharedClient({
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <div className="page-title">Shared access</div>
-          <div className="page-sub">
-            Share an account with someone — they see it and its transactions;
-            SMS parsing stays on the owner&apos;s phone.
-          </div>
-        </div>
-      </div>
-
       {err && <div className="banner-err">{err}</div>}
 
       <div className="grid grid-2 mb-3">

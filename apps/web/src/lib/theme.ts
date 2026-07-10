@@ -1,27 +1,27 @@
 // Ported from the mobile app's src/theme.ts (pure logic, no RN).
 // Kept in sync manually for now; will move to packages/core in a later phase.
 
-// Web admin palette — dark-first, blue accent (mirrors globals.css @theme).
+// Web admin palette — light data surface, brand green (mirrors globals.css
+// and the FinXAI.zip design handoff).
 export const T = {
-  bg: '#0B0E14',
-  surface: '#10141C',
-  surface2: '#151B26',
-  surface3: '#1B2330',
-  border: 'rgba(148,163,184,0.10)',
-  border2: 'rgba(148,163,184,0.20)',
-  text: '#E2E8F0',
-  text2: '#94A3B8',
-  text3: '#5B6B7F',
-  accent: '#3B82F6',
-  accent600: '#2563EB',
-  accentSoft: 'rgba(59,130,246,0.13)',
-  income: '#34D399',
-  expense: '#FB7185',
-  warn: '#FBBF24',
-  info: '#60A5FA',
-  // validated chart pair (dark surface) — money in / money out
-  chartIn: '#3B82F6',
-  chartOut: '#F43F5E',
+  bg: '#F6F8F6',
+  surface: '#FFFFFF',
+  surface2: '#F0F3F0',
+  surface3: '#E6EAE5',
+  border: 'rgba(13,23,17,0.08)',
+  border2: 'rgba(13,23,17,0.16)',
+  text: '#10160F',
+  text2: '#5B665C',
+  text3: '#8A948A',
+  accent: '#16A34A',
+  accent600: '#128A3E',
+  accentSoft: 'rgba(22,163,74,0.12)',
+  income: '#0D9668',
+  expense: '#DC2626',
+  warn: '#D97706',
+  info: '#2563EB',
+  chartIn: '#0D9668',
+  chartOut: '#DC2626',
 };
 
 export type CategoryId =
