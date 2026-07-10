@@ -29,6 +29,14 @@ import {
   fmtAmount,
   resolveCat,
 } from '../theme';
+import categoriesData from '../tools/data.json';
+
+function uuid(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
 
 const SOURCE_LABEL: Record<string, string> = {
   sms: 'From SMS',
@@ -36,7 +44,20 @@ const SOURCE_LABEL: Record<string, string> = {
   manual: 'Manual entry',
 };
 
-type FilterType = 'all' | 'income' | 'expense' | 'ai';
+type FilterType = 'all' | 'income' | 'expense' | 'transfer' | 'ai';
+
+// data.json subcategories for a resolved CategoryId (first matching category).
+function subcatsFor(catId: CategoryId): {name: string; icon: string}[] {
+  const match = (categoriesData.categories as any[]).find(
+    c => resolveCat(c.name) === catId,
+  );
+  return match?.subcategories ?? [];
+}
+
+interface SplitRow {
+  category: CategoryId;
+  amount: number;
+}
 
 function dayLabel(dt: string): string {
   const date = new Date(dt);
@@ -60,30 +81,43 @@ function InfoRow({label, value}: {label: string; value: string}) {
 function TxDetail({
   tx,
   accounts,
+  splits,
   onSave,
+  onSaveSplits,
   onDelete,
-  onClose,
 }: {
   tx: any;
   accounts: any[];
+  splits: any[];
   onSave: (updated: any) => Promise<void>;
+  onSaveSplits: (rows: SplitRow[]) => Promise<void>;
   onDelete: () => void;
-  onClose: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
+  const [mode, setMode] = useState<'view' | 'edit' | 'split'>('view');
   const [amount, setAmount] = useState(String(Math.round(tx.amount ?? 0)));
   const [category, setCategory] = useState<CategoryId>(resolveCat(tx.category ?? ''));
+  const [subcategory, setSubcategory] = useState<string>(tx.subcategory ?? '');
+  const [txType, setTxType] = useState<string>(tx.transaction_type ?? 'expense');
   const [accountId, setAccountId] = useState<string>(tx.account_id ?? '');
   const [merchant, setMerchant] = useState<string>(tx.merchant || tx.payee || '');
   const [note, setNote] = useState<string>(tx.note || '');
   const [busy, setBusy] = useState(false);
 
+  // split editor state
+  const [parts, setParts] = useState<SplitRow[]>(
+    splits.map(s => ({category: resolveCat(s.category ?? ''), amount: s.amount ?? 0})),
+  );
+  const [partCat, setPartCat] = useState<CategoryId | null>(null);
+  const [partAmount, setPartAmount] = useState('');
+
   const catId = resolveCat(tx.category ?? '');
   const cat = CATS[catId];
   const isIncome = tx.transaction_type === 'income';
+  const isTransfer = tx.transaction_type === 'transfer';
   const dateStr = tx.date_time ? format(new Date(tx.date_time), 'MMM d, yyyy  ·  HH:mm') : '—';
   const conf = tx.confidence != null && tx.confidence < 1 ? ` · ${Math.round(tx.confidence * 100)}%` : '';
   const sourceStr = (SOURCE_LABEL[tx.source] ?? 'Manual entry') + conf;
+  const subcats = subcatsFor(category);
 
   const save = async () => {
     const amt = Math.abs(parseInt(amount, 10) || 0);
@@ -93,22 +127,162 @@ function TxDetail({
     setBusy(true);
     await onSave({
       id: tx.id,
-      transaction_type: tx.transaction_type,
+      transaction_type: txType,
+      orig_type: tx.transaction_type,
+      orig_transfer_direction: tx.transfer_direction,
       orig_amount: tx.amount ?? 0,
       orig_account_id: tx.account_id,
       amount: amt,
       account_id: accountId || tx.account_id,
       category: CATS[category]?.label ?? category,
+      subcategory,
       merchant,
       note,
     });
     setBusy(false);
   };
 
-  if (editing) {
+  const partsTotal = parts.reduce((s, p) => s + p.amount, 0);
+  const remaining = Math.round(tx.amount ?? 0) - partsTotal;
+
+  const addPart = () => {
+    const amt = parseInt(partAmount.replace(/\D/g, ''), 10) || 0;
+    if (!partCat || amt <= 0) {
+      return;
+    }
+    setParts(prev => [...prev, {category: partCat, amount: amt}]);
+    setPartCat(null);
+    setPartAmount('');
+  };
+
+  const saveSplits = async () => {
+    setBusy(true);
+    await onSaveSplits(parts);
+    setBusy(false);
+    setMode('view');
+  };
+
+  if (mode === 'split') {
+    return (
+      <BottomSheetScrollView contentContainerStyle={styles.editWrap}>
+        <Text style={styles.editTitle}>Split transaction</Text>
+        <Text style={styles.splitHint}>
+          Break this {fmtAmount(tx.amount ?? 0)} RWF record across categories.
+          Reports use the parts instead of the single category.
+        </Text>
+
+        {parts.map((p, i) => {
+          const c = CATS[p.category];
+          return (
+            <View key={`${p.category}-${i}`} style={styles.splitRow}>
+              <CatChip cat={p.category} size={30} />
+              <Text style={styles.splitRowLabel} numberOfLines={1}>{c.label}</Text>
+              <Text style={styles.splitRowAmt}>{fmtAmount(p.amount)}</Text>
+              <Pressable onPress={() => setParts(prev => prev.filter((_, j) => j !== i))} hitSlop={8}>
+                <Icon name="X" size={15} color={T.text3} strokeWidth={2.2} />
+              </Pressable>
+            </View>
+          );
+        })}
+
+        <Text style={[styles.splitRemaining, {color: remaining === 0 ? T.accent : remaining < 0 ? T.expense : T.text2}]}>
+          {remaining === 0
+            ? 'Fully allocated'
+            : remaining > 0
+            ? `${fmtAmount(remaining)} RWF left to allocate`
+            : `${fmtAmount(-remaining)} RWF over the total`}
+        </Text>
+
+        <BottomSheetScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}>
+          {(Object.values(CATS) as {id: CategoryId; label: string; color: string}[]).map(c => {
+            const on = partCat === c.id;
+            return (
+              <Pressable
+                key={c.id}
+                onPress={() => setPartCat(c.id)}
+                style={[styles.pickChip, on && {borderColor: c.color, backgroundColor: c.color + '18'}]}>
+                <CatChip cat={c.id} size={26} />
+                <Text style={[styles.pickChipText, on && {color: T.text}]} numberOfLines={1}>{c.label}</Text>
+              </Pressable>
+            );
+          })}
+        </BottomSheetScrollView>
+
+        <View style={styles.splitAdderRow}>
+          <BottomSheetTextInput
+            value={partAmount}
+            onChangeText={setPartAmount}
+            keyboardType="numeric"
+            placeholder={partCat ? `Amount for ${CATS[partCat].label}` : 'Pick a category above'}
+            placeholderTextColor={T.text3}
+            style={[styles.editInput, {flex: 1}]}
+          />
+          <Pressable
+            onPress={addPart}
+            disabled={!partCat || !partAmount}
+            style={({pressed}) => [
+              styles.splitAddBtn,
+              {opacity: !partCat || !partAmount ? 0.4 : pressed ? 0.8 : 1},
+            ]}>
+            <Icon name="Plus" size={16} color={T.accentInk} strokeWidth={2.6} />
+          </Pressable>
+        </View>
+
+        <View style={styles.detailBtns}>
+          <Pressable
+            onPress={() => setMode('view')}
+            style={({pressed}) => [styles.closeBtn, {opacity: pressed ? 0.7 : 1}]}>
+            <Text style={styles.closeBtnText}>Cancel</Text>
+          </Pressable>
+          <Pressable
+            onPress={saveSplits}
+            disabled={busy || (parts.length > 0 && remaining !== 0)}
+            style={({pressed}) => [
+              styles.saveBtn,
+              {opacity: busy || (parts.length > 0 && remaining !== 0) ? 0.5 : pressed ? 0.85 : 1},
+            ]}>
+            <Icon name="Check" size={16} color={T.accentInk} strokeWidth={2.5} />
+            <Text style={styles.saveBtnText}>
+              {busy ? 'Saving…' : parts.length === 0 ? 'Remove split' : 'Save split'}
+            </Text>
+          </Pressable>
+        </View>
+      </BottomSheetScrollView>
+    );
+  }
+
+  if (mode === 'edit') {
     return (
       <BottomSheetScrollView contentContainerStyle={styles.editWrap}>
         <Text style={styles.editTitle}>Edit transaction</Text>
+
+        <Text style={styles.editLabel}>Type</Text>
+        <View style={styles.typeRow}>
+          {[
+            {id: 'expense', label: 'Money out'},
+            {id: 'income', label: 'Money in'},
+            {id: 'transfer', label: 'Transfer'},
+          ].map(t => {
+            const on = txType === t.id;
+            return (
+              <Pressable
+                key={t.id}
+                onPress={() => setTxType(t.id)}
+                style={[styles.typeChoice, on && styles.typeChoiceActive]}>
+                <Text style={[styles.typeChoiceText, on && {color: T.accent}]}>{t.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        {txType === 'transfer' && tx.transaction_type !== 'transfer' && (
+          <Text style={styles.typeHint}>
+            Transfers move money between your own accounts — excluded from
+            income & spending totals.
+          </Text>
+        )}
 
         <Text style={styles.editLabel}>Amount (RWF)</Text>
         <BottomSheetTextInput
@@ -128,24 +302,54 @@ function TxDetail({
           placeholderTextColor={T.text3}
         />
 
-        <Text style={styles.editLabel}>Category</Text>
-        <BottomSheetScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRow}>
-          {(Object.values(CATS) as {id: CategoryId; label: string; color: string}[]).map(c => {
-            const on = category === c.id;
-            return (
-              <Pressable
-                key={c.id}
-                onPress={() => setCategory(c.id)}
-                style={[styles.pickChip, on && {borderColor: c.color, backgroundColor: c.color + '18'}]}>
-                <CatChip cat={c.id} size={26} />
-                <Text style={[styles.pickChipText, on && {color: T.text}]} numberOfLines={1}>{c.label}</Text>
-              </Pressable>
-            );
-          })}
-        </BottomSheetScrollView>
+        {txType !== 'transfer' && (
+          <>
+            <Text style={styles.editLabel}>Category</Text>
+            <BottomSheetScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRow}>
+              {(Object.values(CATS) as {id: CategoryId; label: string; color: string}[]).map(c => {
+                const on = category === c.id;
+                return (
+                  <Pressable
+                    key={c.id}
+                    onPress={() => {
+                      setCategory(c.id);
+                      setSubcategory('');
+                    }}
+                    style={[styles.pickChip, on && {borderColor: c.color, backgroundColor: c.color + '18'}]}>
+                    <CatChip cat={c.id} size={26} />
+                    <Text style={[styles.pickChipText, on && {color: T.text}]} numberOfLines={1}>{c.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </BottomSheetScrollView>
+
+            {subcats.length > 0 && (
+              <>
+                <Text style={styles.editLabel}>Subcategory</Text>
+                <BottomSheetScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.chipRow}>
+                  {subcats.map(s => {
+                    const on = subcategory === s.name;
+                    return (
+                      <Pressable
+                        key={s.name}
+                        onPress={() => setSubcategory(on ? '' : s.name)}
+                        style={[styles.pickChip, on && {borderColor: T.accent, backgroundColor: T.accentSoft}]}>
+                        <Text style={{fontSize: 12}}>{s.icon}</Text>
+                        <Text style={[styles.pickChipText, on && {color: T.text}]} numberOfLines={1}>{s.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </BottomSheetScrollView>
+              </>
+            )}
+          </>
+        )}
 
         {accounts.length > 0 && (
           <>
@@ -182,7 +386,7 @@ function TxDetail({
 
         <View style={styles.detailBtns}>
           <Pressable
-            onPress={() => setEditing(false)}
+            onPress={() => setMode('view')}
             style={({pressed}) => [styles.closeBtn, {opacity: pressed ? 0.7 : 1}]}>
             <Text style={styles.closeBtnText}>Cancel</Text>
           </Pressable>
@@ -201,18 +405,37 @@ function TxDetail({
   return (
     <BottomSheetScrollView contentContainerStyle={styles.detail}>
       <View style={styles.detailTop}>
-        <View style={[styles.detailIcon, {backgroundColor: cat.color + '22'}]}>
-          <Icon name={cat.icon} size={22} color={cat.color} strokeWidth={2} />
+        <View style={[styles.detailIcon, {backgroundColor: (isTransfer ? T.info : cat.color) + '22'}]}>
+          <Icon
+            name={isTransfer ? 'ArrowLeftRight' : cat.icon}
+            size={22}
+            color={isTransfer ? T.info : cat.color}
+            strokeWidth={2}
+          />
         </View>
-        <Text style={[styles.detailAmount, {color: isIncome ? T.income : T.expense}]}>
-          {isIncome ? '+' : '-'}RWF {fmtAmount(tx.amount ?? 0)}
+        <Text
+          style={[
+            styles.detailAmount,
+            {color: isTransfer ? T.text : isIncome ? T.income : T.expense},
+          ]}>
+          {isTransfer ? '' : isIncome ? '+' : '-'}RWF {fmtAmount(tx.amount ?? 0)}
         </Text>
         <Text style={styles.detailLabel}>{tx.merchant || tx.payee || cat.label}</Text>
+        {isTransfer && (
+          <Text style={styles.detailSub}>Transfer between your accounts</Text>
+        )}
       </View>
 
       <View style={styles.infoCard}>
-        <InfoRow label="Category" value={cat.label} />
-        <View style={styles.infoDivider} />
+        {!isTransfer && (
+          <>
+            <InfoRow
+              label="Category"
+              value={cat.label + (tx.subcategory ? ` · ${tx.subcategory}` : '')}
+            />
+            <View style={styles.infoDivider} />
+          </>
+        )}
         <InfoRow label="Account" value={tx.account_name ?? '—'} />
         <View style={styles.infoDivider} />
         <InfoRow label="When" value={dateStr} />
@@ -232,13 +455,41 @@ function TxDetail({
         ) : null}
       </View>
 
+      {splits.length > 0 && (
+        <View style={styles.infoCard}>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Split into</Text>
+          </View>
+          {splits.map((s: any) => {
+            const sc = CATS[resolveCat(s.category ?? '')];
+            return (
+              <View key={s.id} style={styles.infoRow}>
+                <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                  <View style={[styles.splitDot, {backgroundColor: sc.color}]} />
+                  <Text style={styles.infoValue}>{sc.label}</Text>
+                </View>
+                <Text style={styles.infoValue}>RWF {fmtAmount(s.amount ?? 0)}</Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
       <View style={styles.detailBtns}>
         <Pressable
-          onPress={() => setEditing(true)}
+          onPress={() => setMode('edit')}
           style={({pressed}) => [styles.editBtn, {opacity: pressed ? 0.8 : 1}]}>
           <Icon name="Pencil" size={15} color={T.accent} strokeWidth={2.2} />
           <Text style={styles.editBtnText}>Edit</Text>
         </Pressable>
+        {!isTransfer && (
+          <Pressable
+            onPress={() => setMode('split')}
+            style={({pressed}) => [styles.editBtn, {opacity: pressed ? 0.8 : 1}]}>
+            <Icon name="Scissors" size={15} color={T.accent} strokeWidth={2.2} />
+            <Text style={styles.editBtnText}>{splits.length > 0 ? 'Re-split' : 'Split'}</Text>
+          </Pressable>
+        )}
         <Pressable
           onPress={onDelete}
           style={({pressed}) => [styles.deleteBtn, {opacity: pressed ? 0.7 : 1}]}>
@@ -254,8 +505,21 @@ const FILTERS: {key: FilterType; label: string}[] = [
   {key: 'all', label: 'All'},
   {key: 'expense', label: 'Spending'},
   {key: 'income', label: 'Income'},
+  {key: 'transfer', label: 'Transfers'},
   {key: 'ai', label: 'AI-tagged'},
 ];
+
+// Balance-movement sign of a transaction as it was originally recorded.
+// Changing the TYPE re-classifies the record; it does not move money again.
+function movementSign(txType: string, transferDirection?: string | null): number {
+  if (txType === 'income') {
+    return 1;
+  }
+  if (txType === 'transfer') {
+    return transferDirection === 'in' ? 1 : -1;
+  }
+  return -1;
+}
 
 export default function RecordsPage({navigation, route}: any) {
   const {userId} = useCurrentUser();
@@ -275,6 +539,11 @@ export default function RecordsPage({navigation, route}: any) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
   const [selected, setSelected] = useState<any>(null);
+
+  const {data: selectedSplits} = useQuery(
+    'SELECT * FROM split_details WHERE transaction_id = ?',
+    [selected?.id ?? ''],
+  );
   const sheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['60%', '92%'], []);
 
@@ -361,13 +630,14 @@ export default function RecordsPage({navigation, route}: any) {
   const deleteSelected = useCallback(async () => {
     if (!selected) {return;}
     // reverse the transaction's effect on its account balance
-    const sign = selected.transaction_type === 'income' ? 1 : -1;
+    const sign = movementSign(selected.transaction_type, selected.transfer_direction);
     if (selected.account_id) {
       await db.execute(
         'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
         [sign * (selected.amount ?? 0), selected.account_id],
       );
     }
+    await db.execute('DELETE FROM split_details WHERE transaction_id = ?', [selected.id]);
     await db.execute('DELETE FROM transactions WHERE id = ?', [selected.id]);
     sheetRef.current?.close();
     setSelected(null);
@@ -375,7 +645,10 @@ export default function RecordsPage({navigation, route}: any) {
 
   const saveEdit = useCallback(
     async (u: any) => {
-      const sign = u.transaction_type === 'income' ? 1 : -1;
+      // Balance follows the ORIGINAL movement direction — switching the type
+      // (e.g. income → transfer) re-classifies the record without pretending
+      // the money moved differently.
+      const sign = movementSign(u.orig_type, u.orig_transfer_direction);
       // revert original effect from the original account
       if (u.orig_account_id) {
         await db.execute(
@@ -390,14 +663,34 @@ export default function RecordsPage({navigation, route}: any) {
           [sign * u.amount, u.account_id],
         );
       }
+      // A manual type flip to 'transfer' keeps direction from the original
+      // movement so records stay explainable.
+      const transferDirection =
+        u.transaction_type === 'transfer'
+          ? u.orig_transfer_direction ?? (sign > 0 ? 'in' : 'out')
+          : null;
       await db.execute(
-        'UPDATE transactions SET amount = ?, account_id = ?, category = ?, merchant = ?, note = ? WHERE id = ?',
-        [u.amount, u.account_id, u.category, u.merchant, u.note, u.id],
+        'UPDATE transactions SET amount = ?, account_id = ?, category = ?, subcategory = ?, merchant = ?, note = ?, transaction_type = ?, transfer_direction = ? WHERE id = ?',
+        [u.amount, u.account_id, u.category, u.subcategory ?? '', u.merchant, u.note, u.transaction_type, transferDirection, u.id],
       );
       sheetRef.current?.close();
       setSelected(null);
     },
     [db],
+  );
+
+  const saveSplits = useCallback(
+    async (rows: SplitRow[]) => {
+      if (!selected) {return;}
+      await db.execute('DELETE FROM split_details WHERE transaction_id = ?', [selected.id]);
+      for (const row of rows) {
+        await db.execute(
+          'INSERT INTO split_details (id, transaction_id, amount, category, subcategory, note, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [uuid(), selected.id, row.amount, CATS[row.category]?.label ?? row.category, '', '', userId ?? ''],
+        );
+      }
+    },
+    [db, selected, userId],
   );
 
   return (
@@ -516,9 +809,10 @@ export default function RecordsPage({navigation, route}: any) {
             key={selected.id}
             tx={selected}
             accounts={accounts as any[]}
+            splits={(selectedSplits as any[]) ?? []}
             onSave={saveEdit}
+            onSaveSplits={saveSplits}
             onDelete={deleteSelected}
-            onClose={() => sheetRef.current?.close()}
           />
         )}
       </BottomSheet>
@@ -655,6 +949,57 @@ const styles = StyleSheet.create({
     color: T.text,
   },
   chipRow: {gap: 8, paddingVertical: 2, paddingRight: 8},
+  typeRow: {flexDirection: 'row', gap: 8},
+  typeChoice: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderRadius: R.small,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  typeChoiceActive: {backgroundColor: T.accentSoft, borderColor: 'rgba(34,197,94,0.35)'},
+  typeChoiceText: {fontFamily: FONTS.semibold, fontSize: 12, color: T.text2},
+  typeHint: {fontFamily: FONTS.regular, fontSize: 11.5, color: T.text3, marginTop: 8, lineHeight: 16},
+  splitHint: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: T.text2,
+    textAlign: 'center',
+    lineHeight: 17,
+    paddingBottom: 10,
+  },
+  splitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: T.surface2,
+    borderRadius: R.small,
+    borderWidth: 1,
+    borderColor: T.border,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 8,
+  },
+  splitRowLabel: {flex: 1, fontFamily: FONTS.semibold, fontSize: 12.5, color: T.text},
+  splitRowAmt: {fontFamily: FONTS.bold, fontSize: 12.5, color: T.text},
+  splitRemaining: {
+    fontFamily: FONTS.semibold,
+    fontSize: 12,
+    textAlign: 'center',
+    paddingVertical: 6,
+  },
+  splitAdderRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10},
+  splitAddBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: R.small,
+    backgroundColor: T.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  splitDot: {width: 8, height: 8, borderRadius: 4},
   pickChip: {
     flexDirection: 'row',
     alignItems: 'center',

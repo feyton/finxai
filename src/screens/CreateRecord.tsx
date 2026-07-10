@@ -22,7 +22,44 @@ function generateUUID(): string {
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '000', '0', 'del'];
 
-type TxType = 'expense' | 'income';
+type TxType = 'expense' | 'income' | 'transfer';
+
+function AccountChips({
+  accounts,
+  activeId,
+  onPick,
+  excludeId,
+}: {
+  accounts: any[];
+  activeId: string;
+  onPick: (id: string) => void;
+  excludeId?: string;
+}) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.accountRow}>
+      {accounts
+        .filter(a => a.id !== excludeId)
+        .map(a => {
+          const on = activeId === a.id;
+          const tint = accountTint(a.name ?? '');
+          return (
+            <Pressable
+              key={a.id}
+              onPress={() => onPick(a.id)}
+              style={[styles.accountChip, on && {borderColor: tint, backgroundColor: tint + '18'}]}>
+              <Icon name={accountIcon(a.name ?? '', a.type ?? '')} size={15} color={tint} strokeWidth={2} />
+              <Text style={[styles.accountName, on && {color: T.text}]} numberOfLines={1}>
+                {a.name}
+              </Text>
+            </Pressable>
+          );
+        })}
+    </ScrollView>
+  );
+}
 
 export default function CreateRecord({navigation}: any) {
   const db = usePowerSync();
@@ -37,13 +74,16 @@ export default function CreateRecord({navigation}: any) {
   const [type, setType] = useState<TxType>('expense');
   const [amount, setAmount] = useState('0');
   const [accountId, setAccountId] = useState<string>('');
+  const [toAccountId, setToAccountId] = useState<string>('');
   const [category, setCategory] = useState<string>('');
+  const [subcategory, setSubcategory] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   // default to the first account once loaded
   const accountList = accounts as any[];
   const activeAccount = accountId || accountList[0]?.id || '';
+  const isTransfer = type === 'transfer';
 
   const cats = useMemo(
     () =>
@@ -51,6 +91,13 @@ export default function CreateRecord({navigation}: any) {
         type === 'income' ? c.type === 'income' : c.type === 'expense',
       ),
     [type],
+  );
+
+  const subcats = useMemo(
+    () =>
+      categoriesData.categories.find(c => c.name === category)?.subcategories ??
+      [],
+    [category],
   );
 
   const press = (k: string) => {
@@ -67,7 +114,60 @@ export default function CreateRecord({navigation}: any) {
   };
 
   const numericAmount = parseInt(amount, 10) || 0;
-  const canSave = numericAmount > 0 && !!activeAccount && !saving;
+  const canSave =
+    numericAmount > 0 &&
+    !!activeAccount &&
+    !saving &&
+    (!isTransfer || (!!toAccountId && toAccountId !== activeAccount));
+
+  const saveTransfer = async () => {
+    const from = accountList.find(a => a.id === activeAccount);
+    const to = accountList.find(a => a.id === toAccountId);
+    if (!from || !to) {
+      setError('Pick both accounts');
+      return;
+    }
+    setSaving(true);
+    try {
+      const now = new Date().toISOString();
+      // Canonical transfer record + one transaction per side (each account's
+      // history shows the movement; both sides are net-zero in reports).
+      await db.execute(
+        'INSERT INTO transfers (id, from_account_id, to_account_id, amount, date_time, note, currency, fees, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [generateUUID(), from.id, to.id, numericAmount, now, '', 'RWF', 0, userId ?? '', now],
+      );
+      await db.execute(
+        `INSERT INTO transactions
+           (id, amount, account_id, category, subcategory, date_time, confirmed,
+            currency, payee, merchant, transaction_type, note, fees, budget_id,
+            source, confidence, transfer_account_id, transfer_direction,
+            owner_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, 'RWF', ?, ?, 'transfer', '', 0, NULL, 'manual', 1, ?, 'out', ?, ?)`,
+        [generateUUID(), numericAmount, from.id, '', '', now, to.name, `To ${to.name}`, to.id, userId ?? '', now],
+      );
+      await db.execute(
+        `INSERT INTO transactions
+           (id, amount, account_id, category, subcategory, date_time, confirmed,
+            currency, payee, merchant, transaction_type, note, fees, budget_id,
+            source, confidence, transfer_account_id, transfer_direction,
+            owner_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, 'RWF', ?, ?, 'transfer', '', 0, NULL, 'manual', 1, ?, 'in', ?, ?)`,
+        [generateUUID(), numericAmount, to.id, '', '', now, from.name, `From ${from.name}`, from.id, userId ?? '', now],
+      );
+      await db.execute(
+        'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
+        [numericAmount, from.id],
+      );
+      await db.execute(
+        'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
+        [numericAmount, to.id],
+      );
+      navigation.goBack();
+    } catch (e: any) {
+      setError(e?.message ?? 'Something went wrong');
+      setSaving(false);
+    }
+  };
 
   const save = async () => {
     if (!activeAccount) {
@@ -78,17 +178,25 @@ export default function CreateRecord({navigation}: any) {
       setError('Enter an amount');
       return;
     }
+    if (isTransfer) {
+      if (!toAccountId || toAccountId === activeAccount) {
+        setError('Pick a different destination account');
+        return;
+      }
+      await saveTransfer();
+      return;
+    }
     setSaving(true);
     try {
       const now = new Date().toISOString();
       await db.execute(
-        'INSERT INTO transactions (id, amount, account_id, category, subcategory, date_time, confirmed, currency, payee, merchant, transaction_type, note, fees, budget_id, source, confidence, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO transactions (id, amount, account_id, category, subcategory, date_time, confirmed, currency, payee, merchant, transaction_type, note, fees, budget_id, source, confidence, transfer_account_id, transfer_direction, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           generateUUID(),
           numericAmount,
           activeAccount,
           category || '',
-          '',
+          subcategory || '',
           now,
           1,
           'RWF',
@@ -100,6 +208,8 @@ export default function CreateRecord({navigation}: any) {
           null,
           'manual',
           1,
+          null,
+          null,
           userId ?? '',
           now,
         ],
@@ -133,16 +243,18 @@ export default function CreateRecord({navigation}: any) {
         </Pressable>
         <Text style={styles.title}>Add transaction</Text>
         <View style={styles.typeToggle}>
-          {(['expense', 'income'] as TxType[]).map(t => (
+          {(['expense', 'income', 'transfer'] as TxType[]).map(t => (
             <Pressable
               key={t}
               onPress={() => {
                 setType(t);
                 setCategory('');
+                setSubcategory('');
+                setError('');
               }}
               style={[styles.typeBtn, type === t && styles.typeBtnActive]}>
               <Text style={[styles.typeText, type === t && styles.typeTextActive]}>
-                {t === 'expense' ? 'Out' : 'In'}
+                {t === 'expense' ? 'Out' : t === 'income' ? 'In' : 'Move'}
               </Text>
             </Pressable>
           ))}
@@ -154,9 +266,17 @@ export default function CreateRecord({navigation}: any) {
         <Text
           style={[
             styles.amount,
-            {color: type === 'income' ? T.income : numericAmount > 0 ? T.expense : T.text},
+            {
+              color: isTransfer
+                ? T.info
+                : type === 'income'
+                ? T.income
+                : numericAmount > 0
+                ? T.expense
+                : T.text,
+            },
           ]}>
-          {type === 'income' ? '+' : numericAmount > 0 ? '-' : ''}
+          {isTransfer ? '' : type === 'income' ? '+' : numericAmount > 0 ? '-' : ''}
           {fmtAmount(numericAmount)}
           <Text style={styles.amountUnit}> RWF</Text>
         </Text>
@@ -165,61 +285,111 @@ export default function CreateRecord({navigation}: any) {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{paddingBottom: 8}}>
-        {/* AI tip */}
-        <View style={styles.tip}>
-          <Icon name="Sparkles" size={15} color={T.accent} strokeWidth={2.2} />
-          <Text style={styles.tipText}>
-            Most expenses appear automatically from SMS — you rarely need this.
-          </Text>
-        </View>
-
-        {/* Accounts */}
-        {accountList.length > 0 && (
+        {isTransfer ? (
           <>
-            <Text style={styles.sectionLabel}>Account</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.accountRow}>
-              {accountList.map(a => {
-                const on = activeAccount === a.id;
-                const tint = accountTint(a.name ?? '');
+            <View style={styles.tip}>
+              <Icon name="ArrowLeftRight" size={15} color={T.info} strokeWidth={2.2} />
+              <Text style={styles.tipText}>
+                Move money between your own accounts — net-zero, excluded from
+                income and spending.
+              </Text>
+            </View>
+            {accountList.length > 0 && (
+              <>
+                <Text style={styles.sectionLabel}>From</Text>
+                <AccountChips
+                  accounts={accountList}
+                  activeId={activeAccount}
+                  onPick={id => {
+                    setAccountId(id);
+                    if (id === toAccountId) {
+                      setToAccountId('');
+                    }
+                  }}
+                />
+                <Text style={styles.sectionLabel}>To</Text>
+                <AccountChips
+                  accounts={accountList}
+                  activeId={toAccountId}
+                  onPick={setToAccountId}
+                  excludeId={activeAccount}
+                />
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {/* AI tip */}
+            <View style={styles.tip}>
+              <Icon name="Sparkles" size={15} color={T.accent} strokeWidth={2.2} />
+              <Text style={styles.tipText}>
+                Most expenses appear automatically from SMS — you rarely need this.
+              </Text>
+            </View>
+
+            {/* Accounts */}
+            {accountList.length > 0 && (
+              <>
+                <Text style={styles.sectionLabel}>Account</Text>
+                <AccountChips
+                  accounts={accountList}
+                  activeId={activeAccount}
+                  onPick={setAccountId}
+                />
+              </>
+            )}
+
+            {/* Categories */}
+            <Text style={styles.sectionLabel}>Category</Text>
+            <View style={styles.catGrid}>
+              {cats.map(c => {
+                const id = resolveCat(c.name) as CategoryId;
+                const meta = CATS[id];
+                const on = category === c.name;
                 return (
                   <Pressable
-                    key={a.id}
-                    onPress={() => setAccountId(a.id)}
-                    style={[styles.accountChip, on && {borderColor: tint, backgroundColor: tint + '18'}]}>
-                    <Icon name={accountIcon(a.name ?? '', a.type ?? '')} size={15} color={tint} strokeWidth={2} />
-                    <Text style={[styles.accountName, on && {color: T.text}]} numberOfLines={1}>
-                      {a.name}
+                    key={c.name}
+                    onPress={() => {
+                      setCategory(on ? '' : c.name);
+                      setSubcategory('');
+                    }}
+                    style={[styles.catCell, on && {borderColor: meta.color, backgroundColor: meta.color + '14'}]}>
+                    <CatChip cat={id} size={34} />
+                    <Text style={[styles.catLabel, on && {color: T.text}]} numberOfLines={1}>
+                      {c.name}
                     </Text>
                   </Pressable>
                 );
               })}
-            </ScrollView>
+            </View>
+
+            {/* Subcategories — fine-grained tracking under the category */}
+            {subcats.length > 0 && (
+              <>
+                <Text style={[styles.sectionLabel, {marginTop: 12}]}>Subcategory</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.accountRow}>
+                  {subcats.map((s: any) => {
+                    const on = subcategory === s.name;
+                    return (
+                      <Pressable
+                        key={s.name}
+                        onPress={() => setSubcategory(on ? '' : s.name)}
+                        style={[styles.subChip, on && styles.subChipActive]}>
+                        <Text style={{fontSize: 13}}>{s.icon}</Text>
+                        <Text style={[styles.subChipText, on && {color: T.text}]} numberOfLines={1}>
+                          {s.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            )}
           </>
         )}
-
-        {/* Categories */}
-        <Text style={styles.sectionLabel}>Category</Text>
-        <View style={styles.catGrid}>
-          {cats.map(c => {
-            const id = resolveCat(c.name) as CategoryId;
-            const meta = CATS[id];
-            const on = category === c.name;
-            return (
-              <Pressable
-                key={c.name}
-                onPress={() => setCategory(on ? '' : c.name)}
-                style={[styles.catCell, on && {borderColor: meta.color, backgroundColor: meta.color + '14'}]}>
-                <CatChip cat={id} size={34} />
-                <Text style={[styles.catLabel, on && {color: T.text}]} numberOfLines={1}>
-                  {c.name}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
       </ScrollView>
 
       {/* Keypad */}
@@ -249,7 +419,9 @@ export default function CreateRecord({navigation}: any) {
           {opacity: !canSave ? 0.5 : pressed ? 0.85 : 1, marginBottom: insets.bottom + 12},
         ]}>
         <Icon name="Check" size={17} color={T.accentInk} strokeWidth={2.6} />
-        <Text style={styles.saveText}>{saving ? 'Saving…' : 'Save transaction'}</Text>
+        <Text style={styles.saveText}>
+          {saving ? 'Saving…' : isTransfer ? 'Move money' : 'Save transaction'}
+        </Text>
       </Pressable>
     </SafeAreaView>
   );
@@ -281,7 +453,7 @@ const styles = StyleSheet.create({
     padding: 3,
     gap: 2,
   },
-  typeBtn: {paddingHorizontal: 13, paddingVertical: 6, borderRadius: R.pill},
+  typeBtn: {paddingHorizontal: 11, paddingVertical: 6, borderRadius: R.pill},
   typeBtnActive: {backgroundColor: T.accent},
   typeText: {fontFamily: FONTS.semibold, fontSize: 12.5, color: T.text2},
   typeTextActive: {color: T.accentInk},
@@ -338,6 +510,19 @@ const styles = StyleSheet.create({
     borderColor: T.border,
   },
   catLabel: {fontFamily: FONTS.medium, fontSize: 10.5, color: T.text3, paddingHorizontal: 4},
+  subChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    borderRadius: R.small,
+    backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  subChipActive: {borderColor: T.accent, backgroundColor: T.accentSoft},
+  subChipText: {fontFamily: FONTS.medium, fontSize: 12, color: T.text3, maxWidth: 150},
   keypad: {
     flexDirection: 'row',
     flexWrap: 'wrap',

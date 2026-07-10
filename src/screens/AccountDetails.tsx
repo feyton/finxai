@@ -48,8 +48,9 @@ export default function AccountDetails({route, navigation}: any) {
     const groups: Record<string, any[]> = {};
 
     for (const t of transactions as any[]) {
+      // transfers are net-zero across the user's accounts — not income/spend
       if (t.transaction_type === 'income') {income += t.amount ?? 0;}
-      else {expense += t.amount ?? 0;}
+      else if (t.transaction_type === 'expense') {expense += t.amount ?? 0;}
 
       const key = dayLabel(t.date_time);
       if (!groups[key]) {groups[key] = [];}
@@ -63,7 +64,7 @@ export default function AccountDetails({route, navigation}: any) {
         .filter(t => t.transaction_type === 'income')
         .reduce((s: number, t: any) => s + (t.amount ?? 0), 0),
       dayExpense: data
-        .filter(t => t.transaction_type !== 'income')
+        .filter(t => t.transaction_type === 'expense')
         .reduce((s: number, t: any) => s + (t.amount ?? 0), 0),
     }));
 
