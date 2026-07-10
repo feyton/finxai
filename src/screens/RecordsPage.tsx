@@ -317,11 +317,18 @@ export default function RecordsPage({navigation, route}: any) {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Records</Text>
-        <Pressable
-          onPress={() => navigation.navigate('CreateRecord')}
-          style={({pressed}) => [styles.addBtn, {opacity: pressed ? 0.7 : 1}]}>
-          <Icon name="Plus" size={18} color={T.accentInk} strokeWidth={2.5} />
-        </Pressable>
+        <View style={{flexDirection: 'row', gap: 8}}>
+          <Pressable
+            onPress={() => navigation.navigate('CategoryStats')}
+            style={({pressed}) => [styles.statsBtn, {opacity: pressed ? 0.7 : 1}]}>
+            <Icon name="PieChart" size={17} color={T.accent} strokeWidth={2.2} />
+          </Pressable>
+          <Pressable
+            onPress={() => navigation.navigate('CreateRecord')}
+            style={({pressed}) => [styles.addBtn, {opacity: pressed ? 0.7 : 1}]}>
+            <Icon name="Plus" size={18} color={T.accentInk} strokeWidth={2.5} />
+          </Pressable>
+        </View>
       </View>
 
       {/* Money in / out summary */}
@@ -472,6 +479,14 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: 10,
     backgroundColor: T.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statsBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: T.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },

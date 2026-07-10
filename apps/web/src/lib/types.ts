@@ -68,6 +68,15 @@ export interface BudgetItem {
   owner_id: string;
 }
 
+export interface Subcategory {
+  id: string;
+  category: string; // CategoryId: 'food', 'transport', …
+  name: string;
+  icon: string | null;
+  owner_id: string;
+  created_at: string | null;
+}
+
 export interface SplitDetail {
   id: string;
   transaction_id: string;
