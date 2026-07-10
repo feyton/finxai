@@ -73,6 +73,19 @@ const auto_records = new Table({
   created_at: column.text,
 });
 
+// Cross-user account sharing: the owner shares an account by email; the
+// invitee's devices sync the account + its transactions read-only (or
+// reclassify/annotate when access='edit'). See supabase_migration_v4.sql.
+const account_shares = new Table({
+  account_id: column.text,
+  owner_id: column.text,
+  invitee_email: column.text,
+  shared_with_id: column.text,
+  access: column.text,        // 'view' | 'edit'
+  status: column.text,        // 'pending' | 'active'
+  created_at: column.text,
+});
+
 // User-created subcategories, merged with the built-in ones from data.json
 // in every picker (see src/hooks/useSubcategories.ts).
 const subcategories = new Table({
@@ -268,6 +281,7 @@ export const AppSchema = new Schema({
   auto_records,
   ignored_sms,
   subcategories,
+  account_shares,
   transfers,
   budgets,
   budget_items,

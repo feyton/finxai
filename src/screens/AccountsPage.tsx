@@ -16,10 +16,12 @@ import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
 
 function AccountCard({
   account,
+  isShared,
   onPress,
   onLongPress,
 }: {
   account: any;
+  isShared: boolean;
   onPress: () => void;
   onLongPress: () => void;
 }) {
@@ -35,7 +37,15 @@ function AccountCard({
         <Icon name={icon} size={22} color={tint} strokeWidth={2} />
       </View>
       <View style={styles.accountMid}>
-        <Text style={styles.accountName} numberOfLines={1}>{account.name}</Text>
+        <View style={{flexDirection: 'row', alignItems: 'center', gap: 6}}>
+          <Text style={styles.accountName} numberOfLines={1}>{account.name}</Text>
+          {isShared && (
+            <View style={styles.sharedPill}>
+              <Icon name="Users" size={10} color={T.info} strokeWidth={2.4} />
+              <Text style={styles.sharedPillText}>Shared</Text>
+            </View>
+          )}
+        </View>
         <Text style={styles.accountType}>{account.type ?? 'Account'}</Text>
       </View>
       <View style={styles.accountRight}>
@@ -54,18 +64,20 @@ export default function AccountsPage({navigation}: any) {
   const {userId} = useCurrentUser();
   const db = usePowerSync();
 
+  // No owner filter: the local DB holds exactly my accounts + accounts
+  // shared TO me (PowerSync buckets). Own accounts sort first.
   const {data: accounts} = useQuery(
-    'SELECT * FROM accounts WHERE owner_id = ? ORDER BY created_at DESC',
+    'SELECT * FROM accounts ORDER BY (owner_id = ?) DESC, created_at DESC',
     [userId ?? ''],
   );
 
+  // Shared accounts are someone else's money — never in MY total.
   const totalBalance = useMemo(
     () =>
-      (accounts as any[]).reduce(
-        (s: number, a: any) => s + (a.available_balance ?? 0),
-        0,
-      ),
-    [accounts],
+      (accounts as any[])
+        .filter((a: any) => a.owner_id === userId)
+        .reduce((s: number, a: any) => s + (a.available_balance ?? 0), 0),
+    [accounts, userId],
   );
 
   const [toDelete, setToDelete] = useState<any>(null);
@@ -115,8 +127,14 @@ export default function AccountsPage({navigation}: any) {
         renderItem={({item}) => (
           <AccountCard
             account={item}
+            isShared={item.owner_id !== userId}
             onPress={() => navigation.navigate('AccountDetails', {accountId: item.id})}
-            onLongPress={() => openDeleteSheet(item)}
+            onLongPress={() => {
+              // shared-in accounts can't be deleted here — that's the owner's call
+              if (item.owner_id === userId) {
+                openDeleteSheet(item);
+              }
+            }}
           />
         )}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
@@ -225,7 +243,17 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   accountMid: {flex: 1},
-  accountName: {fontFamily: FONTS.semibold, fontSize: 14, color: T.text},
+  accountName: {fontFamily: FONTS.semibold, fontSize: 14, color: T.text, flexShrink: 1},
+  sharedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: R.pill,
+    backgroundColor: 'rgba(96,165,250,0.14)',
+  },
+  sharedPillText: {fontFamily: FONTS.semibold, fontSize: 9, color: T.info},
   accountType: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3, marginTop: 1},
   accountRight: {alignItems: 'flex-end'},
   accountBalance: {fontFamily: FONTS.bold, fontSize: 14, color: T.text},
