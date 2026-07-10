@@ -58,7 +58,8 @@ export function SharedClient({
         .single();
       if (error) throw error;
       setShares(prev => [data as AccountShare, ...prev]);
-      // Best-effort invitation email via our own API (Mailjet).
+      // Best-effort invitation email via our own API (Mailjet). The share
+      // itself is already live — an email failure is a warning, not an error.
       fetch('/api/invite', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -67,7 +68,17 @@ export function SharedClient({
           inviterName: userName,
           inviteeName: target.split('@')[0],
         }),
-      }).catch(() => {});
+      })
+        .then(r => {
+          if (!r.ok) {
+            setErr(
+              'Share created, but the invitation email failed to send — check the Mailjet configuration on the server.',
+            );
+          }
+        })
+        .catch(() => {
+          setErr('Share created, but the invitation email failed to send.');
+        });
       setEmail('');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Share failed');

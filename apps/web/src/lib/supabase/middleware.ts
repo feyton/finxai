@@ -3,7 +3,9 @@ import {NextResponse, type NextRequest} from 'next/server';
 
 type CookieToSet = {name: string; value: string; options: CookieOptions};
 
-const PUBLIC_PATHS = ['/login', '/auth'];
+// /api routes do their own auth (session cookie OR mobile Bearer token) and
+// must return JSON status codes — a 307-to-/login breaks both callers.
+const PUBLIC_PATHS = ['/login', '/auth', '/api'];
 
 /**
  * Refreshes the Supabase session cookie on every request and gates
