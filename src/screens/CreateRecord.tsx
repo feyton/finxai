@@ -10,6 +10,7 @@ import {
 import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {CatChip, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {useSubcategories} from '../hooks/useSubcategories';
 import {CATS, CategoryId, FONTS, R, T, accountIcon, accountTint, fmtAmount, resolveCat} from '../theme';
 import categoriesData from '../tools/data.json';
 
@@ -93,12 +94,8 @@ export default function CreateRecord({navigation}: any) {
     [type],
   );
 
-  const subcats = useMemo(
-    () =>
-      categoriesData.categories.find(c => c.name === category)?.subcategories ??
-      [],
-    [category],
-  );
+  const {subcatsFor} = useSubcategories();
+  const subcats = category ? subcatsFor(resolveCat(category)) : [];
 
   const press = (k: string) => {
     setError('');

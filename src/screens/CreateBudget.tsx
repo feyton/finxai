@@ -12,8 +12,8 @@ import {
 import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {CatChip, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
-import {CATS, CategoryId, FONTS, R, T, fmtAmount, resolveCat} from '../theme';
-import categoriesData from '../tools/data.json';
+import {useSubcategories} from '../hooks/useSubcategories';
+import {CATS, CategoryId, FONTS, R, T, fmtAmount} from '../theme';
 
 function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -65,15 +65,8 @@ export default function CreateBudget({navigation}: any) {
   const activeType = TYPES.find(t => t.id === type)!;
   const total = useMemo(() => items.reduce((s, i) => s + i.amount, 0), [items]);
 
-  const subcatsForPick = useMemo(() => {
-    if (!pickCat) {
-      return [];
-    }
-    const match = (categoriesData.categories as any[]).find(
-      c => resolveCat(c.name) === pickCat,
-    );
-    return (match?.subcategories ?? []) as {name: string; icon: string}[];
-  }, [pickCat]);
+  const {subcatsFor} = useSubcategories();
+  const subcatsForPick = subcatsFor(pickCat);
 
   const addItem = () => {
     const amt = parseFloat(pickAmount.replace(/,/g, '')) || 0;

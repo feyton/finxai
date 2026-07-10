@@ -73,6 +73,16 @@ const auto_records = new Table({
   created_at: column.text,
 });
 
+// User-created subcategories, merged with the built-in ones from data.json
+// in every picker (see src/hooks/useSubcategories.ts).
+const subcategories = new Table({
+  category: column.text,      // CategoryId ('food', 'transport', …)
+  name: column.text,
+  icon: column.text,          // emoji
+  owner_id: column.text,
+  created_at: column.text,
+});
+
 // SMS the user (or the failed-transaction detector) chose to keep out of
 // records — dedupe checks this so they are never re-parsed.
 const ignored_sms = new Table({
@@ -257,6 +267,7 @@ export const AppSchema = new Schema({
   split_details,
   auto_records,
   ignored_sms,
+  subcategories,
   transfers,
   budgets,
   budget_items,

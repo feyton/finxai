@@ -15,6 +15,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {CATS, CategoryId, FONTS, R, T, accountIcon, accountTint, resolveCat} from '../theme';
 import {CatChip, ConfPill, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {useSubcategories} from '../hooks/useSubcategories';
 import {recordChannel, recordConfirmation, recordCorrection} from '../tools/merchantMemory';
 import {extractBalance, regexExtract} from '../tools/claudeParser';
 
@@ -30,6 +31,7 @@ const ALL_CATS = Object.values(CATS);
 export interface Fix {
   merchant: string;
   category: CategoryId;
+  subcategory: string;
   accountId: string;
 }
 
@@ -49,13 +51,17 @@ function FixSheet({
 }) {
   const [merchant, setMerchant] = useState('');
   const [cat, setCat] = useState<CategoryId>('shopping');
+  const [subcategory, setSubcategory] = useState('');
   const [accountId, setAccountId] = useState('');
+  const {subcatsFor} = useSubcategories();
+  const subcats = subcatsFor(cat);
 
   // Re-seed local state each time the sheet opens for a record
   useEffect(() => {
     if (visible) {
       setMerchant(record.merchant || record.payee || '');
       setCat((resolveCat(record.category ?? '') as CategoryId) ?? 'shopping');
+      setSubcategory(record.subcategory ?? '');
       setAccountId(record.account_id ?? '');
     }
   }, [visible, record]);
@@ -120,7 +126,10 @@ function FixSheet({
               return (
                 <Pressable
                   key={c.id}
-                  onPress={() => setCat(c.id)}
+                  onPress={() => {
+                    setCat(c.id);
+                    setSubcategory('');
+                  }}
                   style={({pressed}) => [
                     styles.sheetItem,
                     active && {
@@ -140,10 +149,37 @@ function FixSheet({
               );
             })}
           </View>
+
+          {/* Subcategory — fine-grained tracking under the category */}
+          {subcats.length > 0 && (
+            <>
+              <Text style={styles.fixLabel}>Subcategory</Text>
+              <View style={[styles.sheetGrid, {paddingTop: 0}]}>
+                {subcats.map(s => {
+                  const on = subcategory === s.name;
+                  return (
+                    <Pressable
+                      key={s.name}
+                      onPress={() => setSubcategory(on ? '' : s.name)}
+                      style={({pressed}) => [
+                        styles.subChip,
+                        on && styles.subChipActive,
+                        {opacity: pressed ? 0.75 : 1},
+                      ]}>
+                      <Text style={{fontSize: 12}}>{s.icon}</Text>
+                      <Text style={[styles.subChipText, on && {color: T.text}]} numberOfLines={1}>
+                        {s.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
+          )}
         </ScrollView>
 
         <Pressable
-          onPress={() => onSave({merchant: merchant.trim(), category: cat, accountId})}
+          onPress={() => onSave({merchant: merchant.trim(), category: cat, subcategory, accountId})}
           style={({pressed}) => [styles.fixSave, {opacity: pressed ? 0.85 : 1}]}>
           <Icon name="Check" size={16} color={T.accentInk} strokeWidth={2.6} />
           <Text style={styles.fixSaveText}>Save & confirm</Text>
@@ -333,16 +369,17 @@ export default function SMSReviewScreen({navigation}: any) {
       const dir = regexExtract(record.sms ?? '').direction;
       await db.execute(
         `INSERT INTO transactions
-           (id, amount, account_id, category, date_time, sms, sender,
+           (id, amount, account_id, category, subcategory, date_time, sms, sender,
             payee, merchant, transaction_type, fees, currency,
             confirmed, source, confidence,
             transfer_account_id, transfer_direction, owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?)`,
         [
           uuid(),
           record.amount,
           record.account_id,
           record.category,
+          record.subcategory ?? '',
           record.date_time,
           record.sms,
           record.sender,
@@ -400,16 +437,17 @@ export default function SMSReviewScreen({navigation}: any) {
       const fixDir = regexExtract(record.sms ?? '').direction;
       await db.execute(
         `INSERT INTO transactions
-           (id, amount, account_id, category, date_time, sms, sender,
+           (id, amount, account_id, category, subcategory, date_time, sms, sender,
             payee, merchant, transaction_type, fees, currency,
             confirmed, source, confidence,
             transfer_account_id, transfer_direction, owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?)`,
         [
           uuid(),
           record.amount,
           accountId,
           fix.category,
+          fix.subcategory ?? '',
           record.date_time,
           record.sms,
           record.sender,
@@ -834,6 +872,19 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 8,
   },
+  subChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    borderRadius: R.small,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  subChipActive: {borderColor: T.accent, backgroundColor: T.accentSoft},
+  subChipText: {fontFamily: FONTS.medium, fontSize: 11.5, color: T.text3, maxWidth: 150},
   sheetItem: {
     flexDirection: 'row',
     alignItems: 'center',
