@@ -1,4 +1,27 @@
 {
-  "extends": "@react-native/typescript-config/tsconfig.json",
-  "exclude": ["**/Pods/**", "supabase", "scripts"]
+  // Inlined from @react-native/typescript-config — TypeScript 6.x fails to
+  // apply that base config via "extends" (its "jsx": "react-native" mode was
+  // retired), which silently disabled JSX + jest types for the whole repo.
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "types": ["jest"],
+    "lib": ["es2022"],
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "isolatedModules": true,
+    "strict": true,
+    "moduleResolution": "bundler",
+    "customConditions": ["react-native"],
+    "allowImportingTsExtensions": true,
+    "allowArbitraryExtensions": true,
+    "resolveJsonModule": true,
+    "resolvePackageJsonImports": false,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": false
+  },
+  "exclude": ["**/Pods/**", "supabase", "scripts", "apps", "node_modules"]
 }
