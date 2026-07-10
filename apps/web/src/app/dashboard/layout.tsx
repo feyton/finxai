@@ -48,8 +48,8 @@ export default async function DashboardLayout({
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-[12.5px] font-semibold text-white">{name}</div>
-            <div className="text-[10.5px]" style={{color: 'var(--sidebar-text-2)'}}>
-              Kigali, Rwanda
+            <div className="truncate text-[10.5px]" style={{color: 'var(--sidebar-text-2)'}}>
+              {user.email ?? ''}
             </div>
           </div>
           <form action="/auth/signout" method="post">
