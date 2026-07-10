@@ -1,7 +1,11 @@
 /* eslint-disable react/no-unstable-nested-components */
 import React, {useEffect, useState} from 'react';
-import {ActivityIndicator, PermissionsAndroid, View} from 'react-native';
+import {ActivityIndicator, Alert, PermissionsAndroid, Share, View} from 'react-native';
 import 'react-native-get-random-values';
+import {installCrashReporter, takeLastCrash} from './src/tools/crashReporter';
+
+// Capture fatal JS errors as early as possible.
+installCrashReporter();
 
 import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
@@ -54,6 +58,29 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     requestSmsPermission();
+
+    // If the previous session died on a fatal JS error, show exactly what
+    // happened so it can be reported instead of a bare "keeps stopping".
+    takeLastCrash().then(crash => {
+      if (!crash) {
+        return;
+      }
+      const head = crash.stack.split('\n').slice(0, 5).join('\n');
+      Alert.alert(
+        `FinXAI crashed (v${crash.version})`,
+        `${crash.message}\n\n${head}`,
+        [
+          {text: 'Dismiss', style: 'cancel'},
+          {
+            text: 'Share report',
+            onPress: () =>
+              Share.share({
+                message: `FinXAI crash v${crash.version} at ${crash.at}\n${crash.message}\n\n${crash.stack}`,
+              }).catch(() => {}),
+          },
+        ],
+      );
+    });
 
     supabase.auth.getSession().then(({data: {session: s}}) => {
       setSession(s);

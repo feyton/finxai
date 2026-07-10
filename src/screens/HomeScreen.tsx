@@ -2,6 +2,7 @@ import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {useQuery} from '@powersync/react-native';
 import React, {useEffect, useMemo, useState} from 'react';
 import {
+  Alert,
   FlatList,
   Linking,
   Pressable,
@@ -131,9 +132,20 @@ export default function HomeScreen({navigation}: any) {
     setProgress(0);
     try {
       await downloadAndInstall(update.url, setProgress);
-    } catch {
-      // last-resort fallback: open the download page in the browser
-      Linking.openURL(update.url).catch(() => {});
+    } catch (e: any) {
+      // Never silently hand off to the browser — say what failed and let the
+      // user choose the browser explicitly.
+      Alert.alert(
+        'Update failed',
+        e?.message ?? 'The download did not complete.',
+        [
+          {text: 'Cancel', style: 'cancel'},
+          {
+            text: 'Download in browser',
+            onPress: () => update.url && Linking.openURL(update.url).catch(() => {}),
+          },
+        ],
+      );
     } finally {
       setInstalling(false);
     }

@@ -64,6 +64,7 @@ export default function ProfilePage({navigation}: any) {
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [updateReady, setUpdateReady] = useState<string | null>(null);
+  const [installPct, setInstallPct] = useState<number | null>(null);
 
   const {data: accounts} = useQuery(
     'SELECT name, auto FROM accounts WHERE owner_id = ?',
@@ -120,8 +121,31 @@ export default function ProfilePage({navigation}: any) {
     ]);
   };
 
+  // Downloads in-app with progress; on failure the browser is an EXPLICIT
+  // user choice (never a silent fallback — that was landing people in Chrome).
+  const installUpdate = async (url: string) => {
+    setInstallPct(0);
+    try {
+      await downloadAndInstall(url, f => setInstallPct(Math.round(f * 100)));
+    } catch (e: any) {
+      Alert.alert(
+        'Update failed',
+        e?.message ?? 'The download did not complete.',
+        [
+          {text: 'Cancel', style: 'cancel'},
+          {
+            text: 'Download in browser',
+            onPress: () => Linking.openURL(url).catch(() => {}),
+          },
+        ],
+      );
+    } finally {
+      setInstallPct(null);
+    }
+  };
+
   const runUpdateCheck = async () => {
-    if (checking) {
+    if (checking || installPct != null) {
       return;
     }
     setChecking(true);
@@ -135,11 +159,7 @@ export default function ProfilePage({navigation}: any) {
             {text: 'Later', style: 'cancel'},
             {
               text: 'Install',
-              onPress: () =>
-                info.url &&
-                downloadAndInstall(info.url).catch(
-                  () => info.url && Linking.openURL(info.url),
-                ),
+              onPress: () => info.url && installUpdate(info.url),
             },
           ],
         );
@@ -313,10 +333,16 @@ export default function ProfilePage({navigation}: any) {
             icon="RefreshCcw"
             tint={T.accent}
             title="Check for updates"
-            sub={updateReady ? `Version ${updateReady} available` : `Version ${APP_VERSION}`}
+            sub={
+              installPct != null
+                ? `Downloading update… ${installPct}%`
+                : updateReady
+                ? `Version ${updateReady} available`
+                : `Version ${APP_VERSION}`
+            }
             onPress={runUpdateCheck}
             right={
-              checking ? (
+              checking || installPct != null ? (
                 <ActivityIndicator size="small" color={T.text3} />
               ) : updateReady ? (
                 <View style={styles.badge}>
