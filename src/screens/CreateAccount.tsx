@@ -3,7 +3,6 @@ import React, {useRef, useState} from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -157,7 +156,7 @@ export default function CreateAccount({navigation}: any) {
     <SafeAreaView style={styles.root}>
       <KeyboardAvoidingView
         style={{flex: 1}}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        behavior="padding">
         {/* Header */}
         <View style={styles.header}>
           <Pressable

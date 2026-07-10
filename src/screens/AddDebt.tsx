@@ -2,7 +2,6 @@ import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useMemo, useState} from 'react';
 import {
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -142,7 +141,7 @@ export default function AddDebt({navigation}: any) {
 
       <KeyboardAvoidingView
         style={{flex: 1}}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        behavior="padding">
       <ScrollView
         style={{flex: 1}}
         showsVerticalScrollIndicator={false}
