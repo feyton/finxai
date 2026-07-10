@@ -13,6 +13,7 @@ import DatePicker from 'react-native-date-picker';
 import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {buildSchedule, buildScheduleWithPayment, nthDue} from '../tools/amortize';
 import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
 
 function generateUUID(): string {
@@ -24,18 +25,6 @@ function generateUUID(): string {
 
 type Dir = 'borrowed' | 'lent';
 const CADENCES = ['Weekly', 'Monthly', 'One-off'];
-
-function addPeriod(base: Date, cadence: string, n: number): Date {
-  const d = new Date(base);
-  if (cadence === 'Weekly') {
-    d.setDate(d.getDate() + 7 * n);
-  } else if (cadence === 'Monthly') {
-    d.setMonth(d.getMonth() + n);
-  } else {
-    d.setMonth(d.getMonth() + n); // one-off: single due next month
-  }
-  return d;
-}
 
 export default function AddDebt({navigation}: any) {
   const db = usePowerSync();
@@ -57,32 +46,50 @@ export default function AddDebt({navigation}: any) {
   const [installment, setInstallment] = useState('');
   const [term, setTerm] = useState('');
   const [alreadyPaid, setAlreadyPaid] = useState('');
+  const [balanceNow, setBalanceNow] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // First due is the USER'S date — real loans have a contract schedule, not
-  // "one period after whenever I got around to adding this". The cadence only
-  // seeds a default until the user picks a date themselves.
-  const [firstDue, setFirstDue] = useState<Date>(() => addPeriod(new Date(), 'Monthly', 1));
+  // Real loans have a contract schedule: a disbursement (start) date and a
+  // first due date — never "one period after whenever I added this". The
+  // cadence only seeds a default until the user picks dates themselves.
+  const [startDate, setStartDate] = useState<Date>(() => new Date());
+  const [firstDue, setFirstDue] = useState<Date>(() => nthDue(new Date(), 'Monthly', 1));
   const [dueTouched, setDueTouched] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerFor, setPickerFor] = useState<'start' | 'due' | null>(null);
 
   const pickCadence = (c: string) => {
     setCadence(c);
     if (!dueTouched) {
-      setFirstDue(addPeriod(new Date(), c, 1));
+      setFirstDue(nthDue(new Date(), c === 'Weekly' ? 'Weekly' : 'Monthly', 1));
     }
   };
 
   const activeAccount = accountId || accountList[0]?.id || '';
   const paidN = cadence === 'One-off' ? 0 : Math.max(0, parseInt(alreadyPaid, 10) || 0);
 
-  // Schedule anchored to the chosen first-due date; entry n falls n-1 periods
-  // after it. Past dates are fine — that's how a loan taken months ago works.
-  const scheduleDates = useMemo(() => {
+  // Bank-style amortized schedule: daily interest accrual from the start
+  // date, month-end anchoring, installment solved from principal+rate+term
+  // (verified against a real BK schedule in __tests__/amortize.test.ts).
+  // A manually-entered installment overrides the solved payment.
+  const schedule = useMemo(() => {
+    const principalN = parseFloat(principal.replace(/,/g, '')) || 0;
     const termN = cadence === 'One-off' ? 1 : parseInt(term, 10) || 0;
-    return Array.from({length: termN}, (_, i) => addPeriod(firstDue, cadence, i));
-  }, [firstDue, cadence, term]);
+    const rateN = parseFloat(rate) || 0;
+    if (principalN <= 0 || termN <= 0) {
+      return [];
+    }
+    const input = {
+      principal: principalN,
+      annualRatePct: rateN,
+      term: termN,
+      cadence,
+      firstDue,
+      startDate,
+    };
+    const manual = parseFloat(installment.replace(/,/g, '')) || 0;
+    return manual > 0 ? buildScheduleWithPayment(input, manual) : buildSchedule(input);
+  }, [principal, rate, term, cadence, firstDue, startDate, installment]);
 
   const save = async () => {
     const principalN = parseFloat(principal.replace(/,/g, '')) || 0;
@@ -105,14 +112,27 @@ export default function AddDebt({navigation}: any) {
       setError('Already-paid must be less than the number of payments');
       return;
     }
+    if (schedule.length === 0) {
+      setError('Check the principal and payments');
+      return;
+    }
     setSaving(true);
     try {
       const now = new Date().toISOString();
       const debtId = generateUUID();
-      const inst = installmentN || (termN > 0 ? Math.round(principalN / termN) : principalN);
-      const outstanding = Math.max(0, principalN - inst * paidN);
+      const inst = schedule[0]?.amount ?? installmentN;
+      // Outstanding: the bank's own figure wins if given; otherwise the
+      // amortized remaining after the already-paid installments (NOT
+      // principal − n×installment — that ignores interest entirely).
+      const bankBalance = parseFloat(balanceNow.replace(/,/g, '')) || 0;
+      const outstanding =
+        bankBalance > 0
+          ? bankBalance
+          : paidN > 0
+          ? schedule[paidN - 1].remaining
+          : principalN;
       // next_due = the first UNPAID installment, not "today + a period"
-      const nextDue = scheduleDates[paidN] ?? firstDue;
+      const nextDue = schedule[paidN]?.due ?? firstDue;
       await db.execute(
         'INSERT INTO debts (id, dir, party, sub, principal, outstanding, rate, frequency, installment, next_due, account_id, term, paid, tint, icon, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
@@ -135,20 +155,14 @@ export default function AddDebt({navigation}: any) {
           now,
         ],
       );
-      // Build the repayment schedule the AI will use for reminders + payoff.
-      for (let n = 1; n <= termN; n++) {
-        const status = n <= paidN ? 'paid' : n === paidN + 1 ? 'due' : 'upcoming';
+      // Persist the amortized schedule (per-row amounts — the final payment
+      // differs) for reminders, payoff projections and mark-paid math.
+      for (const row of schedule) {
+        const status =
+          row.n <= paidN ? 'paid' : row.n === paidN + 1 ? 'due' : 'upcoming';
         await db.execute(
           'INSERT INTO debt_schedules (id, debt_id, n, due_date, amount, status, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [
-            generateUUID(),
-            debtId,
-            n,
-            scheduleDates[n - 1].toISOString(),
-            inst,
-            status,
-            userId ?? '',
-          ],
+          [generateUUID(), debtId, row.n, row.due.toISOString(), row.amount, status, userId ?? ''],
         );
       }
       navigation.goBack();
@@ -267,25 +281,34 @@ export default function AddDebt({navigation}: any) {
 
         {/* Schedule inputs */}
         <View style={styles.card}>
+          <Field label="Start date">
+            <Pressable
+              onPress={() => setPickerFor('start')}
+              style={({pressed}) => [styles.dateBtn, {opacity: pressed ? 0.7 : 1}]}>
+              <Icon name="Calendar" size={14} color={T.info} strokeWidth={2.2} />
+              <Text style={styles.dateText}>{startDate.toDateString().slice(4)}</Text>
+            </Pressable>
+          </Field>
+          <View style={styles.divider} />
+          <Field label={cadence === 'One-off' ? 'Due date' : 'First due'}>
+            <Pressable
+              onPress={() => setPickerFor('due')}
+              style={({pressed}) => [styles.dateBtn, {opacity: pressed ? 0.7 : 1}]}>
+              <Icon name="Calendar" size={14} color={T.accent} strokeWidth={2.2} />
+              <Text style={styles.dateText}>{firstDue.toDateString().slice(4)}</Text>
+            </Pressable>
+          </Field>
+          <View style={styles.divider} />
           <Field label="Installment">
             <TextInput
               value={installment}
               onChangeText={setInstallment}
-              placeholder="auto"
+              placeholder={schedule[0] ? fmtAmount(schedule[0].amount) : 'auto'}
               placeholderTextColor={T.text3}
               keyboardType="numeric"
               style={[styles.input, {fontFamily: FONTS.semibold}]}
             />
             <Text style={styles.unit}>RWF</Text>
-          </Field>
-          <View style={styles.divider} />
-          <Field label={cadence === 'One-off' ? 'Due date' : 'First due'}>
-            <Pressable
-              onPress={() => setPickerOpen(true)}
-              style={({pressed}) => [styles.dateBtn, {opacity: pressed ? 0.7 : 1}]}>
-              <Icon name="Calendar" size={14} color={T.accent} strokeWidth={2.2} />
-              <Text style={styles.dateText}>{firstDue.toDateString().slice(4)}</Text>
-            </Pressable>
           </Field>
           {cadence !== 'One-off' && (
             <>
@@ -311,23 +334,50 @@ export default function AddDebt({navigation}: any) {
                   style={styles.input}
                 />
               </Field>
+              {paidN > 0 && (
+                <>
+                  <View style={styles.divider} />
+                  <Field label="Balance now">
+                    <TextInput
+                      value={balanceNow}
+                      onChangeText={setBalanceNow}
+                      placeholder={
+                        schedule[paidN - 1]
+                          ? fmtAmount(schedule[paidN - 1].remaining)
+                          : 'from your bank'
+                      }
+                      placeholderTextColor={T.text3}
+                      keyboardType="numeric"
+                      style={styles.input}
+                    />
+                    <Text style={styles.unit}>RWF</Text>
+                  </Field>
+                </>
+              )}
             </>
           )}
         </View>
 
-        {/* Schedule preview so the dates are visible BEFORE saving */}
-        {scheduleDates.length > 0 && (
+        {/* Amortized preview — the numbers the bank would show, BEFORE saving */}
+        {schedule.length > 0 && (
           <View style={styles.previewCard}>
             <Text style={styles.previewTitle}>
-              {scheduleDates.length} payment{scheduleDates.length === 1 ? '' : 's'}
-              {paidN > 0 ? ` · ${paidN} already settled` : ''}
+              {schedule.length} payment{schedule.length === 1 ? '' : 's'} ·{' '}
+              {fmtAmount(schedule[0].amount)} RWF
+              {schedule.length > 1 && schedule[schedule.length - 1].amount !== schedule[0].amount
+                ? ` (last ${fmtAmount(schedule[schedule.length - 1].amount)})`
+                : ''}
+              {paidN > 0 ? ` · ${paidN} settled` : ''}
             </Text>
             <Text style={styles.previewText}>
-              {scheduleDates[paidN]
-                ? `Next due ${scheduleDates[paidN].toDateString().slice(4)}`
+              {schedule[paidN]
+                ? `Next due ${schedule[paidN].due.toDateString().slice(4)}`
                 : ''}
-              {scheduleDates.length > 1
-                ? ` · last ${scheduleDates[scheduleDates.length - 1].toDateString().slice(4)}`
+              {schedule.length > 1
+                ? ` · last ${schedule[schedule.length - 1].due.toDateString().slice(4)}`
+                : ''}
+              {paidN > 0 && schedule[paidN - 1]
+                ? ` · balance ≈ ${fmtAmount(schedule[paidN - 1].remaining)} RWF`
                 : ''}
             </Text>
           </View>
@@ -335,16 +385,29 @@ export default function AddDebt({navigation}: any) {
 
         <DatePicker
           modal
-          open={pickerOpen}
-          date={firstDue}
+          open={pickerFor !== null}
+          date={pickerFor === 'start' ? startDate : firstDue}
           mode="date"
-          title={cadence === 'One-off' ? 'Due date' : 'First payment due'}
+          title={
+            pickerFor === 'start'
+              ? 'Loan start (disbursement)'
+              : cadence === 'One-off'
+              ? 'Due date'
+              : 'First payment due'
+          }
           onConfirm={d => {
-            setFirstDue(d);
-            setDueTouched(true);
-            setPickerOpen(false);
+            if (pickerFor === 'start') {
+              setStartDate(d);
+              if (!dueTouched) {
+                setFirstDue(nthDue(d, cadence === 'Weekly' ? 'Weekly' : 'Monthly', 1));
+              }
+            } else {
+              setFirstDue(d);
+              setDueTouched(true);
+            }
+            setPickerFor(null);
           }}
-          onCancel={() => setPickerOpen(false)}
+          onCancel={() => setPickerFor(null)}
         />
 
         {/* AI note */}

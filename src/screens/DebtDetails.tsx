@@ -4,10 +4,12 @@
 import {usePowerSync, useQuery} from '@powersync/react-native';
 import {format} from 'date-fns';
 import React from 'react';
-import {Alert, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Icon, Progress} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {appAlert} from '../Components/AppDialog';
+import {outstandingAfter} from '../tools/amortize';
 import {FONTS, R, T, fmtAmount} from '../theme';
 
 function fmtDay(d?: string | null): string {
@@ -51,9 +53,13 @@ export default function DebtDetails({route, navigation}: any) {
     }
     const paidCount = updated.filter(r => r.status === 'paid').length;
     const firstUnpaid = updated.find(r => r.status !== 'paid');
-    const outstanding = Math.max(
-      0,
-      (debt.principal ?? 0) - (debt.installment ?? 0) * paidCount,
+    // Amortized remaining balance (interest-aware) — NOT principal minus a
+    // multiple of the installment, which overstates progress on real loans.
+    const outstanding = outstandingAfter(
+      debt.principal ?? 0,
+      debt.rate ?? 0,
+      updated.map(r => ({due_date: r.due_date, amount: r.amount ?? 0})),
+      paidCount,
     );
     await db.execute(
       'UPDATE debts SET paid = ?, outstanding = ?, next_due = ? WHERE id = ?',
@@ -63,7 +69,7 @@ export default function DebtDetails({route, navigation}: any) {
 
   const onRowPress = (row: any) => {
     const isPaid = row.status === 'paid';
-    Alert.alert(
+    appAlert(
       isPaid ? 'Mark as unpaid?' : 'Mark as paid?',
       `Payment ${row.n} · ${fmtAmount(row.amount ?? 0)} RWF · due ${fmtDay(row.due_date)}`,
       [
@@ -77,7 +83,7 @@ export default function DebtDetails({route, navigation}: any) {
   };
 
   const deleteDebt = () => {
-    Alert.alert('Delete this debt?', `${debt?.party} and its schedule will be removed.`, [
+    appAlert('Delete this debt?', `${debt?.party} and its schedule will be removed.`, [
       {text: 'Cancel', style: 'cancel'},
       {
         text: 'Delete',
