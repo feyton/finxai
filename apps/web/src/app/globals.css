@@ -92,7 +92,7 @@
   }
 
   .card {
-    @apply rounded-[14px] border border-line bg-surface;
+    @apply rounded-[14px] border border-line bg-surface p-4;
     box-shadow: var(--shadow);
   }
 
