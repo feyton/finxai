@@ -4,9 +4,9 @@ import React, {useMemo, useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import Svg, {Circle} from 'react-native-svg';
-import {Avatar, Card, CatChip, Icon, Pill, Progress} from '../Components/ui';
+import {Avatar, Card, Icon, Pill, Progress} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
-import {CATS, CategoryId, FONTS, R, T, fmtAmount, resolveCat} from '../theme';
+import {CATS, FONTS, R, T, fmtAmount, resolveCat} from '../theme';
 
 function monthStart() {
   const d = new Date();
@@ -20,6 +20,12 @@ function monthLabel() {
   const month = d.toLocaleString('en-US', {month: 'long', year: 'numeric'});
   return `${month} · resets in ${daysLeft || 'less than a'} day${daysLeft === 1 ? '' : 's'}`;
 }
+
+const EVENT_EMOJI: Record<string, string> = {
+  category: '📊',
+  shared: '🏠',
+  party: '🎉',
+};
 
 // Circular progress ring
 function Ring({pct, size = 74}: {pct: number; size?: number}) {
@@ -60,18 +66,80 @@ function AvatarStack({people}: {people: any[]}) {
   );
 }
 
+// Spending for one budget: explicitly claimed rows always count; category
+// budgets ALSO auto-match unclaimed expenses in the period by item category.
+export function computeBudgetSpend(b: any, items: any[], rows: any[]) {
+  const isCategoryBudget = !b.event || b.event === '' || b.event === 'category';
+  let winStart: string;
+  let winEnd: string;
+  if (b.recurring) {
+    const d = new Date();
+    winStart = new Date(d.getFullYear(), d.getMonth(), 1).toISOString();
+    winEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59).toISOString();
+  } else {
+    winStart = b.start_date ?? '';
+    winEnd = b.end_date ?? '9999';
+  }
+  const itemCats = new Set(items.map((it: any) => resolveCat(it.category ?? '')));
+
+  let claimedSpent = 0;
+  let autoSpent = 0;
+  let contributions = 0;
+  for (const r of rows) {
+    if (r.budget_id === b.id) {
+      if (r.transaction_type === 'income') {
+        contributions += r.amount ?? 0;
+      } else {
+        claimedSpent += r.amount ?? 0;
+      }
+      continue;
+    }
+    if (
+      isCategoryBudget &&
+      !r.budget_id &&
+      r.transaction_type === 'expense' &&
+      (r.date_time ?? '') >= winStart &&
+      (r.date_time ?? '') <= winEnd &&
+      itemCats.has(resolveCat(r.category ?? ''))
+    ) {
+      autoSpent += r.amount ?? 0;
+    }
+  }
+  return {
+    spent: claimedSpent + autoSpent,
+    claimedSpent,
+    autoSpent,
+    contributions,
+    winStart,
+    winEnd,
+    isCategoryBudget,
+  };
+}
+
 export default function BudgetScreen({navigation}: any) {
   const {userId} = useCurrentUser();
   const tabBarHeight = useBottomTabBarHeight();
   const [tab, setTab] = useState<'spending' | 'shared'>('spending');
 
-  const {data: items} = useQuery(
-    'SELECT bi.category, bi.amount FROM budget_items bi JOIN budgets b ON bi.budget_id = b.id WHERE bi.owner_id = ?',
+  const {data: budgetRows} = useQuery(
+    'SELECT * FROM budgets WHERE owner_id = ? ORDER BY created_at DESC',
     [userId ?? ''],
   );
-  const {data: monthTxns} = useQuery(
-    "SELECT category, amount FROM transactions WHERE owner_id = ? AND transaction_type = 'expense' AND date_time >= ?",
-    [userId ?? '', monthStart()],
+  const {data: items} = useQuery(
+    'SELECT * FROM budget_items WHERE owner_id = ?',
+    [userId ?? ''],
+  );
+  // Effective category rows: split parts replace the parent's single
+  // category; unsplit transactions appear once as themselves.
+  const {data: effRows} = useQuery(
+    `SELECT t.id, t.budget_id, t.date_time, t.transaction_type,
+            COALESCE(s.category, t.category) AS category,
+            COALESCE(s.amount, t.amount) AS amount
+     FROM transactions t
+     LEFT JOIN split_details s ON s.transaction_id = t.id
+     WHERE t.owner_id = ? AND t.transaction_type IN ('expense','income')
+       AND t.date_time >= ?`,
+    [userId ?? '', new Date(Date.now() - 180 * 24 * 3600 * 1000).toISOString()],
   );
   const {data: groups} = useQuery(
     'SELECT * FROM budget_groups WHERE owner_id = ? ORDER BY created_at DESC',
@@ -83,26 +151,24 @@ export default function BudgetScreen({navigation}: any) {
   );
 
   const budgets = useMemo(() => {
-    const limits = {} as Record<CategoryId, number>;
+    const itemsByBudget: Record<string, any[]> = {};
     for (const it of items as any[]) {
-      const id = resolveCat(it.category ?? '');
-      limits[id] = (limits[id] ?? 0) + (it.amount ?? 0);
+      if (!itemsByBudget[it.budget_id]) {
+        itemsByBudget[it.budget_id] = [];
+      }
+      itemsByBudget[it.budget_id].push(it);
     }
-    const spent = {} as Record<CategoryId, number>;
-    for (const t of monthTxns as any[]) {
-      const id = resolveCat(t.category ?? '');
-      spent[id] = (spent[id] ?? 0) + (t.amount ?? 0);
-    }
-    const list = (Object.keys(limits) as CategoryId[]).map(id => ({
-      cat: id,
-      limit: limits[id],
-      spent: spent[id] ?? 0,
-    }));
-    const totalLimit = list.reduce((s, b) => s + b.limit, 0);
+    const list = (budgetRows as any[]).map(b => {
+      const bItems = itemsByBudget[b.id] ?? [];
+      const planned = bItems.reduce((s, it) => s + (it.amount ?? 0), 0);
+      const spend = computeBudgetSpend(b, bItems, effRows as any[]);
+      return {...b, items: bItems, planned, ...spend};
+    });
+    const totalLimit = list.reduce((s, b) => s + b.planned, 0);
     const totalSpent = list.reduce((s, b) => s + b.spent, 0);
-    const over = list.filter(b => b.spent > b.limit);
+    const over = list.filter(b => b.planned > 0 && b.spent > b.planned);
     return {list, totalLimit, totalSpent, over};
-  }, [items, monthTxns]);
+  }, [budgetRows, items, effRows]);
 
   const contributorsByGroup = useMemo(() => {
     const map: Record<string, any[]> = {};
@@ -136,7 +202,7 @@ export default function BudgetScreen({navigation}: any) {
 
       {/* Tabs */}
       <View style={styles.tabRow}>
-        {([['spending', 'My spending'], ['shared', 'Shared & goals']] as const).map(([id, label]) => (
+        {([['spending', 'My budgets'], ['shared', 'Shared & goals']] as const).map(([id, label]) => (
           <Pressable
             key={id}
             onPress={() => setTab(id)}
@@ -154,8 +220,10 @@ export default function BudgetScreen({navigation}: any) {
             {budgets.list.length === 0 ? (
               <Card style={{alignItems: 'center', gap: 6}} pad={24}>
                 <Icon name="PieChart" size={36} color={T.text3} strokeWidth={1.5} />
-                <Text style={styles.emptyText}>No category budgets yet</Text>
-                <Text style={styles.emptyHint}>Create one to cap spending per category</Text>
+                <Text style={styles.emptyText}>No budgets yet</Text>
+                <Text style={styles.emptyHint}>
+                  Create one — a monthly cap, or an event like a birthday party
+                </Text>
               </Card>
             ) : (
               <>
@@ -180,41 +248,66 @@ export default function BudgetScreen({navigation}: any) {
                     <Icon name="AlertCircle" size={18} color={T.expense} strokeWidth={2} />
                     <Text style={styles.alertText}>
                       <Text style={{color: T.text, fontFamily: FONTS.semibold}}>
-                        {CATS[budgets.over[0].cat].label}
+                        {budgets.over[0].name}
                       </Text>
                       {' is over by '}
-                      {fmtAmount(budgets.over[0].spent - budgets.over[0].limit)}
-                      {' RWF this month.'}
+                      {fmtAmount(budgets.over[0].spent - budgets.over[0].planned)}
+                      {' RWF.'}
                     </Text>
                   </View>
                 )}
 
-                {/* Category budgets */}
+                {/* Budget cards */}
                 <View style={{gap: 10}}>
                   {budgets.list.map(b => {
-                    const c = CATS[b.cat];
-                    const p = Math.round((b.spent / Math.max(b.limit, 1)) * 100);
-                    const over = b.spent > b.limit;
+                    const p = b.planned > 0 ? Math.round((b.spent / b.planned) * 100) : 0;
+                    const over = b.planned > 0 && b.spent > b.planned;
+                    const emoji = EVENT_EMOJI[b.event ?? 'category'] ?? '📊';
+                    const topCat = b.items[0] ? resolveCat(b.items[0].category ?? '') : 'shopping';
+                    const tint = over ? T.expense : CATS[topCat].color;
                     return (
-                      <Card key={b.cat} pad={13}>
-                        <View style={styles.budgetHead}>
-                          <CatChip cat={b.cat} size={34} />
-                          <View style={{flex: 1}}>
-                            <Text style={styles.budgetLabel}>{c.label}</Text>
-                            <Text style={styles.mutedSmall}>
-                              {fmtAmount(b.spent)} / {fmtAmount(b.limit)} RWF
-                            </Text>
-                          </View>
-                          <Text
-                            style={[
-                              styles.budgetPct,
-                              {color: over ? T.expense : p > 85 ? T.warn : T.text2},
-                            ]}>
-                            {p}%
-                          </Text>
-                        </View>
-                        <Progress value={b.spent} max={b.limit} color={c.color} />
-                      </Card>
+                      <Pressable
+                        key={b.id}
+                        onPress={() => navigation.navigate('BudgetDetails', {budgetId: b.id})}>
+                        {({pressed}) => (
+                          <Card pad={13} style={{opacity: pressed ? 0.85 : 1}}>
+                            <View style={styles.budgetHead}>
+                              <View style={[styles.emojiTile, {backgroundColor: tint + '18'}]}>
+                                <Text style={{fontSize: 18}}>{emoji}</Text>
+                              </View>
+                              <View style={{flex: 1, minWidth: 0}}>
+                                <View style={{flexDirection: 'row', alignItems: 'center', gap: 7}}>
+                                  <Text style={styles.budgetLabel} numberOfLines={1}>{b.name}</Text>
+                                  {!!b.recurring && (
+                                    <Icon name="Repeat" size={12} color={T.text3} strokeWidth={2} />
+                                  )}
+                                </View>
+                                <Text style={styles.mutedSmall}>
+                                  {fmtAmount(b.spent)} / {fmtAmount(b.planned)} RWF
+                                  {' · '}
+                                  {b.items.length} item{b.items.length === 1 ? '' : 's'}
+                                </Text>
+                                {b.contributions > 0 && (
+                                  <Text style={styles.contribText}>
+                                    +{fmtAmount(b.contributions)} RWF contributed
+                                  </Text>
+                                )}
+                              </View>
+                              <View style={{alignItems: 'flex-end', gap: 3}}>
+                                <Text
+                                  style={[
+                                    styles.budgetPct,
+                                    {color: over ? T.expense : p > 85 ? T.warn : T.text2},
+                                  ]}>
+                                  {p}%
+                                </Text>
+                                <Icon name="ChevronRight" size={15} color={T.text3} strokeWidth={2} />
+                              </View>
+                            </View>
+                            <Progress value={b.spent} max={Math.max(b.planned, 1)} color={tint} />
+                          </Card>
+                        )}
+                      </Pressable>
                     );
                   })}
                 </View>
@@ -329,6 +422,7 @@ const styles = StyleSheet.create({
   },
   mutedLabel: {fontFamily: FONTS.regular, fontSize: 11.5, color: T.text2},
   mutedSmall: {fontFamily: FONTS.regular, fontSize: 11, color: T.text2, marginTop: 1},
+  contribText: {fontFamily: FONTS.semibold, fontSize: 10.5, color: T.income, marginTop: 1},
   leftAmount: {fontFamily: FONTS.bold, fontSize: 24, color: T.text, marginTop: 2},
   unit: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3},
   alert: {
@@ -343,7 +437,7 @@ const styles = StyleSheet.create({
   },
   alertText: {flex: 1, fontFamily: FONTS.regular, fontSize: 12.5, color: T.text2, lineHeight: 18},
   budgetHead: {flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 9},
-  budgetLabel: {fontFamily: FONTS.semibold, fontSize: 13, color: T.text},
+  budgetLabel: {fontFamily: FONTS.semibold, fontSize: 13, color: T.text, flexShrink: 1},
   budgetPct: {fontFamily: FONTS.bold, fontSize: 12.5},
   sharedBanner: {
     flexDirection: 'row',
@@ -367,5 +461,5 @@ const styles = StyleSheet.create({
   groupFoot: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 7},
   groupSpent: {fontFamily: FONTS.semibold, fontSize: 11.5, color: T.text},
   emptyText: {fontFamily: FONTS.semibold, fontSize: 14, color: T.text2},
-  emptyHint: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3},
+  emptyHint: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3, textAlign: 'center'},
 });
