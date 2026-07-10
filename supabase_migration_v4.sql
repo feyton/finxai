@@ -86,6 +86,36 @@ CREATE TRIGGER on_auth_user_created_link_shares
   FOR EACH ROW EXECUTE FUNCTION public.link_pending_shares_for_new_user();
 
 -- ── RLS ─────────────────────────────────────────────────────────────────────
+-- RLS policies must NOT reference each other's tables directly: a policy on
+-- accounts querying account_shares whose policies query accounts again makes
+-- Postgres raise 42P17 "infinite recursion detected in policy". The standard
+-- fix: cross-table checks live in SECURITY DEFINER helpers — they run as the
+-- function owner, RLS does not apply inside them, so the cycle is broken.
+
+CREATE OR REPLACE FUNCTION public.user_owns_account(aid uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM accounts a WHERE a.id = aid AND a.owner_id = auth.uid()
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.has_account_share(aid uuid, need_edit boolean DEFAULT false)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM account_shares s
+    WHERE s.account_id = aid
+      AND s.shared_with_id = auth.uid()
+      AND s.status = 'active'
+      AND (NOT need_edit OR s.access = 'edit')
+  );
+$$;
+
 ALTER TABLE account_shares ENABLE ROW LEVEL SECURITY;
 
 -- Owner manages shares of accounts they actually own.
@@ -93,13 +123,7 @@ DROP POLICY IF EXISTS "Owners manage their shares" ON account_shares;
 CREATE POLICY "Owners manage their shares" ON account_shares
   FOR ALL
   USING (owner_id = auth.uid())
-  WITH CHECK (
-    owner_id = auth.uid()
-    AND EXISTS (
-      SELECT 1 FROM accounts a
-      WHERE a.id = account_id AND a.owner_id = auth.uid()
-    )
-  );
+  WITH CHECK (owner_id = auth.uid() AND public.user_owns_account(account_id));
 
 -- Invitee can see shares addressed to them.
 DROP POLICY IF EXISTS "Invitees see their shares" ON account_shares;
@@ -109,48 +133,19 @@ CREATE POLICY "Invitees see their shares" ON account_shares
 -- Shared visibility on the data itself (additive to the owner policies).
 DROP POLICY IF EXISTS "Shared users read accounts" ON accounts;
 CREATE POLICY "Shared users read accounts" ON accounts
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM account_shares s
-      WHERE s.account_id = accounts.id
-        AND s.shared_with_id = auth.uid()
-        AND s.status = 'active'
-    )
-  );
+  FOR SELECT USING (public.has_account_share(id));
 
 DROP POLICY IF EXISTS "Shared users read transactions" ON transactions;
 CREATE POLICY "Shared users read transactions" ON transactions
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM account_shares s
-      WHERE s.account_id = transactions.account_id
-        AND s.shared_with_id = auth.uid()
-        AND s.status = 'active'
-    )
-  );
+  FOR SELECT USING (public.has_account_share(account_id));
 
 -- access='edit' → the invitee may reclassify / annotate (UPDATE only; they
 -- can never insert into or delete from someone else's account).
 DROP POLICY IF EXISTS "Shared editors update transactions" ON transactions;
 CREATE POLICY "Shared editors update transactions" ON transactions
-  FOR UPDATE USING (
-    EXISTS (
-      SELECT 1 FROM account_shares s
-      WHERE s.account_id = transactions.account_id
-        AND s.shared_with_id = auth.uid()
-        AND s.status = 'active'
-        AND s.access = 'edit'
-    )
-  )
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM account_shares s
-      WHERE s.account_id = transactions.account_id
-        AND s.shared_with_id = auth.uid()
-        AND s.status = 'active'
-        AND s.access = 'edit'
-    )
-  );
+  FOR UPDATE
+  USING (public.has_account_share(account_id, true))
+  WITH CHECK (public.has_account_share(account_id, true));
 
 -- ── PowerSync publication ───────────────────────────────────────────────────
 DO $$
