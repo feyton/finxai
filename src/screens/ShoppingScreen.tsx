@@ -1,6 +1,7 @@
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useMemo, useState} from 'react';
 import {
+  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -36,9 +37,11 @@ export default function ShoppingScreen({navigation}: any) {
 
   const [addingList, setAddingList] = useState<string | null>(null);
   const [itemText, setItemText] = useState('');
+  const [itemQty, setItemQty] = useState('');
   const [itemCost, setItemCost] = useState('');
   const [newListOpen, setNewListOpen] = useState(false);
   const [newListName, setNewListName] = useState('');
+  const [menuList, setMenuList] = useState<any>(null);
 
   const byList = useMemo(() => {
     const map: Record<string, any[]> = {};
@@ -63,12 +66,25 @@ export default function ShoppingScreen({navigation}: any) {
     if (!text) {
       return;
     }
+    // quantity stays empty unless the user sets one — no phantom "×1"
     await db.execute(
       'INSERT INTO shopping_items (id, list_id, text, quantity, estimated_cost, done, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [uuid(), listId, text, '1', parseFloat(itemCost.replace(/,/g, '')) || 0, 0, userId ?? ''],
+      [uuid(), listId, text, itemQty.trim(), parseFloat(itemCost.replace(/,/g, '')) || 0, 0, userId ?? ''],
     );
     setItemText('');
+    setItemQty('');
     setItemCost('');
+  };
+
+  const deleteItem = (item: any) => {
+    Alert.alert('Remove item?', item.text, [
+      {text: 'Cancel', style: 'cancel'},
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () => db.execute('DELETE FROM shopping_items WHERE id = ?', [item.id]),
+      },
+    ]);
   };
 
   const createList = async () => {
@@ -79,6 +95,46 @@ export default function ShoppingScreen({navigation}: any) {
     );
     setNewListName('');
     setNewListOpen(false);
+  };
+
+  // ── List actions: reuse as template, reset ticks, delete ──────
+  const duplicateList = async (list: any) => {
+    const newId = uuid();
+    await db.execute(
+      'INSERT INTO shopping_lists (id, name, shared, shared_with, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [newId, `${list.name} (copy)`, 0, '', userId ?? '', new Date().toISOString()],
+    );
+    for (const it of byList[list.id] ?? []) {
+      await db.execute(
+        'INSERT INTO shopping_items (id, list_id, text, quantity, estimated_cost, done, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [uuid(), newId, it.text, it.quantity ?? '', it.estimated_cost ?? 0, 0, userId ?? ''],
+      );
+    }
+    setMenuList(null);
+  };
+
+  const resetList = async (list: any) => {
+    await db.execute('UPDATE shopping_items SET done = 0 WHERE list_id = ?', [list.id]);
+    setMenuList(null);
+  };
+
+  const deleteList = (list: any) => {
+    setMenuList(null);
+    Alert.alert(
+      'Delete list?',
+      `"${list.name}" and its ${byList[list.id]?.length ?? 0} items will be removed.`,
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            await db.execute('DELETE FROM shopping_items WHERE list_id = ?', [list.id]);
+            await db.execute('DELETE FROM shopping_lists WHERE id = ?', [list.id]);
+          },
+        },
+      ],
+    );
   };
 
   const listArr = lists as any[];
@@ -129,6 +185,12 @@ export default function ShoppingScreen({navigation}: any) {
                     {doneCount}/{listItems.length} done · est {fmtAmount(est)} RWF
                   </Text>
                 </View>
+                <Pressable
+                  onPress={() => setMenuList(list)}
+                  hitSlop={8}
+                  style={({pressed}) => [styles.menuBtn, {opacity: pressed ? 0.7 : 1}]}>
+                  <Icon name="MoreHorizontal" size={18} color={T.text2} strokeWidth={2.2} />
+                </Pressable>
               </View>
 
               {/* Items */}
@@ -136,6 +198,7 @@ export default function ShoppingScreen({navigation}: any) {
                 <Pressable
                   key={item.id}
                   onPress={() => toggle(item)}
+                  onLongPress={() => deleteItem(item)}
                   style={({pressed}) => [styles.itemRow, {opacity: pressed ? 0.7 : 1}]}>
                   <View style={[styles.check, item.done && styles.checkOn]}>
                     {!!item.done && <Icon name="Check" size={12} color={T.accentInk} strokeWidth={3} />}
@@ -162,9 +225,16 @@ export default function ShoppingScreen({navigation}: any) {
                     autoFocus
                   />
                   <TextInput
+                    value={itemQty}
+                    onChangeText={setItemQty}
+                    placeholder="qty"
+                    placeholderTextColor={T.text3}
+                    style={styles.addQty}
+                  />
+                  <TextInput
                     value={itemCost}
                     onChangeText={setItemCost}
-                    placeholder="0"
+                    placeholder="cost"
                     placeholderTextColor={T.text3}
                     keyboardType="numeric"
                     style={styles.addCost}
@@ -180,11 +250,12 @@ export default function ShoppingScreen({navigation}: any) {
                   onPress={() => {
                     setAddingList(list.id);
                     setItemText('');
+                    setItemQty('');
                     setItemCost('');
                   }}
                   style={({pressed}) => [styles.addItemBtn, {opacity: pressed ? 0.7 : 1}]}>
                   <Icon name="Plus" size={15} color={T.text3} strokeWidth={2.2} />
-                  <Text style={styles.addItemText}>Add item</Text>
+                  <Text style={styles.addItemText}>Add item · hold an item to remove it</Text>
                 </Pressable>
               )}
             </Card>
@@ -199,6 +270,45 @@ export default function ShoppingScreen({navigation}: any) {
           </Card>
         )}
       </ScrollView>
+
+      {/* List actions: template / reset / delete */}
+      <Modal
+        visible={!!menuList}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuList(null)}>
+        <Pressable style={styles.overlay} onPress={() => setMenuList(null)} />
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>{menuList?.name}</Text>
+          <Pressable
+            onPress={() => duplicateList(menuList)}
+            style={({pressed}) => [styles.actionRow, {opacity: pressed ? 0.7 : 1}]}>
+            <Icon name="Repeat" size={16} color={T.accent} strokeWidth={2.2} />
+            <View style={{flex: 1}}>
+              <Text style={styles.actionTitle}>Use as template</Text>
+              <Text style={styles.actionSub}>New copy with all items unticked</Text>
+            </View>
+          </Pressable>
+          <Pressable
+            onPress={() => resetList(menuList)}
+            style={({pressed}) => [styles.actionRow, {opacity: pressed ? 0.7 : 1}]}>
+            <Icon name="RefreshCcw" size={16} color={T.info} strokeWidth={2.2} />
+            <View style={{flex: 1}}>
+              <Text style={styles.actionTitle}>Reset check-marks</Text>
+              <Text style={styles.actionSub}>Reuse this list for the next shop</Text>
+            </View>
+          </Pressable>
+          <Pressable
+            onPress={() => deleteList(menuList)}
+            style={({pressed}) => [styles.actionRow, {opacity: pressed ? 0.7 : 1}]}>
+            <Icon name="Trash2" size={16} color={T.expense} strokeWidth={2.2} />
+            <View style={{flex: 1}}>
+              <Text style={[styles.actionTitle, {color: T.expense}]}>Delete list</Text>
+              <Text style={styles.actionSub}>Removes the list and its items</Text>
+            </View>
+          </Pressable>
+        </View>
+      </Modal>
 
       {/* Create-list modal */}
       <Modal visible={newListOpen} transparent animationType="fade" onRequestClose={() => setNewListOpen(false)}>
@@ -246,7 +356,12 @@ const styles = StyleSheet.create({
   addItemText: {fontFamily: FONTS.medium, fontSize: 13, color: T.text3},
   addRow: {flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12},
   addInput: {flex: 1, paddingHorizontal: 12, paddingVertical: 9, borderRadius: R.small, backgroundColor: T.surface2, borderWidth: 1, borderColor: T.border, fontFamily: FONTS.medium, fontSize: 13, color: T.text},
-  addCost: {width: 84, paddingHorizontal: 12, paddingVertical: 9, borderRadius: R.small, backgroundColor: T.surface2, borderWidth: 1, borderColor: T.border, fontFamily: FONTS.medium, fontSize: 13, color: T.text, textAlign: 'right'},
+  addQty: {width: 56, paddingHorizontal: 8, paddingVertical: 9, borderRadius: R.small, backgroundColor: T.surface2, borderWidth: 1, borderColor: T.border, fontFamily: FONTS.medium, fontSize: 13, color: T.text, textAlign: 'center'},
+  addCost: {width: 74, paddingHorizontal: 10, paddingVertical: 9, borderRadius: R.small, backgroundColor: T.surface2, borderWidth: 1, borderColor: T.border, fontFamily: FONTS.medium, fontSize: 13, color: T.text, textAlign: 'right'},
+  menuBtn: {width: 32, height: 32, borderRadius: 10, backgroundColor: T.surface2, alignItems: 'center', justifyContent: 'center'},
+  actionRow: {flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11},
+  actionTitle: {fontFamily: FONTS.semibold, fontSize: 13.5, color: T.text},
+  actionSub: {fontFamily: FONTS.regular, fontSize: 11, color: T.text3, marginTop: 1},
   addOk: {width: 38, height: 38, borderRadius: R.small, backgroundColor: T.accent, alignItems: 'center', justifyContent: 'center'},
   emptyText: {fontFamily: FONTS.semibold, fontSize: 14, color: T.text2},
   emptyHint: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3, textAlign: 'center'},
