@@ -39,6 +39,7 @@ const transactions = new Table({
   confidence: column.real,     // 0..1 (AI confidence; 1 for manual)
   transfer_account_id: column.text, // counterparty account for transfers
   transfer_direction: column.text,  // 'in' | 'out' (transfers only)
+  balance_after: column.real,       // bank-reported balance after this txn (audit)
   owner_id: column.text,
   created_at: column.text,
 });
@@ -69,6 +70,7 @@ const auto_records = new Table({
   confidence: column.real,     // 0..1 AI confidence score
   source: column.text,         // 'sms' | 'ai'
   transfer_account_id: column.text, // counterparty account for transfers
+  balance_after: column.real,  // bank-reported balance after this txn
   owner_id: column.text,
   created_at: column.text,
 });

@@ -15,9 +15,24 @@ import {
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {TxRow} from '../Components/TxRow';
 import {Icon} from '../Components/ui';
+import {appAlert} from '../Components/AppDialog';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {extractBalance} from '../tools/claudeParser';
 import {sendInviteEmail} from '../tools/invites';
 import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
+
+// Movement a transaction had on its own account's balance.
+function movementDelta(t: any): number {
+  const amount = t.amount ?? 0;
+  const fees = t.fees ?? 0;
+  if (t.transaction_type === 'income') {
+    return amount;
+  }
+  if (t.transaction_type === 'transfer') {
+    return t.transfer_direction === 'in' ? amount : -(amount + fees);
+  }
+  return -(amount + fees);
+}
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -187,6 +202,7 @@ function dayLabel(dt: string): string {
 export default function AccountDetails({route, navigation}: any) {
   const {accountId} = route.params;
   const {userId} = useCurrentUser();
+  const db = usePowerSync();
   const tabBarHeight = useBottomTabBarHeight();
   const [shareOpen, setShareOpen] = useState(false);
 
@@ -204,6 +220,65 @@ export default function AccountDetails({route, navigation}: any) {
 
   const account = (accounts as any[])[0];
   const isOwner = account?.owner_id === userId;
+  const [syncing, setSyncing] = useState(false);
+
+  // Re-derive the balance from the transaction history: anchor on the newest
+  // bank-reported balance (balance_after, or extracted from the stored SMS
+  // for older rows), then replay every movement recorded after that anchor.
+  const syncBalance = async () => {
+    if (syncing) {
+      return;
+    }
+    setSyncing(true);
+    try {
+      const res = await db.execute(
+        `SELECT id, date_time, amount, fees, transaction_type, transfer_direction,
+                balance_after, sms
+         FROM transactions WHERE account_id = ?
+         ORDER BY date_time DESC LIMIT 300`,
+        [accountId],
+      );
+      const rows: any[] = res.rows?._array ?? [];
+      let anchorIdx = -1;
+      let anchorBal: number | null = null;
+      for (let i = 0; i < rows.length; i++) {
+        const b = rows[i].balance_after ?? extractBalance(rows[i].sms ?? '');
+        if (b != null) {
+          anchorIdx = i;
+          anchorBal = b;
+          break;
+        }
+      }
+      if (anchorBal == null) {
+        appAlert(
+          'No bank balance found',
+          "None of this account's records carry a bank-reported balance yet — it will populate as new SMS arrive.",
+        );
+        return;
+      }
+      // rows[0..anchorIdx-1] are NEWER than the anchor — replay them on top.
+      let bal = anchorBal;
+      for (let i = anchorIdx - 1; i >= 0; i--) {
+        bal += movementDelta(rows[i]);
+      }
+      await db.execute('UPDATE accounts SET available_balance = ? WHERE id = ?', [
+        bal,
+        accountId,
+      ]);
+      const anchorDate = rows[anchorIdx].date_time
+        ? format(new Date(rows[anchorIdx].date_time), 'MMM d, HH:mm')
+        : 'unknown time';
+      appAlert(
+        'Balance synced',
+        `RWF ${fmtAmount(bal)}\n\nAnchored on the bank's balance from ${anchorDate}` +
+          (anchorIdx > 0 ? `, plus ${anchorIdx} newer movement${anchorIdx === 1 ? '' : 's'}.` : '.'),
+      );
+    } catch (e: any) {
+      appAlert('Sync failed', e?.message ?? 'Unknown error');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const {totalIncome, totalExpense, sections} = useMemo(() => {
     let income = 0;
@@ -307,7 +382,23 @@ export default function AccountDetails({route, navigation}: any) {
                   <Text style={styles.accountType}>{account.type ?? 'Account'}</Text>
                 </View>
               </View>
-              <Text style={styles.balanceLabel}>Current balance</Text>
+              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
+                <Text style={styles.balanceLabel}>Current balance</Text>
+                {isOwner && (
+                  <Pressable
+                    onPress={syncBalance}
+                    disabled={syncing}
+                    style={({pressed}) => [
+                      styles.syncBtn,
+                      {opacity: syncing ? 0.5 : pressed ? 0.7 : 1},
+                    ]}>
+                    <Icon name="RefreshCcw" size={12} color={T.accent} strokeWidth={2.4} />
+                    <Text style={styles.syncBtnText}>
+                      {syncing ? 'Syncing…' : 'Sync balance'}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
               <Text style={styles.balanceValue}>
                 RWF {fmtAmount(account.available_balance ?? 0)}
               </Text>
@@ -411,6 +502,16 @@ const styles = StyleSheet.create({
   accountType: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3, marginTop: 1},
   balanceLabel: {fontFamily: FONTS.medium, fontSize: 12, color: T.text3},
   balanceValue: {fontFamily: FONTS.bold, fontSize: 26, color: T.text, marginBottom: 12},
+  syncBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: R.pill,
+    backgroundColor: T.accentSoft,
+  },
+  syncBtnText: {fontFamily: FONTS.semibold, fontSize: 11, color: T.accent},
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',

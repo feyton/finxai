@@ -156,6 +156,15 @@ function TxDetail({
         <InfoRow label="When" value={dateStr} />
         <View style={styles.infoDivider} />
         <InfoRow label="Source" value={sourceStr} />
+        {tx.balance_after != null && (
+          <>
+            <View style={styles.infoDivider} />
+            <InfoRow
+              label="Balance after"
+              value={`RWF ${fmtAmount(tx.balance_after)} (bank-reported)`}
+            />
+          </>
+        )}
         {tx.fees > 0 && (
           <>
             <View style={styles.infoDivider} />

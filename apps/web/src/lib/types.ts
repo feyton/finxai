@@ -39,6 +39,7 @@ export interface Transaction {
   confidence: number | null;
   transfer_account_id: string | null; // counterparty account for transfers
   transfer_direction: string | null; // 'in' | 'out' (transfers only)
+  balance_after: number | null; // bank-reported balance after this txn (audit)
   owner_id: string;
   created_at: string | null;
 }
