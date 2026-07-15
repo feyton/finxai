@@ -105,6 +105,43 @@ describe('failed SMS', () => {
   });
 });
 
+describe('learned transfer rules', () => {
+  const SEND_TO_PERSON =
+    'TxId: 99887. Your payment of 20,000 RWF to JOHN DOE 250788999888 has been completed. Fee was 100 RWF. Your new balance: 41,711 RWF.';
+
+  it("a 'transfer' rule forces isTransfer for that counterparty", () => {
+    const parsed = parseWithRegex(SEND_TO_PERSON, {
+      rules: [{pattern: 'john doe', category: 'transfer', correction_count: 1, confirmation_count: 0}],
+    });
+    expect(parsed.isTransfer).toBe(true);
+    expect(parsed.confidence).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('a real-category rule vetoes the name/Mokash heuristics', () => {
+    // Counterparty matches the user's name → heuristic would say transfer…
+    const raw =
+      'You have received 45000 RWF from FABRICE HAFASHIMANA (*********558). Your new balance: 48,120 RWF.';
+    const parsed = parseWithRegex(raw, {
+      userName: 'Fabrice Hafashimana',
+      rules: [{pattern: 'fabrice hafashimana', category: 'salary', correction_count: 1, confirmation_count: 0}],
+    });
+    // …but the user taught us it's income (salary), so NOT a transfer.
+    expect(parsed.isTransfer).toBe(false);
+    expect(parsed.category).toBe('salary');
+  });
+
+  it('account-number proof beats a contrary rule', () => {
+    const parsed = parseWithRegex(
+      'TRANSFER - MTN mobile money Credited account: 250787241457  Debited account: 100161965558  Amount: RWF 5,000 Transaction Charge: RWF 0 Event #: FT1 Status: COMPLETED Date: 7/6/26, 7:37 PM Available Balance: RWF 5,397',
+      {
+        ...CTX,
+        rules: [{pattern: 'to mtn momo', category: 'shopping', correction_count: 1, confirmation_count: 0}],
+      },
+    );
+    expect(parsed.isTransfer).toBe(true);
+  });
+});
+
 describe('legacy formats still work', () => {
   it('MoMo payment (debit)', () => {
     const raw =

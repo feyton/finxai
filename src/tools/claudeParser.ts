@@ -34,6 +34,42 @@ export interface ParseContext {
   accounts?: OwnAccountRef[];
   // The account this SMS arrived for (its sender address matched).
   currentAccountId?: string;
+  // Learned merchant rules. category === 'transfer' means the user taught us
+  // this counterparty IS a transfer; any real category means it is NOT one.
+  rules?: MerchantRule[];
+}
+
+// Find the learned rule whose pattern overlaps the merchant name.
+export function findRule(
+  rules: MerchantRule[] | undefined,
+  merchant: string,
+): MerchantRule | undefined {
+  if (!rules?.length || !merchant) {
+    return undefined;
+  }
+  const norm = merchant.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!norm) {
+    return undefined;
+  }
+  return rules.find(r => norm.includes(r.pattern) || r.pattern.includes(norm));
+}
+
+// Transfer verdict with clear precedence: account-number PROOF beats
+// everything; then the user's learned rule; then the name/Mokash heuristics.
+function resolveTransfer(
+  facts: RegexFacts,
+  rule: MerchantRule | undefined,
+  raw: string,
+  userName?: string,
+  modelSaysTransfer?: boolean,
+): boolean {
+  if (facts.transferAccount) {
+    return true;
+  }
+  if (rule) {
+    return rule.category === 'transfer';
+  }
+  return modelSaysTransfer === true || detectTransfer(raw, userName);
 }
 
 // ── Deterministic regex extraction ─────────────────────────────
@@ -314,11 +350,17 @@ function factsToParsed(f: RegexFacts, merchant: string, category: CategoryId, co
 // ── Regex-only fallback ────────────────────────────────────────
 export function parseWithRegex(raw: string, ctx?: ParseContext): ParsedSMS {
   const f = regexExtract(raw, ctx);
-  const {merchant, category} = regexClassify(raw, f);
-  const isTransfer = !!f.transferAccount || detectTransfer(raw, ctx?.userName);
-  // FAILED SMS carry full confidence in that one fact — nothing else matters.
-  const confidence = f.status === 'failed' ? 1 : 0.45;
-  return factsToParsed(f, merchant, category, confidence, f.channelHint, isTransfer);
+  const classified = regexClassify(raw, f);
+  const rule = findRule(ctx?.rules, classified.merchant);
+  const category =
+    rule && rule.category !== 'transfer'
+      ? (rule.category as CategoryId)
+      : classified.category;
+  const isTransfer = resolveTransfer(f, rule, raw, ctx?.userName);
+  // FAILED SMS carry full confidence in that one fact; a learned rule also
+  // lifts confidence — the user taught us this exact counterparty.
+  const confidence = f.status === 'failed' ? 1 : rule ? 0.9 : 0.45;
+  return factsToParsed(f, classified.merchant, category, confidence, f.channelHint, isTransfer);
 }
 
 // ── Main: Haiku classification over regex-extracted facts ──────
@@ -361,6 +403,9 @@ Rules:
   a Mokash savings pocket, a bank↔wallet top-up, or an explicit "fund-transfer"
   to the user's own number. It is FALSE for real payments to shops or other people.
 - If a learned rule matches the merchant, use its category and set confidence ≥ 0.95.
+- A learned rule of "transfer" means the USER confirmed that counterparty is a
+  transfer between their own accounts → is_transfer=true. A learned rule with a
+  real category means the user confirmed it is NOT a transfer → is_transfer=false.
 - confidence reflects how sure you are of merchant + category.`;
 
   const factLines = `direction=${f.direction}, amount=${f.amount} RWF, fee=${f.fee}, channelHint=${f.channelHint}` +
@@ -394,11 +439,14 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
       confidence = Math.max(confidence, 0.95);
     }
 
-    // Hard-apply a learned rule if the merchant matches one.
-    const norm = merchant.toLowerCase();
-    const rule = rules.find(r => norm.includes(r.pattern) || r.pattern.includes(norm));
-    if (rule) {
+    // Hard-apply a learned rule if the merchant matches one. 'transfer'
+    // rules govern is_transfer below rather than the category.
+    const rule = findRule(rules, merchant);
+    if (rule && rule.category !== 'transfer') {
       category = rule.category as CategoryId;
+      confidence = Math.max(confidence, 0.95);
+    }
+    if (rule?.category === 'transfer') {
       confidence = Math.max(confidence, 0.95);
     }
     // Facts are solid → don't let a shaky category sink an otherwise clear txn.
@@ -406,12 +454,8 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
       confidence = Math.max(confidence, 0.72);
     }
 
-    // Transfer if the account numbers prove it, Haiku says so, or our
-    // name/Mokash heuristic is confident.
-    const isTransfer =
-      !!f.transferAccount ||
-      j.is_transfer === true ||
-      detectTransfer(raw, ctx?.userName);
+    // Account numbers prove it > the user's learned rule > Haiku/heuristics.
+    const isTransfer = resolveTransfer(f, rule, raw, ctx?.userName, j.is_transfer === true);
 
     return factsToParsed(
       f,

@@ -111,9 +111,9 @@ const SMSRetriever: React.FC = () => {
     try {
       const useAI = await hasAnthropicKey();
       const apiKey = useAI ? (await getAnthropicKey())! : '';
-      const merchantRules = useAI
-        ? await getMerchantRules(db, '', userId!, 20)
-        : [];
+      // Learned rules feed BOTH parsing paths — a counterparty the user
+      // corrected to 'transfer' (or to a category) applies with or without AI.
+      const merchantRules = await getMerchantRules(db, '', userId!, 20);
       const merchantChannels = useAI ? await getMerchantChannels() : {};
 
       const ctxBase: ParseContext = {
@@ -123,6 +123,7 @@ const SMSRetriever: React.FC = () => {
           name: a.name ?? '',
           number: a.number ?? '',
         })),
+        rules: merchantRules,
       };
 
       // New accounts start their catalog from the 1st of the current month.
@@ -193,8 +194,9 @@ const SMSRetriever: React.FC = () => {
                  (id, amount, account_id, category, date_time, sms, sender,
                   payee, merchant, transaction_type, fees, currency,
                   confirmed, source, confidence,
-                  transfer_account_id, transfer_direction, owner_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?)`,
+                  transfer_account_id, transfer_direction, balance_after,
+                  owner_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?)`,
               [
                 uuid(),
                 parsed.amount,
@@ -210,6 +212,7 @@ const SMSRetriever: React.FC = () => {
                 parsed.confidence,
                 transferAccountId,
                 transferDirection,
+                parsed.balance_after,
                 userId,
                 now,
               ],
@@ -241,8 +244,8 @@ const SMSRetriever: React.FC = () => {
                  (id, amount, account_id, category, date_time, sms, sender,
                   payee, merchant, transaction_type, fees, currency,
                   confirmed, source, confidence, transfer_account_id,
-                  owner_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?)`,
+                  balance_after, owner_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?)`,
               [
                 uuid(),
                 parsed.amount,
@@ -257,6 +260,7 @@ const SMSRetriever: React.FC = () => {
                 parsed.fee,
                 parsed.confidence,
                 transferAccountId,
+                parsed.balance_after,
                 userId,
                 now,
               ],

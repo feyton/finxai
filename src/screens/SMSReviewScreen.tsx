@@ -33,7 +33,14 @@ export interface Fix {
   category: CategoryId;
   subcategory: string;
   accountId: string;
+  type: 'expense' | 'income' | 'transfer';
 }
+
+const FIX_TYPES: {id: Fix['type']; label: string}[] = [
+  {id: 'expense', label: 'Money out'},
+  {id: 'income', label: 'Money in'},
+  {id: 'transfer', label: 'Transfer'},
+];
 
 // ── Full correction sheet: name + category + payment channel ───
 function FixSheet({
@@ -53,6 +60,7 @@ function FixSheet({
   const [cat, setCat] = useState<CategoryId>('shopping');
   const [subcategory, setSubcategory] = useState('');
   const [accountId, setAccountId] = useState('');
+  const [fixType, setFixType] = useState<Fix['type']>('expense');
   const {subcatsFor} = useSubcategories();
   const subcats = subcatsFor(cat);
 
@@ -63,6 +71,13 @@ function FixSheet({
       setCat((resolveCat(record.category ?? '') as CategoryId) ?? 'shopping');
       setSubcategory(record.subcategory ?? '');
       setAccountId(record.account_id ?? '');
+      setFixType(
+        record.transaction_type === 'income'
+          ? 'income'
+          : record.transaction_type === 'transfer'
+          ? 'transfer'
+          : 'expense',
+      );
     }
   }, [visible, record]);
 
@@ -81,6 +96,30 @@ function FixSheet({
           Your edits train the AI to tag future SMS correctly.
         </Text>
         <ScrollView showsVerticalScrollIndicator={false}>
+          {/* Type — teaching "Transfer" here trains the AI for next time */}
+          <Text style={styles.fixLabel}>Type</Text>
+          <View style={styles.typeRow}>
+            {FIX_TYPES.map(t => {
+              const on = fixType === t.id;
+              return (
+                <Pressable
+                  key={t.id}
+                  onPress={() => setFixType(t.id)}
+                  style={[styles.typeChoice, on && styles.typeChoiceActive]}>
+                  <Text style={[styles.typeChoiceText, on && {color: T.accent}]}>
+                    {t.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {fixType === 'transfer' && (
+            <Text style={styles.typeHint}>
+              Between your own accounts — excluded from income & spending. The
+              AI will remember this counterparty as a transfer.
+            </Text>
+          )}
+
           {/* Merchant name */}
           <Text style={styles.fixLabel}>Merchant name</Text>
           <TextInput
@@ -118,7 +157,9 @@ function FixSheet({
             </>
           )}
 
-          {/* Category */}
+          {/* Category — irrelevant for transfers */}
+          {fixType !== 'transfer' && (
+          <>
           <Text style={styles.fixLabel}>Category</Text>
           <View style={styles.sheetGrid}>
             {ALL_CATS.map(c => {
@@ -176,10 +217,14 @@ function FixSheet({
               </View>
             </>
           )}
+          </>
+          )}
         </ScrollView>
 
         <Pressable
-          onPress={() => onSave({merchant: merchant.trim(), category: cat, subcategory, accountId})}
+          onPress={() =>
+            onSave({merchant: merchant.trim(), category: cat, subcategory, accountId, type: fixType})
+          }
           style={({pressed}) => [styles.fixSave, {opacity: pressed ? 0.85 : 1}]}>
           <Icon name="Check" size={16} color={T.accentInk} strokeWidth={2.6} />
           <Text style={styles.fixSaveText}>Save & confirm</Text>
@@ -367,13 +412,15 @@ export default function SMSReviewScreen({navigation}: any) {
           : 'expense';
       const now = new Date().toISOString();
       const dir = regexExtract(record.sms ?? '').direction;
+      const bal = extractBalance(record.sms ?? '');
       await db.execute(
         `INSERT INTO transactions
            (id, amount, account_id, category, subcategory, date_time, sms, sender,
             payee, merchant, transaction_type, fees, currency,
             confirmed, source, confidence,
-            transfer_account_id, transfer_direction, owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?)`,
+            transfer_account_id, transfer_direction, balance_after,
+            owner_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?)`,
         [
           uuid(),
           record.amount,
@@ -390,13 +437,13 @@ export default function SMSReviewScreen({navigation}: any) {
           record.confidence ?? 0,
           txType === 'transfer' ? record.transfer_account_id ?? null : null,
           txType === 'transfer' ? (dir === 'credit' ? 'in' : 'out') : null,
+          bal,
           userId,
           now,
         ],
       );
 
       // Prefer the SMS's own balance (authoritative); else increment.
-      const bal = extractBalance(record.sms ?? '');
       if (bal != null) {
         await db.execute(
           'UPDATE accounts SET available_balance = ? WHERE id = ?',
@@ -415,8 +462,15 @@ export default function SMSReviewScreen({navigation}: any) {
 
       await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
 
+      // Confirming a transfer reinforces the transfer rule for that
+      // counterparty; otherwise the category rule as before.
       if (record.merchant) {
-        await recordConfirmation(db, record.merchant, record.category, userId!);
+        await recordConfirmation(
+          db,
+          record.merchant,
+          txType === 'transfer' ? 'transfer' : record.category,
+          userId!,
+        );
       }
     } catch (e) {
       console.warn('[SMSReview] confirm error:', e);
@@ -425,29 +479,28 @@ export default function SMSReviewScreen({navigation}: any) {
 
   const handleFix = async (record: any, fix: Fix) => {
     try {
-      const txType =
-        record.transaction_type === 'income'
-          ? 'income'
-          : record.transaction_type === 'transfer'
-          ? 'transfer'
-          : 'expense';
+      // The USER's chosen type wins — this is where "set as transfer" during
+      // review happens (and trains the AI below).
+      const txType = fix.type;
       const now = new Date().toISOString();
       const merchant = fix.merchant || record.merchant || record.payee || '';
       const accountId = fix.accountId || record.account_id;
       const fixDir = regexExtract(record.sms ?? '').direction;
+      const bal = extractBalance(record.sms ?? '');
       await db.execute(
         `INSERT INTO transactions
            (id, amount, account_id, category, subcategory, date_time, sms, sender,
             payee, merchant, transaction_type, fees, currency,
             confirmed, source, confidence,
-            transfer_account_id, transfer_direction, owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?)`,
+            transfer_account_id, transfer_direction, balance_after,
+            owner_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?)`,
         [
           uuid(),
           record.amount,
           accountId,
-          fix.category,
-          fix.subcategory ?? '',
+          txType === 'transfer' ? record.category : fix.category,
+          txType === 'transfer' ? '' : fix.subcategory ?? '',
           record.date_time,
           record.sms,
           record.sender,
@@ -458,6 +511,7 @@ export default function SMSReviewScreen({navigation}: any) {
           record.confidence ?? 0,
           txType === 'transfer' ? record.transfer_account_id ?? null : null,
           txType === 'transfer' ? (fixDir === 'credit' ? 'in' : 'out') : null,
+          bal,
           userId,
           now,
         ],
@@ -465,7 +519,6 @@ export default function SMSReviewScreen({navigation}: any) {
 
       // Use the SMS balance only if the account wasn't reassigned in the fix;
       // otherwise the SMS balance belongs to a different account — increment.
-      const bal = extractBalance(record.sms ?? '');
       if (bal != null && accountId === record.account_id) {
         await db.execute(
           'UPDATE accounts SET available_balance = ? WHERE id = ?',
@@ -485,10 +538,16 @@ export default function SMSReviewScreen({navigation}: any) {
 
       await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
 
-      // Train the AI: the corrected merchant name maps to the corrected
-      // category, and (if the SMS sender is known) the corrected channel.
+      // Train the AI: 'transfer' is a learned outcome just like a category —
+      // this counterparty will auto-classify as a transfer next time (and a
+      // real category explicitly teaches "NOT a transfer").
       if (merchant) {
-        await recordCorrection(db, merchant, fix.category, userId!);
+        await recordCorrection(
+          db,
+          merchant,
+          txType === 'transfer' ? 'transfer' : fix.category,
+          userId!,
+        );
         if (record.sender && accountId) {
           await recordChannel(db, record.sender, accountId, userId!);
         }
@@ -828,6 +887,26 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 10,
     marginBottom: 8,
+  },
+  typeRow: {flexDirection: 'row', gap: 8, marginHorizontal: 16},
+  typeChoice: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderRadius: R.small,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  typeChoiceActive: {backgroundColor: T.accentSoft, borderColor: 'rgba(34,197,94,0.35)'},
+  typeChoiceText: {fontFamily: FONTS.semibold, fontSize: 12, color: T.text2},
+  typeHint: {
+    fontFamily: FONTS.regular,
+    fontSize: 11,
+    color: T.text3,
+    marginHorizontal: 16,
+    marginTop: 8,
+    lineHeight: 15,
   },
   fixInput: {
     marginHorizontal: 16,
