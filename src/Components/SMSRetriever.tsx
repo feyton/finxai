@@ -5,11 +5,14 @@
  * On mount:
  * 1. Reads new SMS from Android once (no per-sender native filter — matching
  *    is done here case-insensitively, so 'Mokash' vs 'MoKash' can't miss)
- * 2. Calls Claude Haiku to parse + categorize (if API key is set)
- * 3. Falls back to regex parser if no key / API error
- * 4. FAILED transactions go to ignored_sms — never become records
- * 5. Auto-saves confident records (≥ THRESHOLD_AUTO_SAVE) to transactions
- * 6. Saves review-needed records to auto_records
+ * 2. Builds a batch-level transfer-hint index from BPR-style "from A/c ...
+ *    to A/c ... is Completed" confirmations, for cross-message correlation
+ * 3. Calls Claude Haiku to parse + categorize (if API key is set)
+ * 4. Falls back to regex parser if no key / API error
+ * 5. FAILED transactions and transfer-status-only confirmations go to
+ *    ignored_sms — never become records
+ * 6. Auto-saves confident records (≥ THRESHOLD_AUTO_SAVE) to transactions
+ * 7. Saves review-needed records to auto_records
  */
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useEffect, useRef} from 'react';
@@ -20,6 +23,11 @@ import {getAnthropicKey, hasAnthropicKey} from '../tools/aiConfig';
 import {THRESHOLD_AUTO_SAVE} from '../tools/geminiParser';
 import {
   ParseContext,
+  dateKeyFromIso,
+  extractTransferHint,
+  isTransferStatusOnly,
+  maskedSuffixMatches,
+  normalizeAccountNumber,
   parseSmsWithClaude,
   parseWithRegex,
 } from '../tools/claudeParser';
@@ -135,6 +143,19 @@ const SMSRetriever: React.FC = () => {
       const fetchTime = Date.now();
       const inbox = await fetchInbox(minDate);
 
+      // Some banks (BPR) send a SEPARATE "from A/c P to A/c Q ... is
+      // Completed" confirmation for every transfer, alongside the
+      // authoritative "has been debited/credited ... balance is" alert that
+      // already carries the real transaction. Build a lookup of
+      // {amount, date} → destination account BEFORE the main loop, from ALL
+      // fetched SMS (not just ones matching a configured sender — the hint
+      // and the alert can arrive as distinct message types from the same
+      // bank), so the alert can be tagged as a transfer once we reach it —
+      // and the confirmation itself never becomes its own duplicate record.
+      const transferHints = inbox
+        .map(sms => (sms.body ? extractTransferHint(sms.body) : null))
+        .filter((h): h is NonNullable<typeof h> => h != null);
+
       for (const sms of inbox) {
         if (!sms.body || existingSmsSet.has(sms.body)) {continue;}
 
@@ -145,6 +166,17 @@ const SMSRetriever: React.FC = () => {
 
         const smsDate = parseInt(sms.date ?? '0', 10) || 0;
         if (smsDate < (floors.get(account.id) ?? 0)) {continue;}
+
+        // Transfer status/confirmation-only message — never a transaction on
+        // its own (its facts were already folded into transferHints above).
+        if (isTransferStatusOnly(sms.body)) {
+          await db.execute(
+            'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+            [uuid(), sms.body, account.name, 'status', userId, new Date().toISOString()],
+          );
+          existingSmsSet.add(sms.body);
+          continue;
+        }
 
         try {
           const ctx: ParseContext = {...ctxBase, currentAccountId: account.id};
@@ -173,6 +205,34 @@ const SMSRetriever: React.FC = () => {
 
           const occurredAt =
             parsed.occurred_at ?? new Date(smsDate || Date.now()).toISOString();
+
+          // Cross-message correlation: a debit/credit alert that gave no
+          // counterparty (BPR's format never names one) can still be proven
+          // a transfer when a sibling confirmation message — same amount,
+          // same calendar day — names a destination whose visible digits
+          // match one of the user's OWN accounts.
+          if (!parsed.isTransfer && transferHints.length > 0) {
+            const dateKey = dateKeyFromIso(occurredAt, smsDate);
+            const hint = transferHints.find(
+              h => h.dateKey === dateKey && Math.abs(h.amount - parsed.amount) <= 1,
+            );
+            if (hint) {
+              const dest = (ctxBase.accounts ?? []).find(
+                a =>
+                  a.id !== account.id &&
+                  maskedSuffixMatches(hint.destSuffix, normalizeAccountNumber(a.number)),
+              );
+              if (dest) {
+                parsed.isTransfer = true;
+                parsed.transferAccountId = dest.id;
+                parsed.merchant =
+                  parsed.direction === 'debit' ? `To ${dest.name}` : `From ${dest.name}`;
+                parsed.category = 'savings';
+                parsed.confidence = Math.max(parsed.confidence, 0.9);
+              }
+            }
+          }
+
           const txType = parsed.isTransfer
             ? 'transfer'
             : parsed.direction === 'credit'

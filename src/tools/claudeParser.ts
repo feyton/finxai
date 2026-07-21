@@ -151,6 +151,130 @@ function extractOccurredAt(raw: string): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+const MONTH_INDEX: Record<string, number> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+};
+
+// BPR alert format: "on 20 JUL 2026-19:28:17" (DD MON YYYY-HH:MM:SS).
+function extractBprDate(raw: string): string | null {
+  const m = raw.match(
+    /\bon\s+(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\s+(\d{4})-(\d{1,2}):(\d{2})(?::(\d{2}))?/i,
+  );
+  if (!m) {
+    return null;
+  }
+  const month = MONTH_INDEX[m[2].toLowerCase()];
+  if (month == null) {
+    return null;
+  }
+  const d = new Date(
+    parseInt(m[3], 10),
+    month,
+    parseInt(m[1], 10),
+    parseInt(m[4], 10),
+    parseInt(m[5], 10),
+    m[6] ? parseInt(m[6], 10) : 0,
+  );
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+// Sums ALL named charges in one SMS — some banks (BPR) deduct MULTIPLE
+// charges from a single transaction (Transaction Charge + Notification
+// Charge, both applied regardless of direction). A single-match regex here
+// silently undercounts the fee; summing is safe because a real bank SMS
+// never mentions an unrelated charge/fee amount alongside the transaction's
+// own. Verified against a real BPR statement's balance chain (see
+// __tests__/claudeParser.test.ts) — BK's single "Transaction Charge" still
+// sums to the same one value, no regression.
+function extractFees(raw: string): number {
+  const re = /\b(?:(?:[a-z]+\s+)?charges?|fees?)\b\s*(?:was)?\s*[:=]?\s*(?:RWF|FRW)?\s*([\d,]+(?:\.\d+)?)/gi;
+  let total = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw))) {
+    total += num(m[1]);
+  }
+  return total;
+}
+
+// ── BPR-style transfer-confirmation messages ────────────────────
+// BPR sends a SEPARATE "Transaction Ref: X of RWF Y from A/c P to A/c Q on
+// D/M/YYYY is Completed / is Your request is being processing..." message
+// for every transfer — IN ADDITION to the authoritative "your account has
+// been debited/credited ... Your balance is RWF Z" alert that already
+// carries the real transaction (often 2-3 of these per transfer). Without
+// filtering, each transfer would create 2-3 duplicate records on top of the
+// real one — these must never become transactions on their own.
+export function isTransferStatusOnly(raw: string): boolean {
+  return /transaction\s+ref\s*:\s*\S+\s+of\s+RWF[\d,.\s]+from\s+A\/c\s*[\d*]+\s+to\s+A\/c\s*([\d*]+)\s+on\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+is\s+(?:completed|your request is being processing)/i.test(
+    raw,
+  );
+}
+
+export interface TransferHint {
+  amount: number;
+  dateKey: string; // 'YYYY-MM-DD', from the confirmation message's own date
+  destSuffix: string; // trailing visible digits of the destination account
+}
+
+// Trailing contiguous digit run of a masked account string, e.g.
+// "0*****2911" → "2911", "4******947" → "947". The only STABLE part of a
+// masked number — how many leading digits a bank exposes varies by template,
+// even for the SAME account across two message types from the same bank.
+export function trailingDigits(masked: string): string {
+  return masked.match(/(\d+)\s*$/)?.[1] ?? '';
+}
+
+// Loose masked-number match: true when the shorter trailing-digit run is a
+// suffix of the longer one. Handles the SAME account being masked to a
+// different visible length by different SMS templates (BPR shows 3 trailing
+// digits in its debit alert, 4 in its transfer confirmation).
+// NOTE: with only 3-4 digits of entropy this can in rare cases collide with
+// an unrelated external number sharing the same trailing digits — an
+// accepted heuristic risk, same class as BK's exact-account-number matching.
+export function maskedSuffixMatches(a: string, b: string): boolean {
+  if (!a || !b) {
+    return false;
+  }
+  const len = Math.min(a.length, b.length);
+  if (len < 3) {
+    return false; // too short to mean anything
+  }
+  return a.slice(-len) === b.slice(-len);
+}
+
+// Extracts {amount, dateKey, destSuffix} from a BPR-style transfer
+// confirmation, for transfer-detection correlation BEFORE the message
+// itself is discarded (see isTransferStatusOnly). BPR's own pairing of "on
+// 20/07/2026" (confirmation) with "on 20 JUL 2026" (debit alert) confirms
+// this date is D/M/YYYY, not M/D/YYYY.
+export function extractTransferHint(raw: string): TransferHint | null {
+  const m = raw.match(
+    /of\s+RWF\s*([\d,.]+)\s+from\s+A\/c\s*[\d*]+\s+to\s+A\/c\s*([\d*]+)\s+on\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+is\s+(?:completed|your request is being processing)/i,
+  );
+  if (!m) {
+    return null;
+  }
+  const amount = num(m[1]);
+  const destSuffix = trailingDigits(m[2]);
+  if (!destSuffix || amount <= 0) {
+    return null;
+  }
+  const day = m[3].padStart(2, '0');
+  const month = m[4].padStart(2, '0');
+  return {amount, dateKey: `${m[5]}-${month}-${day}`, destSuffix};
+}
+
+// 'YYYY-MM-DD' in LOCAL time — for matching a parsed transaction's own date
+// against a TransferHint's dateKey.
+export function dateKeyFromIso(iso: string | null, fallbackMs?: number): string {
+  const d = iso ? new Date(iso) : new Date(fallbackMs || Date.now());
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
+}
+
 export interface RegexFacts {
   direction: 'credit' | 'debit';
   amount: number;
@@ -218,12 +342,9 @@ export function regexExtract(raw: string, ctx?: ParseContext): RegexFacts {
   );
   const amount = labelled ? num(labelled[1]) : num(generic?.[1] ?? generic?.[2]);
 
-  // Fee: "Fee 100 RWF", "fee was: 100", "Transaction Charge: RWF 200".
-  const fee = num(
-    raw.match(
-      /\b(?:transaction\s+charge|charge|fee)s?\b\s*(?:was)?\s*[:=]?\s*(?:RWF|FRW)?\s*([\d,]+(?:\.\d+)?)/i,
-    )?.[1],
-  );
+  // Fee: "Fee 100 RWF", "fee was: 100", "Transaction Charge: RWF 200" — summed
+  // across ALL named charges (see extractFees for why).
+  const fee = extractFees(raw);
 
   const balance_after = extractBalance(raw);
   const txn_ref =
@@ -238,7 +359,7 @@ export function regexExtract(raw: string, ctx?: ParseContext): RegexFacts {
     balance_after,
     txn_ref,
     status,
-    occurred_at: extractOccurredAt(raw),
+    occurred_at: extractOccurredAt(raw) ?? extractBprDate(raw),
     channelHint: detectChannel(raw, direction === 'credit'),
     counterpartyNumber,
     transferAccount,
@@ -274,6 +395,11 @@ function regexClassify(
   const from = raw.match(/received .+ from ([^\(.]+)/i);
   const sentTo = raw.match(/sent to ([^\(.]+)/i);
   const narration = raw.match(/narration:\s*([^.]+)/i);
+  // BPR-style: "... at BPR Bank. Transaction Charge: ..." — no counterparty
+  // name is disclosed, but naming the bank/agent beats "Unknown".
+  const atBank = raw.match(
+    /\bat\s+([A-Z][A-Za-z0-9&. ]{2,30}?)\.\s*(?:Transaction Charge|Notification Charge|Your balance|For inquiry)/i,
+  );
 
   if (facts.transferAccount) {
     merchant =
@@ -286,6 +412,7 @@ function regexClassify(
   else if (from) {merchant = from[1].trim();}
   else if (sentTo) {merchant = sentTo[1].trim();}
   else if (narration) {merchant = narration[1].trim();}
+  else if (atBank) {merchant = atBank[1].trim();}
 
   const isCredit = facts.direction === 'credit';
   const hay = (merchant + ' ' + raw).toLowerCase();
@@ -398,6 +525,9 @@ Rules:
 - Bank of Kigali alert format: "TRANSFER - <rail> Credited account: X Debited account: Y Amount: RWF N ..." —
   the words Credited/Debited name the two ACCOUNTS, not the user. The direction fact below is already
   resolved from the user's own account numbers; never contradict it.
+- BPR Bank format: "your account X has been debited/credited RWF N ... at BPR Bank. Transaction Charge:
+  ... Notification Charge: ... Your balance is RWF Z." never names the counterparty — use "BPR Bank" or
+  the bank/agent named after "at" as the merchant unless a learned rule or transfer fact says otherwise.
 - is_transfer is TRUE when the money moved between the USER'S OWN accounts —
   i.e. the counterparty is the user themselves (name matches the account holder),
   a Mokash savings pocket, a bank↔wallet top-up, or an explicit "fund-transfer"

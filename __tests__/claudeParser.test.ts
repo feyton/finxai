@@ -5,9 +5,13 @@
 import {
   detectStatus,
   extractBalance,
+  extractTransferHint,
+  isTransferStatusOnly,
+  maskedSuffixMatches,
   normalizeAccountNumber,
   parseWithRegex,
   regexExtract,
+  trailingDigits,
   ParseContext,
 } from '../src/tools/claudeParser';
 
@@ -166,5 +170,118 @@ describe('legacy formats still work', () => {
     const parsed = parseWithRegex(raw);
     expect(parsed.isTransfer).toBe(true);
     expect(extractBalance(raw)).toBe(3120);
+  });
+});
+
+// ── BPR Bank — real SMS text, balance chain hand-verified ───────────────────
+// Each debit/credit deducts BOTH "Transaction Charge" and "Notification
+// Charge" from the balance, regardless of direction:
+//   326,233 (18 JUN debit) + 211,933 (25 JUN credit) − 520 (500+20 charges) = 537,646
+//   537,646 − 100,000 (08 JUL debit) − 20  (0+20 charges)  = 437,626
+//   437,626 − 100,000 (18 JUL debit) − 40  (20+20 charges) = 337,586
+//   337,586 −  40,000 (19 JUL debit) − 40  (20+20 charges) = 297,546
+//   297,546 −  30,000 (20 JUL debit) − 40  (20+20 charges) = 267,506
+const BPR_DEBIT =
+  'Dear RUSARO KIZITO ANGE, your account 4******947 has been debited RWF 30,000.00. Ref: FT26201C9DZQ on 20 JUL 2026-19:28:17 at BPR Bank. Transaction Charge: RWF 20.00. Notification Charge: RWF 20.00. Your balance is RWF 267,506.00. For inquiry call 250788140000';
+
+const BPR_DEBIT_ZERO_TXN_CHARGE =
+  'Dear RUSARO KIZITO ANGE, your account 4******947 has been debited RWF 100,000.00. Ref: FT26189JP45Y on 08 JUL 2026-08:34:20 at BPR Bank. Transaction Charge: RWF 0.00. Notification Charge: RWF 20.00. Your balance is RWF 437,626.00. For inquiry call 250788140000';
+
+const BPR_CREDIT =
+  'Dear RUSARO KIZITO ANGE, your account 4******947 has been credited RWF 211,933.00. Ref: FT2617626KF3 on 25 JUN 2026-16:04:27 at BPR Bank. Transaction Charge: RWF 500.00. Notification Charge: RWF 20.00. Your balance is RWF 537,646.00. For inquiry call 250788140000';
+
+const BPR_STATUS_COMPLETED =
+  'Dear RUSARO KIZITO ANGE, \n\nTransaction Ref: 20144624592 of RWF 30,000.00 from A/c 4*****1947 to A/c 0*****2911 on 20/07/2026 is Completed Bank Ref: 04e5c2f8-d07a-4f46-a183-5e01a5e42b58.';
+
+const BPR_STATUS_PROCESSING =
+  'Dear RUSARO KIZITO ANGE, \n\nTransaction Ref: 20144624592 of RWF 30,000.00 from A/c 4*****1947 to A/c 0*****2911 on 20/07/2026 is Your request is being processing, confirmation will be sent to you shortly Bank Ref: 04e5c2f8-d07a-4f46-a183-5e01a5e42b58.';
+
+const BPR_CTX: ParseContext = {
+  userName: 'RUSARO KIZITO ANGE',
+  accounts: [
+    {id: 'bpr-1', name: 'BPR Bank', number: '4001234561947'},
+    {id: 'momo-1', name: 'MTN MoMo', number: '250787241457'},
+  ],
+  currentAccountId: 'bpr-1',
+};
+
+describe('BPR Bank debit/credit alerts', () => {
+  it('parses a debit with the DD MON YYYY-HH:MM:SS date, ref, and summed charges', () => {
+    const f = regexExtract(BPR_DEBIT, BPR_CTX);
+    expect(f.direction).toBe('debit');
+    expect(f.amount).toBe(30000);
+    expect(f.fee).toBe(40); // 20 (Transaction Charge) + 20 (Notification Charge)
+    expect(f.balance_after).toBe(267506);
+    expect(f.txn_ref).toBe('FT26201C9DZQ');
+    expect(f.occurred_at).toContain('2026-07-20');
+  });
+
+  it('sums charges even when Transaction Charge is 0.00', () => {
+    const f = regexExtract(BPR_DEBIT_ZERO_TXN_CHARGE, BPR_CTX);
+    expect(f.fee).toBe(20); // 0 + 20
+    expect(f.balance_after).toBe(437626);
+  });
+
+  it('"has been credited" is read as a credit, charges still deducted', () => {
+    const f = regexExtract(BPR_CREDIT, BPR_CTX);
+    expect(f.direction).toBe('credit');
+    expect(f.amount).toBe(211933);
+    expect(f.fee).toBe(520); // 500 + 20
+    expect(f.balance_after).toBe(537646);
+  });
+
+  it('falls back to "at BPR Bank" as the merchant (no counterparty disclosed)', () => {
+    const parsed = parseWithRegex(BPR_DEBIT, BPR_CTX);
+    expect(parsed.merchant).toBe('BPR Bank');
+  });
+});
+
+describe('BPR transfer-status confirmations are discarded, not parsed as transactions', () => {
+  it('recognizes both the Completed and the processing variant', () => {
+    expect(isTransferStatusOnly(BPR_STATUS_COMPLETED)).toBe(true);
+    expect(isTransferStatusOnly(BPR_STATUS_PROCESSING)).toBe(true);
+  });
+
+  it('does NOT flag the authoritative debit/credit alert as status-only', () => {
+    expect(isTransferStatusOnly(BPR_DEBIT)).toBe(false);
+    expect(isTransferStatusOnly(BPR_CREDIT)).toBe(false);
+  });
+
+  it('extracts a transfer hint (amount, D/M/YYYY date key, destination suffix)', () => {
+    const hint = extractTransferHint(BPR_STATUS_COMPLETED);
+    expect(hint).not.toBeNull();
+    expect(hint?.amount).toBe(30000);
+    expect(hint?.dateKey).toBe('2026-07-20');
+    expect(hint?.destSuffix).toBe('2911');
+  });
+
+  it('the processing variant yields the same hint as Completed', () => {
+    expect(extractTransferHint(BPR_STATUS_PROCESSING)).toEqual(
+      extractTransferHint(BPR_STATUS_COMPLETED),
+    );
+  });
+});
+
+describe('masked-number suffix matching (BPR shows a different trailing length per template)', () => {
+  it('trailingDigits pulls the stable suffix out of a masked string', () => {
+    expect(trailingDigits('4******947')).toBe('947');
+    expect(trailingDigits('4*****1947')).toBe('1947');
+    expect(trailingDigits('0*****2911')).toBe('2911');
+  });
+
+  it('matches the SAME account masked to different visible lengths', () => {
+    expect(maskedSuffixMatches('947', '1947')).toBe(true);
+    expect(maskedSuffixMatches(trailingDigits('4******947'), trailingDigits('4*****1947'))).toBe(true);
+  });
+
+  it('rejects an unrelated number and anything shorter than 3 digits', () => {
+    expect(maskedSuffixMatches('2911', '1457')).toBe(false);
+    expect(maskedSuffixMatches('11', '2911')).toBe(false);
+  });
+
+  it('a destination suffix matches the configured MoMo account by its trailing digits', () => {
+    const momoNorm = normalizeAccountNumber('0787241457'); // → '787241457'
+    expect(maskedSuffixMatches('1457', momoNorm)).toBe(true);
+    expect(maskedSuffixMatches('2911', momoNorm)).toBe(false);
   });
 });

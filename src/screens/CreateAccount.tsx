@@ -64,6 +64,16 @@ const PROVIDERS = [
     auto: true,
   },
   {
+    id: 'bpr',
+    name: 'BPR Bank',
+    kind: 'Reads BPR SMS alerts',
+    icon: 'Landmark',
+    tint: '#F97316',
+    address: 'BPR',
+    type: 'Bank',
+    auto: true,
+  },
+  {
     id: 'mokash',
     name: 'MoKash Savings',
     kind: 'Auto-reads MoKash SMS',

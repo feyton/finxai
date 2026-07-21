@@ -82,6 +82,7 @@ export function accountTint(name: string): string {
   if (n.includes('cash') || n.includes('wallet')) return '#22C55E';
   if (n.includes('equity')) return '#E2231A';
   if (n.includes('airtel')) return '#E40000';
+  if (n.includes('bpr')) return '#F97316';
   return '#22C55E';
 }
 
