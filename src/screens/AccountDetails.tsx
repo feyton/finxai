@@ -1,7 +1,7 @@
 import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import {usePowerSync, useQuery} from '@powersync/react-native';
 import {format} from 'date-fns';
-import React, {useMemo, useState} from 'react';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {
   Modal,
   Pressable,
@@ -13,26 +13,16 @@ import {
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import TransactionDetailSheet, {
+  TransactionDetailSheetHandle,
+} from '../Components/TransactionDetailSheet';
 import {TxRow} from '../Components/TxRow';
 import {Icon} from '../Components/ui';
 import {appAlert} from '../Components/AppDialog';
 import {useCurrentUser} from '../hooks/useCurrentUser';
-import {extractBalance} from '../tools/claudeParser';
 import {sendInviteEmail} from '../tools/invites';
+import {syncAccountBalance} from '../tools/balance';
 import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
-
-// Movement a transaction had on its own account's balance.
-function movementDelta(t: any): number {
-  const amount = t.amount ?? 0;
-  const fees = t.fees ?? 0;
-  if (t.transaction_type === 'income') {
-    return amount;
-  }
-  if (t.transaction_type === 'transfer') {
-    return t.transfer_direction === 'in' ? amount : -(amount + fees);
-  }
-  return -(amount + fees);
-}
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -199,12 +189,24 @@ function dayLabel(dt: string): string {
   return format(date, 'MMM d, yyyy');
 }
 
+type FilterType = 'all' | 'income' | 'expense' | 'transfer' | 'ai';
+
+const FILTERS: {key: FilterType; label: string}[] = [
+  {key: 'all', label: 'All'},
+  {key: 'expense', label: 'Spending'},
+  {key: 'income', label: 'Income'},
+  {key: 'transfer', label: 'Transfers'},
+  {key: 'ai', label: 'AI-tagged'},
+];
+
 export default function AccountDetails({route, navigation}: any) {
   const {accountId} = route.params;
   const {userId} = useCurrentUser();
   const db = usePowerSync();
   const tabBarHeight = useBottomTabBarHeight();
   const [shareOpen, setShareOpen] = useState(false);
+  const [filter, setFilter] = useState<FilterType>('all');
+  const sheetRef = useRef<TransactionDetailSheetHandle>(null);
 
   // No owner filter: shared-in accounts carry the sharer's owner_id, and the
   // local DB only ever holds rows this user is allowed to see.
@@ -220,58 +222,39 @@ export default function AccountDetails({route, navigation}: any) {
 
   const account = (accounts as any[])[0];
   const isOwner = account?.owner_id === userId;
+  // NOTE: "Can view & edit" sharing only grants RLS write access on
+  // transactions, not on accounts.available_balance — editing/deleting a
+  // transaction also moves the balance, which a shared editor cannot push
+  // upstream today. Scoping Edit/Delete to the owner until that RLS grant
+  // (and the accompanying "no touching the amount/account" UI guard for
+  // shared editors) lands as its own change.
+  const canEdit = isOwner;
+
   const [syncing, setSyncing] = useState(false);
 
-  // Re-derive the balance from the transaction history: anchor on the newest
-  // bank-reported balance (balance_after, or extracted from the stored SMS
-  // for older rows), then replay every movement recorded after that anchor.
   const syncBalance = async () => {
     if (syncing) {
       return;
     }
     setSyncing(true);
     try {
-      const res = await db.execute(
-        `SELECT id, date_time, amount, fees, transaction_type, transfer_direction,
-                balance_after, sms
-         FROM transactions WHERE account_id = ?
-         ORDER BY date_time DESC LIMIT 300`,
-        [accountId],
-      );
-      const rows: any[] = res.rows?._array ?? [];
-      let anchorIdx = -1;
-      let anchorBal: number | null = null;
-      for (let i = 0; i < rows.length; i++) {
-        const b = rows[i].balance_after ?? extractBalance(rows[i].sms ?? '');
-        if (b != null) {
-          anchorIdx = i;
-          anchorBal = b;
-          break;
-        }
-      }
-      if (anchorBal == null) {
+      const result = await syncAccountBalance(db, accountId);
+      if (!result) {
         appAlert(
           'No bank balance found',
           "None of this account's records carry a bank-reported balance yet — it will populate as new SMS arrive.",
         );
         return;
       }
-      // rows[0..anchorIdx-1] are NEWER than the anchor — replay them on top.
-      let bal = anchorBal;
-      for (let i = anchorIdx - 1; i >= 0; i--) {
-        bal += movementDelta(rows[i]);
-      }
-      await db.execute('UPDATE accounts SET available_balance = ? WHERE id = ?', [
-        bal,
-        accountId,
-      ]);
-      const anchorDate = rows[anchorIdx].date_time
-        ? format(new Date(rows[anchorIdx].date_time), 'MMM d, HH:mm')
+      const anchorDate = result.anchorDate
+        ? format(new Date(result.anchorDate), 'MMM d, HH:mm')
         : 'unknown time';
       appAlert(
         'Balance synced',
-        `RWF ${fmtAmount(bal)}\n\nAnchored on the bank's balance from ${anchorDate}` +
-          (anchorIdx > 0 ? `, plus ${anchorIdx} newer movement${anchorIdx === 1 ? '' : 's'}.` : '.'),
+        `RWF ${fmtAmount(result.balance)}\n\nAnchored on the bank's balance from ${anchorDate}` +
+          (result.replayedCount > 0
+            ? `, plus ${result.replayedCount} newer movement${result.replayedCount === 1 ? '' : 's'}.`
+            : '.'),
       );
     } catch (e: any) {
       appAlert('Sync failed', e?.message ?? 'Unknown error');
@@ -280,12 +263,19 @@ export default function AccountDetails({route, navigation}: any) {
     }
   };
 
-  const {totalIncome, totalExpense, sections} = useMemo(() => {
+  const {totalIncome, totalExpense, sections, flatList} = useMemo(() => {
+    let list = transactions as any[];
+    if (filter === 'ai') {
+      list = list.filter(t => t.source === 'sms' || t.source === 'ai');
+    } else if (filter !== 'all') {
+      list = list.filter(t => t.transaction_type === filter);
+    }
+
     let income = 0;
     let expense = 0;
     const groups: Record<string, any[]> = {};
 
-    for (const t of transactions as any[]) {
+    for (const t of list) {
       // transfers are net-zero across the user's accounts — not income/spend
       if (t.transaction_type === 'income') {income += t.amount ?? 0;}
       else if (t.transaction_type === 'expense') {expense += t.amount ?? 0;}
@@ -302,12 +292,21 @@ export default function AccountDetails({route, navigation}: any) {
         .filter(t => t.transaction_type === 'income')
         .reduce((s: number, t: any) => s + (t.amount ?? 0), 0),
       dayExpense: data
-        .filter(t => t.transaction_type === 'expense')
+        .filter(t => t.transaction_type !== 'income')
         .reduce((s: number, t: any) => s + (t.amount ?? 0), 0),
     }));
 
-    return {totalIncome: income, totalExpense: expense, sections: secs};
-  }, [transactions]);
+    return {totalIncome: income, totalExpense: expense, sections: secs, flatList: list};
+  }, [transactions, filter]);
+
+  const openDetail = useCallback((tx: any) => {
+    sheetRef.current?.open(tx);
+  }, []);
+
+  const renderItem = useCallback(
+    ({item}: {item: any}) => <TxRow tx={item} onPress={() => openDetail(item)} />,
+    [openDetail],
+  );
 
   if (!account) {
     return (
@@ -327,7 +326,7 @@ export default function AccountDetails({route, navigation}: any) {
       <SectionList
         sections={sections}
         keyExtractor={(item: any) => item.id}
-        renderItem={({item}) => <TxRow tx={item} />}
+        renderItem={renderItem}
         renderSectionHeader={({section}: any) => (
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionDate}>{section.title}</Text>
@@ -425,20 +424,50 @@ export default function AccountDetails({route, navigation}: any) {
               </View>
             </View>
 
-            {/* Section label */}
+            {/* Filter chips — horizontally scrollable */}
             {(transactions as any[]).length > 0 && (
-              <Text style={styles.sectionLabel}>All transactions</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.filterRow}>
+                {FILTERS.map(f => (
+                  <Pressable
+                    key={f.key}
+                    onPress={() => setFilter(f.key)}
+                    style={[styles.chip, filter === f.key && styles.chipActive]}>
+                    <Text style={[styles.chipText, filter === f.key && styles.chipTextActive]}>
+                      {f.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+
+            {/* Section label */}
+            {flatList.length > 0 && (
+              <Text style={styles.sectionLabel}>
+                {filter === 'all' ? 'All transactions' : `${FILTERS.find(f => f.key === filter)?.label} transactions`}
+              </Text>
             )}
           </>
         }
         ListEmptyComponent={
           <View style={styles.empty}>
             <Icon name="Receipt" size={38} color={T.text3} strokeWidth={1.4} />
-            <Text style={styles.emptyText}>No transactions yet</Text>
+            <Text style={styles.emptyText}>
+              {(transactions as any[]).length === 0 ? 'No transactions yet' : 'No transactions match this filter'}
+            </Text>
           </View>
         }
         contentContainerStyle={[styles.list, {paddingBottom: tabBarHeight + 28}]}
         stickySectionHeadersEnabled={false}
+      />
+
+      <TransactionDetailSheet
+        ref={sheetRef}
+        navigation={navigation}
+        flatList={flatList}
+        canEdit={canEdit}
       />
 
       {isOwner && (
@@ -524,6 +553,23 @@ const styles = StyleSheet.create({
   statDivider: {width: 1, height: 32, backgroundColor: T.border, marginHorizontal: 12},
   statLabel: {fontFamily: FONTS.regular, fontSize: 11, color: T.text3},
   statValue: {fontFamily: FONTS.semibold, fontSize: 13},
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 4,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: R.pill,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  chipActive: {backgroundColor: T.accentSoft, borderColor: T.accent},
+  chipText: {fontFamily: FONTS.medium, fontSize: 12.5, color: T.text2},
+  chipTextActive: {color: T.accent},
   sectionLabel: {
     fontFamily: FONTS.semibold,
     fontSize: 12,
@@ -531,7 +577,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 12,
     paddingBottom: 4,
   },
   sectionHeader: {

@@ -36,6 +36,7 @@ import {
   getMerchantRules,
   recordMerchantChannel,
 } from '../tools/merchantMemory';
+import {syncAccountBalance} from '../tools/balance';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -155,6 +156,12 @@ const SMSRetriever: React.FC = () => {
       const transferHints = inbox
         .map(sms => (sms.body ? extractTransferHint(sms.body) : null))
         .filter((h): h is NonNullable<typeof h> => h != null);
+
+      // Accounts that got a new auto-saved transaction this run — balance is
+      // recomputed for each ONCE at the end (anchor + replay), never by
+      // blindly writing whichever SMS happened to be processed last (the
+      // inbox isn't guaranteed to arrive in chronological order).
+      const touchedAccounts = new Set<string>();
 
       for (const sms of inbox) {
         if (!sms.body || existingSmsSet.has(sms.body)) {continue;}
@@ -277,26 +284,7 @@ const SMSRetriever: React.FC = () => {
                 now,
               ],
             );
-
-            // Prefer the bank's own balance from the SMS (authoritative,
-            // self-healing); only fall back to incrementing when absent.
-            if (parsed.balance_after != null) {
-              await db.execute(
-                'UPDATE accounts SET available_balance = ? WHERE id = ?',
-                [parsed.balance_after, account.id],
-              );
-            } else {
-              // Balance impact follows the SMS direction (not the type):
-              // a debit costs amount + fee, a credit adds amount.
-              const delta =
-                parsed.direction === 'credit'
-                  ? parsed.amount
-                  : -(parsed.amount + (parsed.fee ?? 0));
-              await db.execute(
-                'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-                [delta, account.id],
-              );
-            }
+            touchedAccounts.add(account.id);
           } else {
             // Needs review — goes to auto_records
             await db.execute(
@@ -330,6 +318,13 @@ const SMSRetriever: React.FC = () => {
         } catch (e) {
           console.warn('[SMSRetriever] Failed to process SMS:', e);
         }
+      }
+
+      // Recompute balances once per touched account — anchor on the newest
+      // bank-reported balance and replay newer movements, immune to whatever
+      // order the inbox happened to process in.
+      for (const accId of touchedAccounts) {
+        await syncAccountBalance(db, accId);
       }
 
       // Advance every auto account's catalog cursor to this fetch.

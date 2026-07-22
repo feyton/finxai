@@ -18,6 +18,7 @@ import {useCurrentUser} from '../hooks/useCurrentUser';
 import {useSubcategories} from '../hooks/useSubcategories';
 import {recordChannel, recordConfirmation, recordCorrection} from '../tools/merchantMemory';
 import {extractBalance, regexExtract} from '../tools/claudeParser';
+import {syncAccountBalance} from '../tools/balance';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -443,22 +444,11 @@ export default function SMSReviewScreen({navigation}: any) {
         ],
       );
 
-      // Prefer the SMS's own balance (authoritative); else increment.
-      if (bal != null) {
-        await db.execute(
-          'UPDATE accounts SET available_balance = ? WHERE id = ?',
-          [bal, record.account_id],
-        );
-      } else {
-        const delta =
-          dir === 'credit'
-            ? record.amount ?? 0
-            : -((record.amount ?? 0) + (record.fees ?? 0));
-        await db.execute(
-          'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-          [delta, record.account_id],
-        );
-      }
+      // Recompute from the full history (anchor + replay) rather than
+      // trusting this one SMS's balance in isolation — pending records can
+      // be confirmed in any order, and blindly writing "whatever this SMS
+      // says" leaves a stale balance if an older one is confirmed last.
+      await syncAccountBalance(db, record.account_id);
 
       await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
 
@@ -517,24 +507,9 @@ export default function SMSReviewScreen({navigation}: any) {
         ],
       );
 
-      // Use the SMS balance only if the account wasn't reassigned in the fix;
-      // otherwise the SMS balance belongs to a different account — increment.
-      if (bal != null && accountId === record.account_id) {
-        await db.execute(
-          'UPDATE accounts SET available_balance = ? WHERE id = ?',
-          [bal, accountId],
-        );
-      } else {
-        const dir = regexExtract(record.sms ?? '').direction;
-        const delta =
-          dir === 'credit'
-            ? record.amount ?? 0
-            : -((record.amount ?? 0) + (record.fees ?? 0));
-        await db.execute(
-          'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-          [delta, accountId],
-        );
-      }
+      // Recompute from the full history for whichever account actually
+      // received this transaction (anchor + replay — see handleConfirm).
+      await syncAccountBalance(db, accountId);
 
       await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
 

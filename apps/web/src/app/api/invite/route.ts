@@ -67,8 +67,15 @@ export async function POST(request: Request) {
   }
   const inviter = String(body.inviterName || 'A FinXAI user').slice(0, 80);
   const invitee = String(body.inviteeName || 'there').slice(0, 80);
-  const link =
+  const appLink =
     process.env.APP_LINK ?? 'https://github.com/feyton/finxai/releases/latest';
+  // The web dashboard is the fastest path — no install needed, and there is
+  // no separate "accept" step: signing in with this email is what activates
+  // the share (a DB trigger flips it to active the moment this address
+  // matches a Supabase auth user). /login redirects straight to
+  // /dashboard/shared once authenticated.
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://app.feyton.co.rw').replace(/\/+$/, '');
+  const webLink = `${siteUrl}/login`;
 
   const res = await fetch('https://api.mailjet.com/v3.1/send', {
     method: 'POST',
@@ -92,10 +99,15 @@ export async function POST(request: Request) {
               <p>Hi ${escapeHtml(invitee)},</p>
               <p><b>${escapeHtml(inviter)}</b> shared an account with you on
                  <b>FinXAI</b> — an AI expense tracker that sorts MoMo &amp; bank SMS automatically.</p>
-              <p><a href="${link}" style="display:inline-block;background:#3B82F6;color:#fff;
+              <p><a href="${webLink}" style="display:inline-block;background:#3B82F6;color:#fff;
                  text-decoration:none;font-weight:700;padding:12px 20px;border-radius:10px">
-                 Open FinXAI</a></p>
-              <p style="color:#6B747C;font-size:13px">Sign in with this email address and the shared account appears automatically.</p>
+                 View on the web</a></p>
+              <p style="color:#6B747C;font-size:13px">
+                 Sign in with <b>${escapeHtml(email)}</b> (Google) — there's no separate "accept" step,
+                 the shared account appears the moment you sign in.</p>
+              <p style="color:#6B747C;font-size:13px;margin-top:18px">
+                 Prefer the phone app? <a href="${appLink}" style="color:#3B82F6">Install FinXAI</a>
+                 and sign in with the same email.</p>
             </div>`,
         },
       ],

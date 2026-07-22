@@ -1,11 +1,13 @@
-import BottomSheet, {BottomSheetScrollView} from '@gorhom/bottom-sheet';
-import {Gesture, GestureDetector} from 'react-native-gesture-handler';
+import TransactionDetailSheet, {
+  TransactionDetailSheetHandle,
+} from '../Components/TransactionDetailSheet';
 import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
-import {useQuery, usePowerSync} from '@powersync/react-native';
+import {useQuery} from '@powersync/react-native';
 import {format} from 'date-fns';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Pressable,
+  ScrollView,
   SectionList,
   StyleSheet,
   Text,
@@ -16,22 +18,17 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {TxRow} from '../Components/TxRow';
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
-import {
-  CATS,
-  FONTS,
-  R,
-  T,
-  fmtAmount,
-  resolveCat,
-} from '../theme';
-
-const SOURCE_LABEL: Record<string, string> = {
-  sms: 'From SMS',
-  ai: 'AI added',
-  manual: 'Manual entry',
-};
+import {FONTS, R, T, fmtAmount} from '../theme';
 
 type FilterType = 'all' | 'income' | 'expense' | 'transfer' | 'ai';
+
+const FILTERS: {key: FilterType; label: string}[] = [
+  {key: 'all', label: 'All'},
+  {key: 'expense', label: 'Spending'},
+  {key: 'income', label: 'Income'},
+  {key: 'transfer', label: 'Transfers'},
+  {key: 'ai', label: 'AI-tagged'},
+];
 
 function dayLabel(dt: string): string {
   const date = new Date(dt);
@@ -43,207 +40,8 @@ function dayLabel(dt: string): string {
   return format(date, 'MMM d, yyyy');
 }
 
-function InfoRow({label, value}: {label: string; value: string}) {
-  return (
-    <View style={styles.infoRow}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue} numberOfLines={1}>{value}</Text>
-    </View>
-  );
-}
-
-// View-only detail — editing/splitting live on the EditTransaction screen
-// (horizontal chip rows inside the bottom sheet fought its pan gestures).
-// Swipe left/right (or use the arrows) to step through the filtered list.
-function TxDetail({
-  tx,
-  splits,
-  index,
-  total,
-  onStep,
-  onEdit,
-  onDelete,
-}: {
-  tx: any;
-  splits: any[];
-  index: number;
-  total: number;
-  onStep: (dir: 1 | -1) => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const catId = resolveCat(tx.category ?? '');
-  const cat = CATS[catId];
-  const isIncome = tx.transaction_type === 'income';
-  const isTransfer = tx.transaction_type === 'transfer';
-  const dateStr = tx.date_time ? format(new Date(tx.date_time), 'MMM d, yyyy  ·  HH:mm') : '—';
-  const conf = tx.confidence != null && tx.confidence < 1 ? ` · ${Math.round(tx.confidence * 100)}%` : '';
-  const sourceStr = (SOURCE_LABEL[tx.source] ?? 'Manual entry') + conf;
-
-  // Horizontal swipe steps transactions; clearly-vertical drags stay with the
-  // sheet/scroll (activeOffsetX vs failOffsetY keeps the gestures apart).
-  const swipe = Gesture.Pan()
-    .runOnJS(true)
-    .activeOffsetX([-15, 15])
-    .failOffsetY([-12, 12])
-    .onEnd(e => {
-      if (e.translationX <= -56) {
-        onStep(1); // swipe left → next (older)
-      } else if (e.translationX >= 56) {
-        onStep(-1); // swipe right → previous (newer)
-      }
-    });
-
-  return (
-    <BottomSheetScrollView contentContainerStyle={styles.detail}>
-      <GestureDetector gesture={swipe}>
-      <View>
-      {/* Prev / next navigation */}
-      <View style={styles.navRow}>
-        <Pressable
-          onPress={() => onStep(-1)}
-          disabled={index <= 0}
-          hitSlop={10}
-          style={({pressed}) => [styles.navBtn, {opacity: index <= 0 ? 0.3 : pressed ? 0.7 : 1}]}>
-          <Icon name="ChevronLeft" size={18} color={T.text2} strokeWidth={2.2} />
-        </Pressable>
-        <Text style={styles.navPos}>
-          {index + 1} of {total}
-        </Text>
-        <Pressable
-          onPress={() => onStep(1)}
-          disabled={index >= total - 1}
-          hitSlop={10}
-          style={({pressed}) => [styles.navBtn, {opacity: index >= total - 1 ? 0.3 : pressed ? 0.7 : 1}]}>
-          <Icon name="ChevronRight" size={18} color={T.text2} strokeWidth={2.2} />
-        </Pressable>
-      </View>
-
-      <View style={styles.detailTop}>
-        <View style={[styles.detailIcon, {backgroundColor: (isTransfer ? T.info : cat.color) + '22'}]}>
-          <Icon
-            name={isTransfer ? 'ArrowLeftRight' : cat.icon}
-            size={22}
-            color={isTransfer ? T.info : cat.color}
-            strokeWidth={2}
-          />
-        </View>
-        <Text
-          style={[
-            styles.detailAmount,
-            {color: isTransfer ? T.text : isIncome ? T.income : T.expense},
-          ]}>
-          {isTransfer ? '' : isIncome ? '+' : '-'}RWF {fmtAmount(tx.amount ?? 0)}
-        </Text>
-        <Text style={styles.detailLabel}>{tx.merchant || tx.payee || cat.label}</Text>
-        {isTransfer && (
-          <Text style={styles.detailSub}>Transfer between your accounts</Text>
-        )}
-      </View>
-
-      <View style={styles.infoCard}>
-        {!isTransfer && (
-          <>
-            <InfoRow
-              label="Category"
-              value={cat.label + (tx.subcategory ? ` · ${tx.subcategory}` : '')}
-            />
-            <View style={styles.infoDivider} />
-          </>
-        )}
-        <InfoRow label="Account" value={tx.account_name ?? '—'} />
-        <View style={styles.infoDivider} />
-        <InfoRow label="When" value={dateStr} />
-        <View style={styles.infoDivider} />
-        <InfoRow label="Source" value={sourceStr} />
-        {tx.balance_after != null && (
-          <>
-            <View style={styles.infoDivider} />
-            <InfoRow
-              label="Balance after"
-              value={`RWF ${fmtAmount(tx.balance_after)} (bank-reported)`}
-            />
-          </>
-        )}
-        {tx.fees > 0 && (
-          <>
-            <View style={styles.infoDivider} />
-            <InfoRow label="Fee" value={`RWF ${fmtAmount(tx.fees)}`} />
-          </>
-        )}
-        {tx.note ? (
-          <>
-            <View style={styles.infoDivider} />
-            <InfoRow label="Note" value={tx.note} />
-          </>
-        ) : null}
-      </View>
-
-      {splits.length > 0 && (
-        <View style={styles.infoCard}>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Split into</Text>
-          </View>
-          {splits.map((s: any) => {
-            const sc = CATS[resolveCat(s.category ?? '')];
-            return (
-              <View key={s.id} style={styles.infoRow}>
-                <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
-                  <View style={[styles.splitDot, {backgroundColor: sc.color}]} />
-                  <Text style={styles.infoValue}>{sc.label}</Text>
-                </View>
-                <Text style={styles.infoValue}>RWF {fmtAmount(s.amount ?? 0)}</Text>
-              </View>
-            );
-          })}
-        </View>
-      )}
-
-      <View style={styles.detailBtns}>
-        <Pressable
-          onPress={onEdit}
-          style={({pressed}) => [styles.editBtn, {opacity: pressed ? 0.8 : 1}]}>
-          <Icon name="Pencil" size={15} color={T.accent} strokeWidth={2.2} />
-          <Text style={styles.editBtnText}>
-            {isTransfer ? 'Edit' : 'Edit / Split'}
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={onDelete}
-          style={({pressed}) => [styles.deleteBtn, {opacity: pressed ? 0.7 : 1}]}>
-          <Icon name="Trash2" size={16} color={T.expense} strokeWidth={2} />
-          <Text style={styles.deleteBtnText}>Delete</Text>
-        </Pressable>
-      </View>
-      </View>
-      </GestureDetector>
-    </BottomSheetScrollView>
-  );
-}
-
-const FILTERS: {key: FilterType; label: string}[] = [
-  {key: 'all', label: 'All'},
-  {key: 'expense', label: 'Spending'},
-  {key: 'income', label: 'Income'},
-  {key: 'transfer', label: 'Transfers'},
-  {key: 'ai', label: 'AI-tagged'},
-];
-
-// Balance-movement sign of a transaction as it was originally recorded.
-// Changing the TYPE re-classifies the record; it does not move money again.
-function movementSign(txType: string, transferDirection?: string | null): number {
-  if (txType === 'income') {
-    return 1;
-  }
-  if (txType === 'transfer') {
-    return transferDirection === 'in' ? 1 : -1;
-  }
-  return -1;
-}
-
 export default function RecordsPage({navigation, route}: any) {
   const {userId} = useCurrentUser();
-  const db = usePowerSync();
 
   const {data: txns} = useQuery(
     'SELECT t.*, a.name as account_name FROM transactions t LEFT JOIN accounts a ON t.account_id = a.id WHERE t.owner_id = ? ORDER BY t.date_time DESC',
@@ -253,15 +51,7 @@ export default function RecordsPage({navigation, route}: any) {
   const tabBarHeight = useBottomTabBarHeight();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
-  const [selected, setSelected] = useState<any>(null);
-
-  const {data: selectedSplits} = useQuery(
-    'SELECT * FROM split_details WHERE transaction_id = ?',
-    [selected?.id ?? ''],
-  );
-  const sheetRef = useRef<BottomSheet>(null);
-  // Tall enough that the Edit/Delete actions are visible without dragging.
-  const snapPoints = useMemo(() => ['80%', '95%'], []);
+  const sheetRef = useRef<TransactionDetailSheetHandle>(null);
 
   const monthTotals = useMemo(() => {
     const start = new Date();
@@ -321,25 +111,9 @@ export default function RecordsPage({navigation, route}: any) {
     return {sections: secs, flatList: list};
   }, [txns, filter, search]);
 
-  const openDetail = (tx: any) => {
-    setSelected(tx);
-    sheetRef.current?.snapToIndex(0);
-  };
-
-  // Prev / next within the current filter, for the detail sheet's swipe + arrows.
-  const selectedIndex = selected
-    ? flatList.findIndex((t: any) => t.id === selected.id)
-    : -1;
-  const goStep = useCallback(
-    (dir: 1 | -1) => {
-      if (selectedIndex < 0) {return;}
-      const next = flatList[selectedIndex + dir];
-      if (next) {
-        setSelected(next);
-      }
-    },
-    [flatList, selectedIndex],
-  );
+  const openDetail = useCallback((tx: any) => {
+    sheetRef.current?.open(tx);
+  }, []);
 
   // Deeplink: open a transaction's detail when navigated with openTxId
   // (e.g. tapping a recent transaction on the Home landing page).
@@ -352,40 +126,18 @@ export default function RecordsPage({navigation, route}: any) {
     if (!tx) {
       return; // txns not loaded yet — effect re-runs when it is
     }
-    setSelected(tx);
-    // Delay the snap: on first navigation into this tab the sheet may not be
+    // Delay the open: on first navigation into this tab the sheet may not be
     // laid out yet, so an immediate snapToIndex gets dropped.
-    const t = setTimeout(() => sheetRef.current?.snapToIndex(0), 150);
+    const t = setTimeout(() => sheetRef.current?.open(tx), 150);
     navigation.setParams({openTxId: undefined}); // consume it (only after we found the tx)
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params?.openTxId, txns]);
 
-  const deleteSelected = useCallback(async () => {
-    if (!selected) {return;}
-    // reverse the transaction's effect on its account balance
-    const sign = movementSign(selected.transaction_type, selected.transfer_direction);
-    if (selected.account_id) {
-      await db.execute(
-        'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
-        [sign * (selected.amount ?? 0), selected.account_id],
-      );
-    }
-    await db.execute('DELETE FROM split_details WHERE transaction_id = ?', [selected.id]);
-    await db.execute('DELETE FROM transactions WHERE id = ?', [selected.id]);
-    sheetRef.current?.close();
-    setSelected(null);
-  }, [db, selected]);
-
-  // Editing/splitting happen on the EditTransaction screen — the bottom
-  // sheet's pan gestures made in-sheet chip rows a hit-or-miss experience.
-  const editSelected = useCallback(() => {
-    if (!selected) {return;}
-    const id = selected.id;
-    sheetRef.current?.close();
-    setSelected(null);
-    navigation.navigate('EditTransaction', {txId: id});
-  }, [navigation, selected]);
+  const renderItem = useCallback(
+    ({item}: {item: any}) => <TxRow tx={item} onPress={() => openDetail(item)} />,
+    [openDetail],
+  );
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -447,8 +199,11 @@ export default function RecordsPage({navigation, route}: any) {
         )}
       </View>
 
-      {/* Filter chips */}
-      <View style={styles.filterRow}>
+      {/* Filter chips — horizontally scrollable so more filters never wrap/clip */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterRow}>
         {FILTERS.map(f => (
           <Pressable
             key={f.key}
@@ -463,13 +218,13 @@ export default function RecordsPage({navigation, route}: any) {
             </Text>
           </Pressable>
         ))}
-      </View>
+      </ScrollView>
 
       {/* Transaction list */}
       <SectionList
         sections={sections}
         keyExtractor={(item: any) => item.id}
-        renderItem={({item}) => <TxRow tx={item} onPress={() => openDetail(item)} />}
+        renderItem={renderItem}
         renderSectionHeader={({section}: any) => (
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionDate}>{section.title}</Text>
@@ -495,35 +250,7 @@ export default function RecordsPage({navigation, route}: any) {
       />
 
       {/* Transaction detail sheet */}
-      <BottomSheet
-        ref={sheetRef}
-        index={-1}
-        snapPoints={snapPoints}
-        enablePanDownToClose
-        // The sheet's pan must not fight the horizontal tx-swipe: only
-        // clearly-vertical drags move the sheet, and any horizontal movement
-        // makes the sheet's gesture FAIL outright (no more up/down jitter
-        // while swiping between transactions).
-        activeOffsetY={[-12, 12]}
-        failOffsetX={[-15, 15]}
-        backgroundStyle={styles.sheetBg}
-        handleIndicatorStyle={styles.handle}
-        onChange={i => {
-          if (i === -1) {setSelected(null);}
-        }}>
-        {selected && (
-          <TxDetail
-            key={selected.id}
-            tx={selected}
-            splits={(selectedSplits as any[]) ?? []}
-            index={selectedIndex}
-            total={flatList.length}
-            onStep={goStep}
-            onEdit={editSelected}
-            onDelete={deleteSelected}
-          />
-        )}
-      </BottomSheet>
+      <TransactionDetailSheet ref={sheetRef} navigation={navigation} flatList={flatList} />
     </SafeAreaView>
   );
 }
@@ -598,6 +325,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     paddingHorizontal: 16,
+    paddingBottom: 4,
     marginBottom: 4,
   },
   chip: {
@@ -627,199 +355,4 @@ const styles = StyleSheet.create({
   empty: {alignItems: 'center', paddingTop: 80, gap: 8},
   emptyText: {fontFamily: FONTS.semibold, fontSize: 15, color: T.text2, marginTop: 4},
   emptyHint: {fontFamily: FONTS.regular, fontSize: 13, color: T.text3},
-  sheetBg: {backgroundColor: T.surface},
-  handle: {backgroundColor: T.border2},
-  sheetWrap: {flex: 1},
-  detail: {paddingHorizontal: 20, paddingBottom: 28},
-  detailTop: {alignItems: 'center', paddingVertical: 8, gap: 4},
-  navRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: 2,
-  },
-  navBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 11,
-    backgroundColor: T.surface2,
-    borderWidth: 1,
-    borderColor: T.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navPos: {fontFamily: FONTS.medium, fontSize: 11.5, color: T.text3},
-  infoCard: {
-    backgroundColor: T.surface2,
-    borderRadius: R.card,
-    borderWidth: 1,
-    borderColor: T.border,
-    paddingHorizontal: 14,
-    marginTop: 8,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    gap: 12,
-  },
-  infoLabel: {fontFamily: FONTS.regular, fontSize: 12.5, color: T.text2},
-  infoValue: {fontFamily: FONTS.medium, fontSize: 13, color: T.text, flexShrink: 1, textAlign: 'right'},
-  infoDivider: {height: 1, backgroundColor: T.border},
-  editWrap: {paddingHorizontal: 20, paddingBottom: 28},
-  editTitle: {fontFamily: FONTS.bold, fontSize: 16, color: T.text, textAlign: 'center', paddingVertical: 6},
-  editLabel: {fontFamily: FONTS.semibold, fontSize: 12, color: T.text2, marginTop: 14, marginBottom: 7},
-  editInput: {
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderRadius: R.small,
-    backgroundColor: T.surface2,
-    borderWidth: 1,
-    borderColor: T.border,
-    fontFamily: FONTS.medium,
-    fontSize: 14,
-    color: T.text,
-  },
-  chipRow: {gap: 8, paddingVertical: 2, paddingRight: 8},
-  typeRow: {flexDirection: 'row', gap: 8},
-  typeChoice: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 9,
-    borderRadius: R.small,
-    backgroundColor: T.surface2,
-    borderWidth: 1,
-    borderColor: T.border,
-  },
-  typeChoiceActive: {backgroundColor: T.accentSoft, borderColor: 'rgba(34,197,94,0.35)'},
-  typeChoiceText: {fontFamily: FONTS.semibold, fontSize: 12, color: T.text2},
-  typeHint: {fontFamily: FONTS.regular, fontSize: 11.5, color: T.text3, marginTop: 8, lineHeight: 16},
-  splitHint: {
-    fontFamily: FONTS.regular,
-    fontSize: 12,
-    color: T.text2,
-    textAlign: 'center',
-    lineHeight: 17,
-    paddingBottom: 10,
-  },
-  splitRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: T.surface2,
-    borderRadius: R.small,
-    borderWidth: 1,
-    borderColor: T.border,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    marginBottom: 8,
-  },
-  splitRowLabel: {flex: 1, fontFamily: FONTS.semibold, fontSize: 12.5, color: T.text},
-  splitRowAmt: {fontFamily: FONTS.bold, fontSize: 12.5, color: T.text},
-  splitRemaining: {
-    fontFamily: FONTS.semibold,
-    fontSize: 12,
-    textAlign: 'center',
-    paddingVertical: 6,
-  },
-  splitAdderRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10},
-  splitAddBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: R.small,
-    backgroundColor: T.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  splitDot: {width: 8, height: 8, borderRadius: 4},
-  pickChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-    borderRadius: R.small,
-    backgroundColor: T.surface2,
-    borderWidth: 1,
-    borderColor: T.border,
-  },
-  pickChipText: {fontFamily: FONTS.medium, fontSize: 11.5, color: T.text3, maxWidth: 110},
-  editBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: R.card,
-    backgroundColor: T.accentSoft,
-    borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.25)',
-  },
-  editBtnText: {fontFamily: FONTS.semibold, fontSize: 13.5, color: T.accent},
-  saveBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: R.card,
-    backgroundColor: T.accent,
-  },
-  saveBtnText: {fontFamily: FONTS.bold, fontSize: 13.5, color: T.accentInk},
-  detailIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  detailAmount: {fontFamily: FONTS.bold, fontSize: 26},
-  detailLabel: {fontFamily: FONTS.semibold, fontSize: 15.5, color: T.text, marginTop: 2},
-  detailSub: {fontFamily: FONTS.regular, fontSize: 12.5, color: T.text3, marginTop: 1},
-  detailNote: {
-    fontFamily: FONTS.regular,
-    fontSize: 13,
-    color: T.text2,
-    backgroundColor: T.surface2,
-    borderRadius: R.small,
-    padding: 10,
-    marginTop: 10,
-    alignSelf: 'stretch',
-    textAlign: 'center',
-  },
-  detailBtns: {
-    flexDirection: 'row',
-    gap: 10,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: T.border,
-  },
-  deleteBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: R.card,
-    backgroundColor: 'rgba(251,113,133,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(251,113,133,0.2)',
-  },
-  deleteBtnText: {fontFamily: FONTS.semibold, fontSize: 13.5, color: T.expense},
-  closeBtn: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: R.card,
-    backgroundColor: T.surface2,
-    borderWidth: 1,
-    borderColor: T.border,
-  },
-  closeBtnText: {fontFamily: FONTS.semibold, fontSize: 13.5, color: T.text2},
 });

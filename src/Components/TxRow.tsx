@@ -9,7 +9,15 @@ interface TxRowProps {
   onPress?: () => void;
 }
 
-export function TxRow({tx, onPress}: TxRowProps) {
+
+// Memoized ignoring `onPress` identity: the parent's row-tap handler is
+// typically a fresh closure every render (`() => openDetail(item)`), but as
+// long as the underlying `tx` object is unchanged there is nothing new to
+// draw — re-rendering every visible row on every keystroke of an unrelated
+// search box is exactly the kind of avoidable jank that reads as "lag".
+export const TxRow = React.memo(TxRowImpl, (prev, next) => prev.tx === next.tx);
+
+function TxRowImpl({tx, onPress}: TxRowProps) {
   const cat = CATS[resolveCat(tx.category ?? '')];
   const label = tx.merchant || tx.payee || tx.category || 'Unknown';
   const isTransfer = tx.transaction_type === 'transfer';
