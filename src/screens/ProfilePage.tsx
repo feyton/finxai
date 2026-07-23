@@ -115,6 +115,13 @@ export default function ProfilePage({navigation}: any) {
           try {
             await GoogleSignin.signOut();
           } catch {}
+          // Wipe local data here specifically — a DELIBERATE sign-out
+          // (e.g. switching to test with a different account) is the only
+          // time it's safe to clear. App.tsx's auth-state listener only
+          // ever plain-disconnects, because it also fires on transient,
+          // self-recovering session loss (token refresh hiccups) where
+          // wiping local data would force a needless full resync.
+          await db.disconnectAndClear().catch(() => {});
           await supabase.auth.signOut();
         },
       },

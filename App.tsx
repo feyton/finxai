@@ -99,16 +99,16 @@ function App(): React.JSX.Element {
       if (s) {
         db.connect(connector);
       } else {
-        // disconnectAndClear (not just disconnect) — this device may sign
-        // in as a DIFFERENT user next (e.g. testing account sharing between
-        // two of your own accounts). Leaving the previous user's rows in
-        // local SQLite confuses PowerSync's bucket reconciliation for the
-        // next identity — shared/received accounts in particular would
-        // silently fail to sync in. A plain disconnect() only paused
-        // syncing; the stale rows stayed on disk.
-        db.disconnectAndClear().catch(err =>
-          console.error('[App] disconnectAndClear failed:', err),
-        );
+        // Plain disconnect — NOT disconnectAndClear. This fires on any
+        // session loss, including a transient one Supabase recovers from
+        // on its own (a token-refresh hiccup, the app being backgrounded
+        // past token expiry, a clock skew blip) — none of those are the
+        // user asking to sign out, and wiping local data on a recoverable
+        // blip forces a full from-scratch resync for no reason (this bit
+        // us: see the account-switching fix below for why clearing
+        // matters, and ProfilePage's performLogout for where it actually
+        // belongs — a DELIBERATE sign-out, never this listener).
+        db.disconnect();
       }
     });
 
