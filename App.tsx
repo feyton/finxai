@@ -99,7 +99,16 @@ function App(): React.JSX.Element {
       if (s) {
         db.connect(connector);
       } else {
-        db.disconnect();
+        // disconnectAndClear (not just disconnect) — this device may sign
+        // in as a DIFFERENT user next (e.g. testing account sharing between
+        // two of your own accounts). Leaving the previous user's rows in
+        // local SQLite confuses PowerSync's bucket reconciliation for the
+        // next identity — shared/received accounts in particular would
+        // silently fail to sync in. A plain disconnect() only paused
+        // syncing; the stale rows stayed on disk.
+        db.disconnectAndClear().catch(err =>
+          console.error('[App] disconnectAndClear failed:', err),
+        );
       }
     });
 
