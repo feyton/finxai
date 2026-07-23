@@ -61,6 +61,24 @@ function App(): React.JSX.Element {
   useEffect(() => {
     requestSmsPermission();
 
+    // Sync connection failures (auth rejection, network errors, etc.) were
+    // previously silent — the UI just stayed empty with no diagnostic
+    // trail anywhere. Logging status changes means a PowerSync-side issue
+    // shows up in logcat instead of looking like a client bug.
+    const unsubStatus = db.registerListener({
+      statusChanged: status => {
+        console.log(
+          '[PowerSync status]',
+          JSON.stringify({
+            connected: status.connected,
+            connecting: status.connecting,
+            downloadError: status.dataFlowStatus?.downloadError?.message,
+            uploadError: status.dataFlowStatus?.uploadError?.message,
+          }),
+        );
+      },
+    });
+
     // If the previous session died on a fatal JS error, show exactly what
     // happened so it can be reported instead of a bare "keeps stopping".
     takeLastCrash().then(crash => {
@@ -112,7 +130,10 @@ function App(): React.JSX.Element {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      unsubStatus();
+    };
   }, []);
 
   if (loading) {
