@@ -4,6 +4,7 @@
  */
 import {
   detectStatus,
+  detectTransfer,
   extractBalance,
   extractTransferHint,
   isTransferStatusOnly,
@@ -283,5 +284,53 @@ describe('masked-number suffix matching (BPR shows a different trailing length p
     const momoNorm = normalizeAccountNumber('0787241457'); // → '787241457'
     expect(maskedSuffixMatches('1457', momoNorm)).toBe(true);
     expect(maskedSuffixMatches('2911', momoNorm)).toBe(false);
+  });
+});
+
+// ── Kinyarwanda MTN Mokash SMS — real text, no "balance"/"credited" keywords ─
+const MOKASH_KINY_DEPOSIT_1 =
+  "Y'ello. Umaze kubitsa RWF 500 kuri Mokash kuva kuri konti yawe ya Mobile Money. Ubu ufite RWF 508 kuri Mokash.Ref 29373092228";
+
+const MOKASH_KINY_SEND =
+  "Y'ello. Umaze kohereza RWF 5000 kuva kuri konti Mokash tariki 16/07/2026 saa 9:39 AM. Mokash ifiteho amafaranga RWF 7508. Ref 29227817165";
+
+const MOKASH_KINY_DEPOSIT_2 =
+  "Y'ello. Umaze kubitsa RWF 500 kuri Mokash kuva kuri konti yawe ya Mobile Money. Ubu ufite RWF 8508 kuri Mokash.Ref 29012034911";
+
+const MOKASH_KINY_INSUFFICIENT_FUNDS =
+  "Y'ello. Ntabwo ufite amafaranga ahagije kuri konti yawe ya Mokash kugira ngo ukore iki gikorwa. Ufite 3508 RWF";
+
+describe('Kinyarwanda MTN Mokash SMS', () => {
+  it('reads the "Ubu ufite RWF X kuri Mokash" balance and treats a deposit as a credit/transfer', () => {
+    expect(extractBalance(MOKASH_KINY_DEPOSIT_1)).toBe(508);
+    const parsed = parseWithRegex(MOKASH_KINY_DEPOSIT_1);
+    expect(parsed.direction).toBe('credit');
+    expect(parsed.isTransfer).toBe(true);
+    expect(parsed.balance_after).toBe(508);
+  });
+
+  it('reads the "Mokash ifiteho amafaranga RWF X" balance and treats a send as a debit/transfer', () => {
+    expect(extractBalance(MOKASH_KINY_SEND)).toBe(7508);
+    const parsed = parseWithRegex(MOKASH_KINY_SEND);
+    expect(parsed.direction).toBe('debit');
+    expect(parsed.isTransfer).toBe(true);
+    expect(parsed.balance_after).toBe(7508);
+  });
+
+  it('a second deposit again reads as a credit with its own balance', () => {
+    expect(extractBalance(MOKASH_KINY_DEPOSIT_2)).toBe(8508);
+    const parsed = parseWithRegex(MOKASH_KINY_DEPOSIT_2);
+    expect(parsed.direction).toBe('credit');
+  });
+
+  it('an insufficient-funds notice is detected as FAILED, never a transaction', () => {
+    expect(detectStatus(MOKASH_KINY_INSUFFICIENT_FUNDS)).toBe('failed');
+    const parsed = parseWithRegex(MOKASH_KINY_INSUFFICIENT_FUNDS);
+    expect(parsed.status).toBe('failed');
+  });
+
+  it('detectTransfer still flags plain Mokash mentions regardless of language', () => {
+    expect(detectTransfer(MOKASH_KINY_DEPOSIT_1)).toBe(true);
+    expect(detectTransfer(MOKASH_KINY_SEND)).toBe(true);
   });
 });

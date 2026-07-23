@@ -102,7 +102,7 @@ function matchOwnAccount(
 // FAILED / REVERSED transactions must never become records.
 export function detectStatus(raw: string): 'completed' | 'failed' | null {
   if (
-    /\bhas\s+FAILED\b|status\s*:?\s*FAILED|\bREVERSED\b|\bDECLINED\b|\bunsuccessful\b|could\s+not\s+be\s+(?:completed|processed)/i.test(
+    /\bhas\s+FAILED\b|status\s*:?\s*FAILED|\bREVERSED\b|\bDECLINED\b|\bunsuccessful\b|could\s+not\s+be\s+(?:completed|processed)|ntabwo\s+ufite\s+amafaranga\s+ahagije/i.test(
       raw,
     )
   ) {
@@ -121,10 +121,19 @@ export function extractBalance(raw: string): number | null {
   const m = raw.match(
     /(?:available\s+balance|new\s+balance|mokash\s+balance|balance)\s*(?:is)?\s*:?\s*(?:RWF|FRW)?\s*([\d,]+(?:\.\d+)?)/i,
   );
-  if (!m) {
-    return null;
+  if (m) {
+    return num(m[1]);
   }
-  return num(m[1]);
+  // Kinyarwanda MTN Mokash formats — no literal "balance" keyword:
+  //   "Ubu ufite RWF 508 kuri Mokash"      (you now have RWF 508 on Mokash)
+  //   "Mokash ifiteho amafaranga RWF 7508" (Mokash [now] has RWF 7508)
+  const kiny = raw.match(
+    /(?:ifiteho\s+amafaranga|ufite)\s*:?\s*(?:RWF|FRW)?\s*([\d,]+(?:\.\d+)?)/i,
+  );
+  if (kiny) {
+    return num(kiny[1]);
+  }
+  return null;
 }
 
 // "Date: 7/2/26, 9:31 AM" (BK alert format, M/D/YY) → ISO string.
@@ -329,7 +338,10 @@ export function regexExtract(raw: string, ctx?: ParseContext): RegexFacts {
       transferAccount = other;
     }
   } else {
-    direction = /received|credited|you have received|deposit/i.test(raw)
+    // "kubitsa" (Kinyarwanda: to deposit/save) — e.g. "Umaze kubitsa RWF 500
+    // kuri Mokash" — money moving IN to the tracked account, same role as
+    // the English "deposit"/"received"/"credited" signals below.
+    direction = /received|credited|you have received|deposit|kubitsa/i.test(raw)
       ? 'credit'
       : 'debit';
   }
