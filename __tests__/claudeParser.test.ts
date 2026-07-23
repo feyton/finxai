@@ -5,6 +5,7 @@
 import {
   detectStatus,
   detectTransfer,
+  extractAccountRef,
   extractBalance,
   extractTransferHint,
   isTransferStatusOnly,
@@ -378,5 +379,25 @@ describe('Bank of Kigali — second alert format ("BK BANK" sender)', () => {
     expect(f.balance_after).toBe(1807426);
     const parsed = parseWithRegex(BK_V2_CARD_PURCHASE);
     expect(parsed.merchant).toBe('Card Purchase');
+  });
+
+  it('extracts the account reference for sender-independent routing, matching the configured account number by trailing digits', () => {
+    const ref = extractAccountRef(BK_V2_CREDIT);
+    expect(ref).toBe('********5558');
+    expect(trailingDigits(ref!)).toBe('5558');
+    // The account's OWN configured number (unmasked) still matches by suffix.
+    expect(maskedSuffixMatches(trailingDigits(ref!), normalizeAccountNumber('100161965558'))).toBe(true);
+    // A different account's number does not.
+    expect(maskedSuffixMatches(trailingDigits(ref!), normalizeAccountNumber('0787241457'))).toBe(false);
+  });
+
+  it('the same transaction reported by BOTH BK senders shares one txn_ref, so it can be deduplicated', () => {
+    const OLD_SENDER_SAME_TXN =
+      'TRANSFER - EKASH Beneficiary: Fabrice HAFASHIMANA Credited account: 250787241457 Debited account: 100161965558 Amount:RWF 100000.00 Transaction Charge:RWF 20 Event #:FTCM2620415SGRF2Y Status: COMPLETED Date: 2026-07-23 19:10:39.43 Channel:MOBILE Available Balance:RWF 1,812,490 For enquiry call BK:250788143000/4455';
+    const a = regexExtract(BK_V2_DEBIT_EKASH);
+    const b = regexExtract(OLD_SENDER_SAME_TXN);
+    expect(a.txn_ref).toBe('FTCM2620415SGRF2Y');
+    expect(b.txn_ref).toBe('FTCM2620415SGRF2Y');
+    expect(a.txn_ref).toBe(b.txn_ref);
   });
 });

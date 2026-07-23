@@ -419,9 +419,9 @@ export default function SMSReviewScreen({navigation}: any) {
            (id, amount, account_id, category, subcategory, date_time, sms, sender,
             payee, merchant, transaction_type, fees, currency,
             confirmed, source, confidence,
-            transfer_account_id, transfer_direction, balance_after,
+            transfer_account_id, transfer_direction, balance_after, txn_ref,
             owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?)`,
         [
           uuid(),
           record.amount,
@@ -439,6 +439,7 @@ export default function SMSReviewScreen({navigation}: any) {
           txType === 'transfer' ? record.transfer_account_id ?? null : null,
           txType === 'transfer' ? (dir === 'credit' ? 'in' : 'out') : null,
           bal,
+          record.txn_ref ?? null,
           userId,
           now,
         ],
@@ -482,9 +483,9 @@ export default function SMSReviewScreen({navigation}: any) {
            (id, amount, account_id, category, subcategory, date_time, sms, sender,
             payee, merchant, transaction_type, fees, currency,
             confirmed, source, confidence,
-            transfer_account_id, transfer_direction, balance_after,
+            transfer_account_id, transfer_direction, balance_after, txn_ref,
             owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?)`,
         [
           uuid(),
           record.amount,
@@ -502,6 +503,7 @@ export default function SMSReviewScreen({navigation}: any) {
           txType === 'transfer' ? record.transfer_account_id ?? null : null,
           txType === 'transfer' ? (fixDir === 'credit' ? 'in' : 'out') : null,
           bal,
+          record.txn_ref ?? null,
           userId,
           now,
         ],

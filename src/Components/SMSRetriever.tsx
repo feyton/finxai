@@ -24,12 +24,14 @@ import {THRESHOLD_AUTO_SAVE} from '../tools/geminiParser';
 import {
   ParseContext,
   dateKeyFromIso,
+  extractAccountRef,
   extractTransferHint,
   isTransferStatusOnly,
   maskedSuffixMatches,
   normalizeAccountNumber,
   parseSmsWithClaude,
   parseWithRegex,
+  trailingDigits,
 } from '../tools/claudeParser';
 import {
   getMerchantChannels,
@@ -66,6 +68,33 @@ function senderMatches(smsAddress: string, accountAddress: string): boolean {
   return a === b || a.includes(b) || b.includes(a);
 }
 
+// Which of the user's accounts does this SMS belong to? Sender address is
+// the primary signal, but a bank can add or change sender IDs at any time
+// (Bank of Kigali now also sends alerts from a second sender, "BK BANK",
+// with no relation by name to the account's configured address) — when no
+// sender matches, fall back to the account NUMBER the alert itself names
+// ("your account ********5558 has been..."), which never changes.
+function findAccountForSms(
+  sms: {body: string; address: string},
+  accounts: {address?: string | null; number?: string | null}[],
+): any {
+  const bySender = (accounts as any[]).find(a =>
+    senderMatches(sms.address, a.address),
+  );
+  if (bySender) {
+    return bySender;
+  }
+  const ref = extractAccountRef(sms.body);
+  const refSuffix = ref ? trailingDigits(ref) : '';
+  if (!refSuffix) {
+    return undefined;
+  }
+  return (accounts as any[]).find(a => {
+    const num = normalizeAccountNumber(a.number);
+    return num && maskedSuffixMatches(refSuffix, num);
+  });
+}
+
 const SMSRetriever: React.FC = () => {
   const db = usePowerSync();
   const {userId, name} = useCurrentUser();
@@ -84,6 +113,15 @@ const SMSRetriever: React.FC = () => {
     [userId ?? '', userId ?? '', userId ?? ''],
   );
 
+  // Bank of Kigali now sends TWO alerts per transaction from two different
+  // senders/formats, sharing the same Ref/Event #. This dedupes by
+  // (account, txn_ref) across BOTH tables so the second alert never
+  // creates a second record for the same real-world transaction.
+  const {data: existingTxnRefs} = useQuery(
+    'SELECT account_id, txn_ref FROM auto_records WHERE owner_id = ? AND txn_ref IS NOT NULL UNION SELECT account_id, txn_ref FROM transactions WHERE owner_id = ? AND txn_ref IS NOT NULL',
+    [userId ?? '', userId ?? ''],
+  );
+
   const autoAccounts = (accounts as any[]).filter(a => a.auto === 1 && a.address);
 
   useEffect(() => {
@@ -93,6 +131,10 @@ const SMSRetriever: React.FC = () => {
 
   const existingSmsSet = new Set(
     (existingRecords ?? []).map((r: any) => r.sms).filter(Boolean),
+  );
+
+  const existingTxnRefSet = new Set(
+    (existingTxnRefs ?? []).map((r: any) => `${r.account_id}:${r.txn_ref}`),
   );
 
   const fetchInbox = (
@@ -142,7 +184,17 @@ const SMSRetriever: React.FC = () => {
       }
       const minDate = Math.min(...floors.values());
       const fetchTime = Date.now();
-      const inbox = await fetchInbox(minDate);
+      // Prefer the richer "Credited account: X Debited account: Y" alert
+      // over its "your account has been debited/credited" sibling when both
+      // arrive in the same batch (same txn_ref) — the former proves a
+      // self-transfer via account-number matching, the latter doesn't name
+      // either account at all. Array.sort is stable, so unrelated messages
+      // keep their original order.
+      const inbox = (await fetchInbox(minDate)).sort((a, b) => {
+        const richA = /credited\s+account|debited\s+account/i.test(a.body ?? '') ? 0 : 1;
+        const richB = /credited\s+account|debited\s+account/i.test(b.body ?? '') ? 0 : 1;
+        return richA - richB;
+      });
 
       // Some banks (BPR) send a SEPARATE "from A/c P to A/c Q ... is
       // Completed" confirmation for every transfer, alongside the
@@ -166,9 +218,7 @@ const SMSRetriever: React.FC = () => {
       for (const sms of inbox) {
         if (!sms.body || existingSmsSet.has(sms.body)) {continue;}
 
-        const account = autoAccounts.find(a =>
-          senderMatches(sms.address, a.address),
-        );
+        const account = findAccountForSms(sms, autoAccounts);
         if (!account) {continue;}
 
         const smsDate = parseInt(sms.date ?? '0', 10) || 0;
@@ -199,6 +249,18 @@ const SMSRetriever: React.FC = () => {
             await db.execute(
               'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
               [uuid(), sms.body, account.name, 'failed', userId, now],
+            );
+            existingSmsSet.add(sms.body);
+            continue;
+          }
+
+          // Same transaction, a second alert (see findAccountForSms above) —
+          // never a second record.
+          const txnRefKey = parsed.txn_ref ? `${account.id}:${parsed.txn_ref}` : null;
+          if (txnRefKey && existingTxnRefSet.has(txnRefKey)) {
+            await db.execute(
+              'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+              [uuid(), sms.body, account.name, 'duplicate', userId, now],
             );
             existingSmsSet.add(sms.body);
             continue;
@@ -261,9 +323,9 @@ const SMSRetriever: React.FC = () => {
                  (id, amount, account_id, category, date_time, sms, sender,
                   payee, merchant, transaction_type, fees, currency,
                   confirmed, source, confidence,
-                  transfer_account_id, transfer_direction, balance_after,
+                  transfer_account_id, transfer_direction, balance_after, txn_ref,
                   owner_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?)`,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?)`,
               [
                 uuid(),
                 parsed.amount,
@@ -280,6 +342,7 @@ const SMSRetriever: React.FC = () => {
                 transferAccountId,
                 transferDirection,
                 parsed.balance_after,
+                parsed.txn_ref,
                 userId,
                 now,
               ],
@@ -292,8 +355,8 @@ const SMSRetriever: React.FC = () => {
                  (id, amount, account_id, category, date_time, sms, sender,
                   payee, merchant, transaction_type, fees, currency,
                   confirmed, source, confidence, transfer_account_id,
-                  balance_after, owner_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?)`,
+                  balance_after, txn_ref, owner_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?, ?)`,
               [
                 uuid(),
                 parsed.amount,
@@ -309,12 +372,16 @@ const SMSRetriever: React.FC = () => {
                 parsed.confidence,
                 transferAccountId,
                 parsed.balance_after,
+                parsed.txn_ref,
                 userId,
                 now,
               ],
             );
           }
           existingSmsSet.add(sms.body);
+          if (txnRefKey) {
+            existingTxnRefSet.add(txnRefKey);
+          }
         } catch (e) {
           console.warn('[SMSRetriever] Failed to process SMS:', e);
         }

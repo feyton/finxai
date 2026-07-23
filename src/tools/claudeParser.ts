@@ -256,6 +256,17 @@ export function trailingDigits(masked: string): string {
   return masked.match(/(\d+)\s*$/)?.[1] ?? '';
 }
 
+// "your account ********5558 has been credited/debited ..." — extracts the
+// (often masked) account reference an alert names. This is a MORE reliable
+// way to find which of the user's accounts an SMS belongs to than the
+// sender address alone: a bank can (and does — see Bank of Kigali's second
+// "BK BANK" sender) change or add sender IDs at any time, but the account
+// number it reports never changes. Used as a fallback route when no
+// configured sender address matches the SMS's actual sender.
+export function extractAccountRef(raw: string): string | null {
+  return raw.match(/your\s+account\s+([\d*]{4,})/i)?.[1] ?? null;
+}
+
 // Loose masked-number match: true when the shorter trailing-digit run is a
 // suffix of the longer one. Handles the SAME account being masked to a
 // different visible length by different SMS templates (BPR shows 3 trailing
