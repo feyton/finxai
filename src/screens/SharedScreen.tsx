@@ -3,18 +3,31 @@
 // accounts shared TO you, and who you shared YOUR accounts with.
 import {useQuery, usePowerSync} from '@powersync/react-native';
 import {formatDistanceToNowStrict} from 'date-fns';
-import React from 'react';
-import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import React, {useState} from 'react';
+import {Pressable, RefreshControl, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {appAlert} from '../Components/AppDialog';
+import {reconnect} from '../tools/database';
 import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
 
 export default function SharedScreen({navigation}: any) {
   const db = usePowerSync();
   const {userId} = useCurrentUser();
   const uid = userId ?? '';
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await reconnect();
+    } catch (e) {
+      appAlert('Refresh failed', 'Could not reach FinXAI — check your connection and try again.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   // Accounts other people shared to me (synced via the shared_accounts bucket)
   const {data: received} = useQuery(
@@ -69,7 +82,12 @@ export default function SharedScreen({navigation}: any) {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.accent} />
+        }>
         {/* Privacy note */}
         <View style={styles.banner}>
           <Icon name="Lock" size={15} color={T.info} strokeWidth={2.2} />

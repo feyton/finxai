@@ -5,6 +5,7 @@ import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {
   FlatList,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   View,
@@ -12,6 +13,7 @@ import {
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {reconnect} from '../tools/database';
 import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
 
 function AccountCard({
@@ -63,6 +65,16 @@ function AccountCard({
 export default function AccountsPage({navigation}: any) {
   const {userId} = useCurrentUser();
   const db = usePowerSync();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await reconnect();
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   // No owner filter: the local DB holds exactly my accounts + accounts
   // shared TO me (PowerSync buckets). Own accounts sort first.
@@ -151,6 +163,9 @@ export default function AccountsPage({navigation}: any) {
           </View>
         }
         contentContainerStyle={[styles.list, {paddingBottom: tabBarHeight + 28}]}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.accent} />
+        }
       />
 
       {/* Delete confirm sheet */}
