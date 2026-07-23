@@ -334,3 +334,49 @@ describe('Kinyarwanda MTN Mokash SMS', () => {
     expect(detectTransfer(MOKASH_KINY_SEND)).toBe(true);
   });
 });
+
+// ── Bank of Kigali's SECOND alert format — real text, sent from a different
+// sender ("BK BANK") than the original "TRANSFER - ... Credited account:"
+// format. No "Date:" label, no counterparty name; uses "Txn Description".
+const BK_V2_CREDIT =
+  'Dear FABRICE HAFASHIMANA, your account ********5558 has been credited RWF2,073,109. Ref: FTCM26204KMIB5YCF on 23-07-2026 19:05:37. Txn Description: Incoming Trsf frm local banks. Txn Charge: RWF0. Notification Charge: RWF0. Available Balance: RWF2,073,109. For inquiries call BK: 250788143000.';
+
+const BK_V2_DEBIT_EKASH =
+  'Dear FABRICE HAFASHIMANA, your account ********5558 has been debited RWF100,000. Ref: FTCM2620415SGRF2Y on 23-07-2026 19:10:45. Txn Description: EKASH P2P-NEW APP. Txn Charge: RWF20. Notification Charge: RWF0. Available Balance: RWF1,812,490. For inquiries call BK: 250788143000.';
+
+const BK_V2_CARD_PURCHASE =
+  'Dear FABRICE HAFASHIMANA, your account ********5558 has been debited RWF5,064. Ref: FTCM26204TSGM6FED on 23-07-2026 19:56:04. Txn Description: Card Purchase. Txn Charge: RWF0. Notification Charge: RWF0. Available Balance: RWF1,807,426. For inquiries call BK: 250788143000.';
+
+describe('Bank of Kigali — second alert format ("BK BANK" sender)', () => {
+  it('reads a credit correctly: amount, balance, date, and a merchant from Txn Description', () => {
+    const f = regexExtract(BK_V2_CREDIT);
+    expect(f.direction).toBe('credit');
+    expect(f.amount).toBe(2073109);
+    expect(f.fee).toBe(0);
+    expect(f.balance_after).toBe(2073109);
+    expect(f.txn_ref).toBe('FTCM26204KMIB5YCF');
+    expect(f.occurred_at).toContain('2026-07-23');
+    const parsed = parseWithRegex(BK_V2_CREDIT);
+    expect(parsed.merchant).toBe('Incoming Trsf frm local banks');
+  });
+
+  it('reads a debit (EKASH P2P) with summed Txn + Notification charges', () => {
+    const f = regexExtract(BK_V2_DEBIT_EKASH);
+    expect(f.direction).toBe('debit');
+    expect(f.amount).toBe(100000);
+    expect(f.fee).toBe(20);
+    expect(f.balance_after).toBe(1812490);
+    const parsed = parseWithRegex(BK_V2_DEBIT_EKASH);
+    expect(parsed.merchant).toBe('EKASH P2P-NEW APP');
+  });
+
+  it('reads a card purchase debit with no fee', () => {
+    const f = regexExtract(BK_V2_CARD_PURCHASE);
+    expect(f.direction).toBe('debit');
+    expect(f.amount).toBe(5064);
+    expect(f.fee).toBe(0);
+    expect(f.balance_after).toBe(1807426);
+    const parsed = parseWithRegex(BK_V2_CARD_PURCHASE);
+    expect(parsed.merchant).toBe('Card Purchase');
+  });
+});

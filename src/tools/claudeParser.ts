@@ -188,6 +188,28 @@ function extractBprDate(raw: string): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+// BK's second alert format (a different sender, "BK BANK"): "on
+// 23-07-2026 19:05:37" (DD-MM-YYYY HH:MM:SS, 24h, dashes not slashes —
+// distinct from both the "Date: M/D/YY" original BK format and BPR's
+// "on D MON YYYY-HH:MM:SS").
+function extractBkV2Date(raw: string): string | null {
+  const m = raw.match(
+    /\bon\s+(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})/i,
+  );
+  if (!m) {
+    return null;
+  }
+  const d = new Date(
+    parseInt(m[3], 10),
+    parseInt(m[2], 10) - 1,
+    parseInt(m[1], 10),
+    parseInt(m[4], 10),
+    parseInt(m[5], 10),
+    parseInt(m[6], 10),
+  );
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 // Sums ALL named charges in one SMS — some banks (BPR) deduct MULTIPLE
 // charges from a single transaction (Transaction Charge + Notification
 // Charge, both applied regardless of direction). A single-match regex here
@@ -371,7 +393,7 @@ export function regexExtract(raw: string, ctx?: ParseContext): RegexFacts {
     balance_after,
     txn_ref,
     status,
-    occurred_at: extractOccurredAt(raw) ?? extractBprDate(raw),
+    occurred_at: extractOccurredAt(raw) ?? extractBprDate(raw) ?? extractBkV2Date(raw),
     channelHint: detectChannel(raw, direction === 'credit'),
     counterpartyNumber,
     transferAccount,
@@ -407,6 +429,11 @@ function regexClassify(
   const from = raw.match(/received .+ from ([^\(.]+)/i);
   const sentTo = raw.match(/sent to ([^\(.]+)/i);
   const narration = raw.match(/narration:\s*([^.]+)/i);
+  // BK's second alert format ("BK BANK" sender): "... Txn Description:
+  // Card Purchase. Txn Charge: ..." — no counterparty name either, but the
+  // description (Card Purchase, EKASH P2P-NEW APP, Incoming Trsf frm local
+  // banks, ...) is a far better label than "Unknown".
+  const txnDesc = raw.match(/txn\s*description\s*:?\s*([^.]+)/i);
   // BPR-style: "... at BPR Bank. Transaction Charge: ..." — no counterparty
   // name is disclosed, but naming the bank/agent beats "Unknown".
   const atBank = raw.match(
@@ -424,6 +451,7 @@ function regexClassify(
   else if (from) {merchant = from[1].trim();}
   else if (sentTo) {merchant = sentTo[1].trim();}
   else if (narration) {merchant = narration[1].trim();}
+  else if (txnDesc) {merchant = txnDesc[1].trim();}
   else if (atBank) {merchant = atBank[1].trim();}
 
   const isCredit = facts.direction === 'credit';
@@ -540,6 +568,10 @@ Rules:
 - BPR Bank format: "your account X has been debited/credited RWF N ... at BPR Bank. Transaction Charge:
   ... Notification Charge: ... Your balance is RWF Z." never names the counterparty — use "BPR Bank" or
   the bank/agent named after "at" as the merchant unless a learned rule or transfer fact says otherwise.
+- Bank of Kigali ALSO sends a second alert format, from a different sender ("BK BANK"): "your account X
+  has been debited/credited RWF N ... Txn Description: <desc> ... Available Balance: RWF Z." No counterparty
+  name is given either — use the Txn Description (e.g. "Card Purchase", "EKASH P2P-NEW APP", "Incoming Trsf
+  frm local banks") as the merchant/description unless a learned rule or transfer fact says otherwise.
 - is_transfer is TRUE when the money moved between the USER'S OWN accounts —
   i.e. the counterparty is the user themselves (name matches the account holder),
   a Mokash savings pocket, a bank↔wallet top-up, or an explicit "fund-transfer"
