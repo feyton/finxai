@@ -7,8 +7,9 @@
  *    is done here case-insensitively, so 'Mokash' vs 'MoKash' can't miss)
  * 2. Builds a batch-level transfer-hint index from BPR-style "from A/c ...
  *    to A/c ... is Completed" confirmations, for cross-message correlation
- * 3. Calls Claude Haiku to parse + categorize (if API key is set)
- * 4. Falls back to regex parser if no key / API error
+ * 3. Calls FinXAI's own server (Gemini 3.5 Flash, key held server-side) to
+ *    parse + categorize
+ * 4. Falls back to regex parser if the server call is unavailable / errors
  * 5. FAILED transactions and transfer-status-only confirmations go to
  *    ignored_sms — never become records
  * 6. Auto-saves confident records (≥ THRESHOLD_AUTO_SAVE) to transactions
@@ -19,7 +20,7 @@ import React, {useEffect, useRef} from 'react';
 // @ts-ignore
 import SmsAndroid from 'react-native-get-sms-android';
 import {useCurrentUser} from '../hooks/useCurrentUser';
-import {getAnthropicKey, hasAnthropicKey} from '../tools/aiConfig';
+import {supabase} from '../tools/supabase';
 import {THRESHOLD_AUTO_SAVE} from '../tools/geminiParser';
 import {
   ParseContext,
@@ -29,8 +30,7 @@ import {
   isTransferStatusOnly,
   maskedSuffixMatches,
   normalizeAccountNumber,
-  parseSmsWithClaude,
-  parseWithRegex,
+  parseSmsWithAI,
   trailingDigits,
 } from '../tools/claudeParser';
 import {
@@ -160,12 +160,15 @@ const SMSRetriever: React.FC = () => {
   const processSms = async () => {
     processing.current = true;
     try {
-      const useAI = await hasAnthropicKey();
-      const apiKey = useAI ? (await getAnthropicKey())! : '';
-      // Learned rules feed BOTH parsing paths — a counterparty the user
-      // corrected to 'transfer' (or to a category) applies with or without AI.
+      const {
+        data: {session},
+      } = await supabase.auth.getSession();
+      const authToken = session?.access_token ?? '';
+
+      // Learned rules feed the classifier — a counterparty the user corrected
+      // to 'transfer' (or to a category) is honored on every future SMS.
       const merchantRules = await getMerchantRules(db, '', userId!, 20);
-      const merchantChannels = useAI ? await getMerchantChannels() : {};
+      const merchantChannels = await getMerchantChannels();
 
       const ctxBase: ParseContext = {
         userName: name ?? '',
@@ -237,9 +240,7 @@ const SMSRetriever: React.FC = () => {
 
         try {
           const ctx: ParseContext = {...ctxBase, currentAccountId: account.id};
-          const parsed = useAI
-            ? await parseSmsWithClaude(sms.body, merchantRules, apiKey, merchantChannels, ctx)
-            : parseWithRegex(sms.body, ctx);
+          const parsed = await parseSmsWithAI(sms.body, merchantRules, authToken, merchantChannels, ctx);
 
           const now = new Date().toISOString();
 
@@ -316,7 +317,7 @@ const SMSRetriever: React.FC = () => {
               : 'out'
             : null;
 
-          if (useAI && parsed.confidence >= THRESHOLD_AUTO_SAVE) {
+          if (parsed.confidence >= THRESHOLD_AUTO_SAVE) {
             // Auto-save directly to transactions — high confidence
             await db.execute(
               `INSERT INTO transactions

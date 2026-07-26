@@ -17,12 +17,8 @@ import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {appAlert} from '../Components/AppDialog';
 import {T, FONTS, R, fmtAmount} from '../theme';
-import {
-  DEFAULT_ANTHROPIC_MODEL,
-  getAnthropicKey,
-  getAnthropicModel,
-} from '../tools/aiConfig';
-import {ToolMessage, askClaudeTools} from '../tools/anthropicClient';
+import {ToolMessage, chatTools} from '../tools/aiProxyClient';
+import {supabase} from '../tools/supabase';
 import {AiAction, anthropicToolSchemas, findAction} from '../tools/aiActions';
 
 interface Message {
@@ -229,21 +225,10 @@ Guidelines:
   const [apiHistory, setApiHistory] = useState<ToolMessage[]>([]);
   const [typing, setTyping] = useState(false);
   const [input, setInput] = useState('');
-  const [apiKey, setApiKeyState] = useState('');
-  const [model, setModelState] = useState(DEFAULT_ANTHROPIC_MODEL);
   const [loaded, setLoaded] = useState(false);
   const listRef = useRef<FlatList>(null);
 
   const chatKey = `finxai.chat.${uid || 'anon'}`;
-
-  useEffect(() => {
-    (async () => {
-      const k = await getAnthropicKey();
-      const m = await getAnthropicModel();
-      if (k) {setApiKeyState(k);}
-      setModelState(m);
-    })();
-  }, []);
 
   // Restore the saved conversation once the user id is known.
   useEffect(() => {
@@ -313,11 +298,6 @@ Guidelines:
     const q = (text ?? input).trim();
     if (!q) {return;}
 
-    if (!apiKey) {
-      navigation.navigate('AISettings');
-      return;
-    }
-
     setInput('');
     setMsgs(m => [...m, {id: 'u' + Date.now(), who: 'me', text: q}]);
 
@@ -329,14 +309,13 @@ Guidelines:
 
     try {
       // Agentic loop: model may call tools; execute and feed results back.
+      const {
+        data: {session},
+      } = await supabase.auth.getSession();
+      const authToken = session?.access_token ?? '';
+
       for (let step = 0; step < 6; step++) {
-        const turn = await askClaudeTools(
-          history.slice(-24),
-          systemPrompt,
-          apiKey,
-          model,
-          tools,
-        );
+        const turn = await chatTools(history.slice(-24), systemPrompt, tools, authToken);
         history = [...history, {role: 'assistant', content: turn.content}];
 
         const textParts = turn.content
@@ -396,9 +375,7 @@ Guidelines:
       }
       setApiHistory(history);
     } catch (e: any) {
-      const errText = e?.message?.includes('Invalid') || e?.message?.includes('key')
-        ? 'API key rejected. Go to AI Settings to update it.'
-        : `Something went wrong: ${e?.message ?? 'unknown error'}`;
+      const errText = `The Finance Coach is temporarily unavailable: ${e?.message ?? 'unknown error'}`;
       setMsgs(m => [...m, {id: 'err' + Date.now(), who: 'ai', text: errText}]);
     } finally {
       setTyping(false);
@@ -420,9 +397,9 @@ Guidelines:
         <View style={{flex: 1}}>
           <Text style={styles.headerTitle}>Finance Coach</Text>
           <View style={{flexDirection: 'row', alignItems: 'center', gap: 5}}>
-            <View style={[styles.statusDot, {backgroundColor: apiKey ? T.accent : T.text3}]} />
-            <Text style={{fontFamily: FONTS.medium, fontSize: 11, color: apiKey ? T.accent : T.text3}}>
-              {apiKey ? 'Knows your accounts' : 'Not configured'}
+            <View style={[styles.statusDot, {backgroundColor: T.accent}]} />
+            <Text style={{fontFamily: FONTS.medium, fontSize: 11, color: T.accent}}>
+              Knows your accounts
             </Text>
           </View>
         </View>
@@ -453,17 +430,6 @@ Guidelines:
           onContentSizeChange={() => listRef.current?.scrollToEnd({animated: true})}
         />
 
-        {/* No-key banner */}
-        {!apiKey && (
-          <Pressable
-            onPress={() => navigation.navigate('AISettings')}
-            style={({pressed}) => [styles.noKeyBanner, {opacity: pressed ? 0.85 : 1}]}>
-            <Icon name="Key" size={14} color={T.warn} strokeWidth={2.2} />
-            <Text style={styles.noKeyText}>Add your Anthropic key in AI Settings to start chatting</Text>
-            <Icon name="ChevronRight" size={14} color={T.warn} />
-          </Pressable>
-        )}
-
         {/* Suggestion chips */}
         <FlatList
           horizontal
@@ -492,7 +458,6 @@ Guidelines:
               style={styles.input}
               onSubmitEditing={() => send()}
               returnKeyType="send"
-              editable={!!apiKey}
             />
           </View>
           <Pressable
@@ -500,7 +465,7 @@ Guidelines:
             disabled={typing}
             style={({pressed}) => [
               styles.sendBtn,
-              {opacity: pressed || typing || !apiKey ? 0.5 : 1},
+              {opacity: pressed || typing ? 0.5 : 1},
             ]}>
             {typing ? (
               <ActivityIndicator size="small" color={T.accentInk} />
@@ -584,25 +549,6 @@ const styles = StyleSheet.create({
   },
   actionText: {flex: 1, fontFamily: FONTS.medium, fontSize: 12.5, color: T.text, lineHeight: 18},
   dot: {width: 7, height: 7, borderRadius: 7, backgroundColor: T.text3},
-  noKeyBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 14,
-    marginBottom: 8,
-    padding: 12,
-    borderRadius: R.card,
-    backgroundColor: 'rgba(251,191,36,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(251,191,36,0.2)',
-  },
-  noKeyText: {
-    flex: 1,
-    fontFamily: FONTS.medium,
-    fontSize: 12.5,
-    color: T.warn,
-    lineHeight: 17,
-  },
   chipsList: {flexGrow: 0},
   chips: {gap: 8, paddingHorizontal: 14, paddingBottom: 10},
   chip: {

@@ -54,6 +54,56 @@ function Ring({pct, size = 74}: {pct: number; size?: number}) {
   );
 }
 
+function BudgetCard({b, onPress}: {b: any; onPress: () => void}) {
+  const p = b.planned > 0 ? Math.round((b.spent / b.planned) * 100) : 0;
+  const over = b.planned > 0 && b.spent > b.planned;
+  const emoji = EVENT_EMOJI[b.event ?? 'category'] ?? '📊';
+  const topCat = b.items[0] ? resolveCat(b.items[0].category ?? '') : 'shopping';
+  const tint = over ? T.expense : CATS[topCat].color;
+  return (
+    <Pressable onPress={onPress}>
+      {({pressed}) => (
+        <Card pad={13} style={{opacity: pressed ? 0.85 : 1}}>
+          <View style={styles.budgetHead}>
+            <View style={[styles.emojiTile, {backgroundColor: tint + '18'}]}>
+              <Text style={{fontSize: 18}}>{emoji}</Text>
+            </View>
+            <View style={{flex: 1, minWidth: 0}}>
+              <View style={{flexDirection: 'row', alignItems: 'center', gap: 7}}>
+                <Text style={styles.budgetLabel} numberOfLines={1}>{b.name}</Text>
+                {!!b.recurring && (
+                  <Icon name="Repeat" size={12} color={T.text3} strokeWidth={2} />
+                )}
+              </View>
+              <Text style={styles.mutedSmall}>
+                {fmtAmount(b.spent)} / {fmtAmount(b.planned)} RWF
+                {' · '}
+                {b.items.length} item{b.items.length === 1 ? '' : 's'}
+              </Text>
+              {b.contributions > 0 && (
+                <Text style={styles.contribText}>
+                  +{fmtAmount(b.contributions)} RWF contributed
+                </Text>
+              )}
+            </View>
+            <View style={{alignItems: 'flex-end', gap: 3}}>
+              <Text
+                style={[
+                  styles.budgetPct,
+                  {color: over ? T.expense : p > 85 ? T.warn : T.text2},
+                ]}>
+                {p}%
+              </Text>
+              <Icon name="ChevronRight" size={15} color={T.text3} strokeWidth={2} />
+            </View>
+          </View>
+          <Progress value={b.spent} max={Math.max(b.planned, 1)} color={tint} />
+        </Card>
+      )}
+    </Pressable>
+  );
+}
+
 function AvatarStack({people}: {people: any[]}) {
   return (
     <View style={{flexDirection: 'row'}}>
@@ -167,7 +217,14 @@ export default function BudgetScreen({navigation}: any) {
     const totalLimit = list.reduce((s, b) => s + b.planned, 0);
     const totalSpent = list.reduce((s, b) => s + b.spent, 0);
     const over = list.filter(b => b.planned > 0 && b.spent > b.planned);
-    return {list, totalLimit, totalSpent, over};
+    // 'shared'/'party' budgets are real budgets (named items, category
+    // matching) — not budget_groups — but the "Shared budget"/"Party" picker
+    // in CreateBudget implies they belong under "Shared & goals" too, so
+    // they're also surfaced there. Without this they only ever showed under
+    // "My budgets", unlabeled as shared, which read as the budget having
+    // silently disappeared.
+    const sharedOrParty = list.filter(b => b.event === 'shared' || b.event === 'party');
+    return {list, totalLimit, totalSpent, over, sharedOrParty};
   }, [budgetRows, items, effRows]);
 
   const contributorsByGroup = useMemo(() => {
@@ -259,57 +316,13 @@ export default function BudgetScreen({navigation}: any) {
 
                 {/* Budget cards */}
                 <View style={{gap: 10}}>
-                  {budgets.list.map(b => {
-                    const p = b.planned > 0 ? Math.round((b.spent / b.planned) * 100) : 0;
-                    const over = b.planned > 0 && b.spent > b.planned;
-                    const emoji = EVENT_EMOJI[b.event ?? 'category'] ?? '📊';
-                    const topCat = b.items[0] ? resolveCat(b.items[0].category ?? '') : 'shopping';
-                    const tint = over ? T.expense : CATS[topCat].color;
-                    return (
-                      <Pressable
-                        key={b.id}
-                        onPress={() => navigation.navigate('BudgetDetails', {budgetId: b.id})}>
-                        {({pressed}) => (
-                          <Card pad={13} style={{opacity: pressed ? 0.85 : 1}}>
-                            <View style={styles.budgetHead}>
-                              <View style={[styles.emojiTile, {backgroundColor: tint + '18'}]}>
-                                <Text style={{fontSize: 18}}>{emoji}</Text>
-                              </View>
-                              <View style={{flex: 1, minWidth: 0}}>
-                                <View style={{flexDirection: 'row', alignItems: 'center', gap: 7}}>
-                                  <Text style={styles.budgetLabel} numberOfLines={1}>{b.name}</Text>
-                                  {!!b.recurring && (
-                                    <Icon name="Repeat" size={12} color={T.text3} strokeWidth={2} />
-                                  )}
-                                </View>
-                                <Text style={styles.mutedSmall}>
-                                  {fmtAmount(b.spent)} / {fmtAmount(b.planned)} RWF
-                                  {' · '}
-                                  {b.items.length} item{b.items.length === 1 ? '' : 's'}
-                                </Text>
-                                {b.contributions > 0 && (
-                                  <Text style={styles.contribText}>
-                                    +{fmtAmount(b.contributions)} RWF contributed
-                                  </Text>
-                                )}
-                              </View>
-                              <View style={{alignItems: 'flex-end', gap: 3}}>
-                                <Text
-                                  style={[
-                                    styles.budgetPct,
-                                    {color: over ? T.expense : p > 85 ? T.warn : T.text2},
-                                  ]}>
-                                  {p}%
-                                </Text>
-                                <Icon name="ChevronRight" size={15} color={T.text3} strokeWidth={2} />
-                              </View>
-                            </View>
-                            <Progress value={b.spent} max={Math.max(b.planned, 1)} color={tint} />
-                          </Card>
-                        )}
-                      </Pressable>
-                    );
-                  })}
+                  {budgets.list.map(b => (
+                    <BudgetCard
+                      key={b.id}
+                      b={b}
+                      onPress={() => navigation.navigate('BudgetDetails', {budgetId: b.id})}
+                    />
+                  ))}
                 </View>
               </>
             )}
@@ -365,7 +378,15 @@ export default function BudgetScreen({navigation}: any) {
               );
             })}
 
-            {(groups as any[]).length === 0 && (
+            {budgets.sharedOrParty.map(b => (
+              <BudgetCard
+                key={b.id}
+                b={b}
+                onPress={() => navigation.navigate('BudgetDetails', {budgetId: b.id})}
+              />
+            ))}
+
+            {(groups as any[]).length === 0 && budgets.sharedOrParty.length === 0 && (
               <Card style={{alignItems: 'center', gap: 6}} pad={24}>
                 <Icon name="Users" size={36} color={T.text3} strokeWidth={1.5} />
                 <Text style={styles.emptyText}>No shared budgets or goals yet</Text>

@@ -1,19 +1,20 @@
-// Claude Haiku SMS parser.
+// AI-assisted SMS parser.
 //
 // Split responsibility for consistency:
 //   • regex extracts the DETERMINISTIC facts (amount, fee, balance, ref,
 //     direction, status, a channel hint) — these are structurally reliable
 //     in RW SMS.
-//   • Claude Haiku does only the FUZZY classification (clean merchant name,
+//   • The model does only the FUZZY classification (clean merchant name,
 //     category, payment channel), guided by the user's learned corrections.
-// If Haiku is unavailable/fails, we degrade to regex-only (low confidence).
+// Classification runs through FinXAI's own server (see ./aiProxyClient —
+// Gemini 3.5 Flash, key held server-side, not on the phone). If the server
+// call is unavailable/fails for any reason, we degrade to regex-only (low
+// confidence) rather than blocking the transaction from being recorded.
 
-import {askClaude} from './anthropicClient';
+import {classifySms} from './aiProxyClient';
 import {MerchantChannel} from './merchantMemory';
 import {MerchantRule, ParsedSMS} from './geminiParser';
 import {CategoryId} from '../theme';
-
-export const PARSER_MODEL = 'claude-haiku-4-5';
 
 const CATS =
   'food, groceries, transport, utilities, airtime, rent, health, shopping, salary, family, fun, savings, education';
@@ -541,11 +542,11 @@ export function parseWithRegex(raw: string, ctx?: ParseContext): ParsedSMS {
   return factsToParsed(f, classified.merchant, category, confidence, f.channelHint, isTransfer);
 }
 
-// ── Main: Haiku classification over regex-extracted facts ──────
-export async function parseSmsWithClaude(
+// ── Main: AI classification over regex-extracted facts ─────────
+export async function parseSmsWithAI(
   raw: string,
   rules: MerchantRule[],
-  apiKey: string,
+  authToken: string,
   merchantChannels: Record<string, MerchantChannel> = {},
   ctx?: ParseContext,
 ): Promise<ParsedSMS> {
@@ -604,12 +605,7 @@ ${ruleLines ? `\nLearned category rules:\n${ruleLines}` : ''}
 ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
 
   try {
-    const reply = await askClaude(
-      [{role: 'user', content: user}],
-      system,
-      apiKey,
-      PARSER_MODEL,
-    );
+    const reply = await classifySms(system, user, authToken);
     const j = extractJson(reply);
     let merchant = String(j.merchant || 'Unknown').trim();
     let category = String(j.category || 'shopping').trim() as CategoryId;
@@ -639,7 +635,7 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
       confidence = Math.max(confidence, 0.72);
     }
 
-    // Account numbers prove it > the user's learned rule > Haiku/heuristics.
+    // Account numbers prove it > the user's learned rule > AI/heuristics.
     const isTransfer = resolveTransfer(f, rule, raw, ctx?.userName, j.is_transfer === true);
 
     return factsToParsed(
@@ -651,7 +647,7 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
       isTransfer,
     );
   } catch (e) {
-    console.warn('[ClaudeParser] falling back to regex:', e);
+    console.warn('[AIParser] falling back to regex:', e);
     return parseWithRegex(raw, ctx);
   }
 }
