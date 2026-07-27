@@ -14,12 +14,31 @@
 import {classifySms} from './aiProxyClient';
 import {MerchantChannel} from './merchantMemory';
 import {MerchantRule, ParsedSMS} from './geminiParser';
-import {CategoryId} from '../theme';
+import {CategoryId, resolveCat} from '../theme';
+import categoriesData from './data.json';
 
 const CATS =
   'food, groceries, transport, utilities, airtime, rent, health, shopping, salary, family, fun, savings, education';
 const CHANNELS =
   'MoMoPay, Send money, Receive, Bank transfer, Cash Power, Airtime, Bill, Other';
+
+// Same grouping useSubcategories() computes for the pickers (built-ins only —
+// the AI has no visibility into a user's custom subcategories), so a guess
+// here is always one the user can actually see/select in the Fix sheet.
+const SUBCATS_BY_CAT: Partial<Record<CategoryId, string[]>> = (() => {
+  const map: Partial<Record<CategoryId, string[]>> = {};
+  for (const c of (categoriesData as any).categories as any[]) {
+    const cat = resolveCat(c.name);
+    const names = (c.subcategories ?? []).map((s: any) => s.name);
+    map[cat] = [...(map[cat] ?? []), ...names];
+  }
+  return map;
+})();
+
+const SUBCATS_PROMPT_BLOCK = Object.entries(SUBCATS_BY_CAT)
+  .filter(([, names]) => (names as string[]).length > 0)
+  .map(([cat, names]) => `- ${cat}: ${(names as string[]).join(', ')}`)
+  .join('\n');
 
 // ── Parse context: the user's own accounts, for direction + transfer match ──
 export interface OwnAccountRef {
@@ -508,12 +527,13 @@ export function detectTransfer(raw: string, userName?: string): boolean {
   return false;
 }
 
-function factsToParsed(f: RegexFacts, merchant: string, category: CategoryId, confidence: number, channel: string, isTransfer: boolean): ParsedSMS {
+function factsToParsed(f: RegexFacts, merchant: string, category: CategoryId, confidence: number, channel: string, isTransfer: boolean, subcategory: string = ''): ParsedSMS {
   return {
     direction: f.direction,
     amount: f.amount,
     merchant,
     category,
+    subcategory,
     confidence,
     fee: f.fee,
     balance_after: f.balance_after,
@@ -569,10 +589,14 @@ export async function parseSmsWithAI(
 
   const system = `You classify a single Rwandan mobile-money / bank SMS. Return ONLY a JSON object, no prose, no markdown.
 Fields:
-{"merchant": "<clean title-case seller/counterparty>", "category": "<one of: ${CATS}>", "channel": "<one of: ${CHANNELS}>", "is_transfer": <true|false>, "confidence": <0..1>}
+{"merchant": "<clean title-case seller/counterparty>", "category": "<one of: ${CATS}>", "subcategory": "<one of that category's subcategories below, or \\"\\">", "channel": "<one of: ${CHANNELS}>", "is_transfer": <true|false>, "confidence": <0..1>}
 Rules:
 - merchant is the shop or person, cleaned (e.g. "SAWA CITI LTD" → "Sawa Citi").
 - category is your best fit from the list.
+- subcategory must be copied EXACTLY (spelling, punctuation) from the list below for
+  whichever category you picked, only when one clearly fits; otherwise "". Never invent one.
+Subcategories per category:
+${SUBCATS_PROMPT_BLOCK}
 - channel is the payment rail.
 - Bank of Kigali alert format: "TRANSFER - <rail> Credited account: X Debited account: Y Amount: RWF N ..." —
   the words Credited/Debited name the two ACCOUNTS, not the user. The direction fact below is already
@@ -609,6 +633,7 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
     const j = extractJson(reply);
     let merchant = String(j.merchant || 'Unknown').trim();
     let category = String(j.category || 'shopping').trim() as CategoryId;
+    let subcategory = String(j.subcategory || '').trim();
     let confidence = Math.min(1, Math.max(0, Number(j.confidence) || 0.7));
 
     // A matched own account is the most trustworthy label there is.
@@ -638,6 +663,16 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
     // Account numbers prove it > the user's learned rule > AI/heuristics.
     const isTransfer = resolveTransfer(f, rule, raw, ctx?.userName, j.is_transfer === true);
 
+    // A rule (or the transfer/account-match overrides above) may have swapped
+    // `category` out from under the AI's subcategory guess — only keep it if
+    // it's still a real option under the FINAL category.
+    const validSubcats = SUBCATS_BY_CAT[category] ?? [];
+    if (isTransfer || !validSubcats.some(s => s.toLowerCase() === subcategory.toLowerCase())) {
+      subcategory = '';
+    } else {
+      subcategory = validSubcats.find(s => s.toLowerCase() === subcategory.toLowerCase())!;
+    }
+
     return factsToParsed(
       f,
       merchant,
@@ -645,6 +680,7 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
       confidence,
       String(j.channel || f.channelHint),
       isTransfer,
+      subcategory,
     );
   } catch (e) {
     console.warn('[AIParser] falling back to regex:', e);

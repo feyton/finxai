@@ -9,6 +9,10 @@ export interface ParsedSMS {
   amount: number;
   merchant: string;
   category: CategoryId;
+  // Best-effort guess from the built-in subcategory list for `category`;
+  // '' when none fits well. Only ever a built-in name — the AI has no
+  // visibility into the user's custom subcategories.
+  subcategory: string;
   confidence: number;
   fee: number;
   balance_after: number | null;

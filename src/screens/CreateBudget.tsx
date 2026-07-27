@@ -1,6 +1,7 @@
 import {usePowerSync} from '@powersync/react-native';
 import React, {useMemo, useState} from 'react';
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
@@ -286,6 +287,11 @@ export default function CreateBudget({navigation}: any) {
                     <Pressable
                       key={c.id}
                       onPress={() => {
+                        // Free up screen space immediately — otherwise the
+                        // subcategory row + amount field that appear below
+                        // can end up hidden behind the still-open keyboard
+                        // from the item-name input.
+                        Keyboard.dismiss();
                         setPickCat(on ? null : c.id);
                         setPickSub('');
                       }}

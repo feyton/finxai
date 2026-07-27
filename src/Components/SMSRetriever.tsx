@@ -321,17 +321,18 @@ const SMSRetriever: React.FC = () => {
             // Auto-save directly to transactions — high confidence
             await db.execute(
               `INSERT INTO transactions
-                 (id, amount, account_id, category, date_time, sms, sender,
+                 (id, amount, account_id, category, subcategory, date_time, sms, sender,
                   payee, merchant, transaction_type, fees, currency,
                   confirmed, source, confidence,
                   transfer_account_id, transfer_direction, balance_after, txn_ref,
                   owner_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?)`,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?)`,
               [
                 uuid(),
                 parsed.amount,
                 account.id,
                 parsed.category,
+                parsed.subcategory ?? '',
                 occurredAt,
                 sms.body,
                 account.name,
@@ -353,16 +354,17 @@ const SMSRetriever: React.FC = () => {
             // Needs review — goes to auto_records
             await db.execute(
               `INSERT INTO auto_records
-                 (id, amount, account_id, category, date_time, sms, sender,
+                 (id, amount, account_id, category, subcategory, date_time, sms, sender,
                   payee, merchant, transaction_type, fees, currency,
                   confirmed, source, confidence, transfer_account_id,
                   balance_after, txn_ref, owner_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?, ?)`,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?, ?)`,
               [
                 uuid(),
                 parsed.amount,
                 account.id,
                 parsed.category,
+                parsed.subcategory ?? '',
                 occurredAt,
                 sms.body,
                 account.name,

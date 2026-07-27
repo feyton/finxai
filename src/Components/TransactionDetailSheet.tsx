@@ -261,6 +261,15 @@ function TransactionDetailSheet(
                 ) : null}
               </View>
 
+              {tx.sms ? (
+                <View style={styles.infoCard}>
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Original SMS</Text>
+                  </View>
+                  <Text style={styles.smsText}>{tx.sms}</Text>
+                </View>
+              ) : null}
+
               {splits.length > 0 && (
                 <View style={styles.infoCard}>
                   <View style={styles.infoRow}>
@@ -349,6 +358,13 @@ const styles = StyleSheet.create({
   infoLabel: {fontFamily: FONTS.regular, fontSize: 12.5, color: T.text2},
   infoValue: {fontFamily: FONTS.medium, fontSize: 13, color: T.text, flexShrink: 1, textAlign: 'right'},
   infoDivider: {height: 1, backgroundColor: T.border},
+  smsText: {
+    fontFamily: 'monospace',
+    fontSize: 11.5,
+    color: T.text2,
+    lineHeight: 17,
+    paddingBottom: 12,
+  },
   splitDot: {width: 8, height: 8, borderRadius: 4},
   detailBtns: {
     flexDirection: 'row',

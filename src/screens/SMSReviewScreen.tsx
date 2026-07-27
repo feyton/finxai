@@ -3,6 +3,7 @@ import React, {useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
   Pressable,
   ScrollView,
@@ -89,14 +90,23 @@ function FixSheet({
       animationType="slide"
       statusBarTranslucent
       onRequestClose={onClose}>
-      <Pressable style={styles.sheetOverlay} onPress={onClose} />
-      <View style={styles.sheet}>
-        <View style={styles.sheetHandle} />
-        <Text style={styles.sheetTitle}>Fix this transaction</Text>
-        <Text style={styles.sheetHint}>
-          Your edits train the AI to tag future SMS correctly.
-        </Text>
-        <ScrollView showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView style={{flex: 1}} behavior="height">
+        <Pressable style={styles.sheetOverlay} onPress={onClose} />
+        <View style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          <Text style={styles.sheetTitle}>Fix this transaction</Text>
+          <Text style={styles.sheetHint}>
+            Your edits train the AI to tag future SMS correctly.
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          {/* Raw SMS — for double-checking what the AI actually read */}
+          <View style={styles.fixSmsBox}>
+            <Text style={styles.smsFrom} numberOfLines={1}>
+              {record.sender ?? 'SMS'}
+            </Text>
+            <Text style={styles.smsBody}>{record.sms ?? '—'}</Text>
+          </View>
+
           {/* Type — teaching "Transfer" here trains the AI for next time */}
           <Text style={styles.fixLabel}>Type</Text>
           <View style={styles.typeRow}>
@@ -220,17 +230,18 @@ function FixSheet({
           )}
           </>
           )}
-        </ScrollView>
+          </ScrollView>
 
-        <Pressable
-          onPress={() =>
-            onSave({merchant: merchant.trim(), category: cat, subcategory, accountId, type: fixType})
-          }
-          style={({pressed}) => [styles.fixSave, {opacity: pressed ? 0.85 : 1}]}>
-          <Icon name="Check" size={16} color={T.accentInk} strokeWidth={2.6} />
-          <Text style={styles.fixSaveText}>Save & confirm</Text>
-        </Pressable>
-      </View>
+          <Pressable
+            onPress={() =>
+              onSave({merchant: merchant.trim(), category: cat, subcategory, accountId, type: fixType})
+            }
+            style={({pressed}) => [styles.fixSave, {opacity: pressed ? 0.85 : 1}]}>
+            <Icon name="Check" size={16} color={T.accentInk} strokeWidth={2.6} />
+            <Text style={styles.fixSaveText}>Save & confirm</Text>
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -297,7 +308,8 @@ function SmsCard({
             <Text style={styles.catLabel}>
               {isTransfer
                 ? 'Between your accounts'
-                : CATS[localCat]?.label ?? localCat}
+                : (CATS[localCat]?.label ?? localCat) +
+                  (record.subcategory ? ` · ${record.subcategory}` : '')}
             </Text>
           </View>
           {isTransfer && (
@@ -680,6 +692,16 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: T.border,
+  },
+  fixSmsBox: {
+    backgroundColor: T.surface2,
+    borderRadius: R.small,
+    borderWidth: 1,
+    borderColor: T.border,
+    marginHorizontal: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 4,
   },
   smsFrom: {
     fontFamily: FONTS.semibold,
