@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">FinXAi</string>
+    <string name="widget_balance_description" translatable="false">Account balances at a glance</string>
 </resources>

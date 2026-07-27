@@ -15,6 +15,7 @@ import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {reconnect} from '../tools/database';
 import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
+import {refreshBalanceWidget} from '../widgets/refreshWidget';
 
 function AccountCard({
   account,
@@ -105,6 +106,7 @@ export default function AccountsPage({navigation}: any) {
     if (!toDelete) {return;}
     await db.execute('DELETE FROM transactions WHERE account_id = ?', [toDelete.id]);
     await db.execute('DELETE FROM accounts WHERE id = ?', [toDelete.id]);
+    refreshBalanceWidget();
     sheetRef.current?.close();
     setToDelete(null);
   }, [db, toDelete]);

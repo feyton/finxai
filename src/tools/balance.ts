@@ -14,6 +14,7 @@
 // SMS-sourced insert (auto-save, confirm, fix), not just from a manual
 // "Sync balance" button.
 import {extractBalance} from './claudeParser';
+import {refreshBalanceWidget} from '../widgets/refreshWidget';
 
 export interface MovementLike {
   amount?: number | null;
@@ -82,6 +83,8 @@ export async function syncAccountBalance(
     bal,
     accountId,
   ]);
+
+  refreshBalanceWidget();
 
   return {
     balance: bal,

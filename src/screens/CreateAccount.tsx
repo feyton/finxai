@@ -14,6 +14,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {FONTS, R, T} from '../theme';
+import {refreshBalanceWidget} from '../widgets/refreshWidget';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -155,6 +156,7 @@ export default function CreateAccount({navigation}: any) {
           new Date().toISOString(),
         ],
       );
+      refreshBalanceWidget();
       navigation.goBack();
     } catch (e: any) {
       setError(e?.message ?? 'Something went wrong');

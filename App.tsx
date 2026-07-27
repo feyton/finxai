@@ -1,6 +1,6 @@
 /* eslint-disable react/no-unstable-nested-components */
 import React, {useEffect, useState} from 'react';
-import {ActivityIndicator, PermissionsAndroid, Share, View} from 'react-native';
+import {ActivityIndicator, AppState, PermissionsAndroid, Share, View} from 'react-native';
 import 'react-native-get-random-values';
 import {AppDialogHost, appAlert} from './src/Components/AppDialog';
 import {installCrashReporter, takeLastCrash} from './src/tools/crashReporter';
@@ -43,6 +43,7 @@ import ProfilePage from './src/screens/ProfilePage';
 import {db} from './src/tools/database';
 import {connector} from './src/tools/SupabaseConnector';
 import {supabase} from './src/tools/supabase';
+import {refreshBalanceWidget} from './src/widgets/refreshWidget';
 
 const Stack = createNativeStackNavigator();
 
@@ -134,6 +135,18 @@ function App(): React.JSX.Element {
       subscription.unsubscribe();
       unsubStatus();
     };
+  }, []);
+
+  useEffect(() => {
+    // Best-effort refresh so the home-screen widget shows current balances
+    // right as the user leaves the app — catches balance-changing flows
+    // that don't already call refreshBalanceWidget() themselves.
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'background' || state === 'inactive') {
+        refreshBalanceWidget();
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   if (loading) {
