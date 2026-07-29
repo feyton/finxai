@@ -8,6 +8,7 @@ import {
   extractAccountRef,
   extractBalance,
   extractTransferHint,
+  findRule,
   isTransferStatusOnly,
   maskedSuffixMatches,
   normalizeAccountNumber,
@@ -16,6 +17,9 @@ import {
   trailingDigits,
   ParseContext,
 } from '../src/tools/claudeParser';
+import {isUsablePattern, normalizeMerchant} from '../src/tools/merchantNormalize';
+import {pickSmsFormat} from '../src/tools/smsFormats';
+import {THRESHOLD_AUTO_SAVE} from '../src/tools/geminiParser';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
@@ -399,5 +403,158 @@ describe('Bank of Kigali — second alert format ("BK BANK" sender)', () => {
     expect(a.txn_ref).toBe('FTCM2620415SGRF2Y');
     expect(b.txn_ref).toBe('FTCM2620415SGRF2Y');
     expect(a.txn_ref).toBe(b.txn_ref);
+  });
+});
+
+// ── Counterparty extraction against REAL messages ──────────────────────────
+// Every case below came from the user's own inbox. Before this suite existed,
+// 7 of 8 extracted wrongly and none produced a reusable learning key — yet the
+// tests above passed, because none of them asserted on `merchant`.
+describe('counterparty extraction (real inbox samples)', () => {
+  const CASES: [string, string, string][] = [
+    [
+      'MTN merchant — "transaction of N RWF by X" had NO pattern at all',
+      "*164*S*Y'ello, A transaction of 2000 RWF by ComzAfrica Rwanda Limited was completed at 2026-07-29 12:51:17. Balance:1152 RWF. Fee  0 RWF. FT Id: 29508026690. ET  Id: K1785321706780440.*EN#",
+      'ComzAfrica Rwanda Limited',
+    ],
+    [
+      'MTN merchant — INTOUCH',
+      "*164*S*Y'ello, A transaction of 105000 RWF by INTOUCH COMMUNICATIONS LTD was completed at 2026-07-29 10:57:20. Balance:3180 RWF. Fee  0 RWF. FT Id: 29505489295.*EN#",
+      'Intouch Communications Ltd',
+    ],
+    [
+      'MTN P2P — timestamp used to be captured INTO the name',
+      'TxId:29506397578*S*Your payment of 1,500 RWF to Valentine 002597 was completed at 2026-07-29 11:37:48.  Balance: 3,152 RWF. Fee 0 RWF.*EN#',
+      'Valentine',
+    ],
+    [
+      'MTN merchant-with-code — code split off the name',
+      'TxId:29519088326*S*Your payment of 2,500 RWF to THRIVE G Ltd 888840 was completed at 2026-07-29 20:04:10.  Balance: 5,680 RWF. Fee 0 RWF.*EN#',
+      'Thrive G Ltd',
+    ],
+    [
+      'MTN P2P — Lambert',
+      'TxId:29496587489*S*Your payment of 6,300 RWF to Lambert 005868 was completed at 2026-07-28 19:52:04.  Balance: 4,180 RWF. Fee 0 RWF.*EN#',
+      'Lambert',
+    ],
+    [
+      'MTN receive — greedy .+ used to bind the LAST "from", yielding "sender:"',
+      'You have received 105000 RWF from FABRICE HAFASHIMANA (*********915) at 2026-07-29 10:56:04. Message from sender: . Balance:108180 RWF. FT Id: 29505457081.',
+      'Fabrice Hafashimana',
+    ],
+    [
+      'legacy MoMo payment — was silently "SAWA CITI LTD has been completed"',
+      'TxId: 123456. Your payment of 5,000 RWF to SAWA CITI LTD has been completed. Fee was 0 RWF. Your new balance: 61,811 RWF.',
+      'Sawa Citi Ltd',
+    ],
+  ];
+
+  it.each(CASES)('%s', (_label, raw, expected) => {
+    expect(parseWithRegex(raw).merchant).toBe(expected);
+  });
+
+  it('never leaves a timestamp or "was completed" inside the merchant name', () => {
+    for (const [, raw] of CASES) {
+      const m = parseWithRegex(raw).merchant;
+      expect(m).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+      expect(m).not.toMatch(/was completed|has been completed/i);
+    }
+  });
+
+  it('the BK header format still wins over the new MTN pattern, casing preserved', () => {
+    const parsed = parseWithRegex(
+      'TRANSFER - MTN mobile money Credited account: 250787241457  Debited account: 100161965558  Amount: RWF 5,000 Transaction Charge: RWF 0 Status: COMPLETED',
+    );
+    // A bank DESCRIPTION field, not a counterparty name — passed through as the
+    // bank wrote it rather than title-cased.
+    expect(parsed.merchant).toBe('MTN mobile money');
+  });
+});
+
+// ── Learning keys must be stable and safe ──────────────────────────────────
+describe('merchant normalization → learning keys', () => {
+  it('collapses the same counterparty across different timestamps', () => {
+    const a = normalizeMerchant('Valentine 002597 was completed at 2026-07-29 11:37:48');
+    const b = normalizeMerchant('Valentine 002597 was completed at 2026-08-02 08:14:02');
+    expect(a.key).toBe(b.key);
+    expect(a.key).toBe('valentine');
+    expect(a.code).toBe('002597');
+  });
+
+  it('collapses Ltd/Limited spellings onto one key', () => {
+    expect(normalizeMerchant('ComzAfrica Rwanda Limited').key).toBe(
+      normalizeMerchant('ComzAfrica Rwanda Ltd').key,
+    );
+  });
+
+  it("rejects 'unknown' as a pattern — it used to match every unparseable SMS", () => {
+    expect(isUsablePattern('unknown')).toBe(false);
+    expect(isUsablePattern('bk')).toBe(false); // too short to match on safely
+    expect(isUsablePattern('valentine')).toBe(true);
+  });
+});
+
+describe('findRule matching', () => {
+  const rule = (pattern: string, category = 'food') => ({
+    pattern,
+    category,
+    correction_count: 1,
+    confirmation_count: 0,
+  });
+
+  it('matches an exact normalized key and reports it as exact', () => {
+    const hit = findRule([rule('valentine')], 'Valentine');
+    expect(hit?.category).toBe('food');
+    expect(hit?.exact).toBe(true);
+  });
+
+  it("never matches via an 'unknown' rule", () => {
+    expect(findRule([rule('unknown', 'rent')], 'Unknown')).toBeUndefined();
+  });
+
+  it('does not let a 2-char pattern match an unrelated merchant', () => {
+    expect(findRule([rule('bk')], 'Bakery Supplies')).toBeUndefined();
+  });
+
+  it('matches on a word boundary, not a bare substring', () => {
+    expect(findRule([rule('cafe')], 'Cafe Rwanda')?.exact).toBe(false);
+    // 'cafe' must NOT match inside 'Cafeteria'
+    expect(findRule([rule('cafe')], 'Cafeteria Ltd')).toBeUndefined();
+  });
+
+  it('an inexact rule hit stays below the auto-save threshold', () => {
+    const parsed = parseWithRegex(
+      'TxId: 1. Your payment of 1,000 RWF to Cafe Rwanda has been completed. Fee was 0 RWF.',
+      {rules: [rule('cafe')]},
+    );
+    expect(parsed.category).toBe('food');
+    expect(parsed.confidence).toBeLessThan(THRESHOLD_AUTO_SAVE);
+  });
+});
+
+// ── Per-provider prompt/extractor selection ────────────────────────────────
+describe('SMS format registry', () => {
+  it('routes MTN wrapper messages to the MTN format', () => {
+    const f = pickSmsFormat('M-Money', "*164*S*Y'ello, A transaction of 500 RWF by X was completed.*EN#");
+    expect(f.id).toBe('mtn');
+  });
+
+  it('routes the BK transfer-alert body to the BK format regardless of sender', () => {
+    expect(
+      pickSmsFormat('anything', 'TRANSFER - EKASH Credited account: 1 Debited account: 2 Amount: RWF 5').id,
+    ).toBe('bk');
+  });
+
+  it("routes BK's second sender by its Txn Description marker", () => {
+    expect(pickSmsFormat('BK BANK', 'your account x has been debited RWF 1 Txn Description: Card Purchase.').id)
+      .toBe('bk_bank');
+  });
+
+  it('extracts the MTN counterparty deterministically, code separated', () => {
+    const f = pickSmsFormat('M-Money', 'Your payment of 2,500 RWF to THRIVE G Ltd 888840 was completed at 2026-07-29 20:04:10.');
+    expect(f.extractCounterparty?.('Your payment of 2,500 RWF to THRIVE G Ltd 888840 was completed at 2026-07-29 20:04:10.')).toEqual({
+      name: 'THRIVE G Ltd',
+      code: '888840',
+    });
   });
 });

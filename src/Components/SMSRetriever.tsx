@@ -19,6 +19,7 @@ import {useQuery, usePowerSync} from '@powersync/react-native';
 import React, {useEffect, useRef} from 'react';
 // @ts-ignore
 import SmsAndroid from 'react-native-get-sms-android';
+import {useToast} from 'react-native-toast-notifications';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {supabase} from '../tools/supabase';
 import {THRESHOLD_AUTO_SAVE} from '../tools/geminiParser';
@@ -31,11 +32,14 @@ import {
   maskedSuffixMatches,
   normalizeAccountNumber,
   parseSmsWithAI,
+  parseWithRegex,
   trailingDigits,
 } from '../tools/claudeParser';
 import {
+  getChannelRules,
   getMerchantChannels,
   getMerchantRules,
+  migrateMerchantRuleKeys,
   recordMerchantChannel,
 } from '../tools/merchantMemory';
 import {syncAccountBalance} from '../tools/balance';
@@ -74,9 +78,15 @@ function senderMatches(smsAddress: string, accountAddress: string): boolean {
 // with no relation by name to the account's configured address) — when no
 // sender matches, fall back to the account NUMBER the alert itself names
 // ("your account ********5558 has been..."), which never changes.
+// `channelRules` is the sender→account map the user implicitly builds every
+// time they pick a payment account in the Fix sheet. It used to be written and
+// never read (recordChannel had no consumer), so that choice was discarded;
+// it is now the last-resort route when neither the sender address nor the
+// account number the alert names identifies an account.
 function findAccountForSms(
   sms: {body: string; address: string},
   accounts: {address?: string | null; number?: string | null}[],
+  channelRules: Record<string, string> = {},
 ): any {
   const bySender = (accounts as any[]).find(a =>
     senderMatches(sms.address, a.address),
@@ -86,19 +96,27 @@ function findAccountForSms(
   }
   const ref = extractAccountRef(sms.body);
   const refSuffix = ref ? trailingDigits(ref) : '';
-  if (!refSuffix) {
-    return undefined;
+  if (refSuffix) {
+    const byNumber = (accounts as any[]).find(a => {
+      const num = normalizeAccountNumber(a.number);
+      return num && maskedSuffixMatches(refSuffix, num);
+    });
+    if (byNumber) {
+      return byNumber;
+    }
   }
-  return (accounts as any[]).find(a => {
-    const num = normalizeAccountNumber(a.number);
-    return num && maskedSuffixMatches(refSuffix, num);
-  });
+  // Learned from a past Fix: "SMS from this sender belongs to that account."
+  const learntId = channelRules[sms.address];
+  return learntId
+    ? (accounts as any[]).find(a => a.id === learntId)
+    : undefined;
 }
 
 const SMSRetriever: React.FC = () => {
   const db = usePowerSync();
   const {userId, name} = useCurrentUser();
   const processing = useRef(false);
+  const toast = useToast();
 
   // ALL accounts stream in — auto ones get SMS processing, and every account
   // number participates in inter-account transfer matching.
@@ -165,10 +183,18 @@ const SMSRetriever: React.FC = () => {
       } = await supabase.auth.getSession();
       const authToken = session?.access_token ?? '';
 
+      // One-time repair of rule keys written before normalizeMerchant existed
+      // (timestamps baked into the key, plus the poisonous 'unknown' rule).
+      // Idempotent — a no-op once it has run.
+      await migrateMerchantRuleKeys(db, userId!);
+
       // Learned rules feed the classifier — a counterparty the user corrected
-      // to 'transfer' (or to a category) is honored on every future SMS.
+      // to 'transfer' (or to a category) is honored on every future SMS. This
+      // is the generic head; per-SMS relevant rules are fetched inside the
+      // loop below, keyed on that message's own counterparty.
       const merchantRules = await getMerchantRules(db, '', userId!, 20);
       const merchantChannels = await getMerchantChannels();
+      const channelRules = await getChannelRules();
 
       const ctxBase: ParseContext = {
         userName: name ?? '',
@@ -218,10 +244,17 @@ const SMSRetriever: React.FC = () => {
       // inbox isn't guaranteed to arrive in chronological order).
       const touchedAccounts = new Set<string>();
 
+      // How many messages degraded to regex-only classification this run.
+      // Surfaced ONCE at the end (not per SMS) — the previous behaviour was a
+      // silent console.warn, which is how a fully dark AI pipeline went
+      // unnoticed.
+      let fallbackCount = 0;
+      let lastFallbackReason = '';
+
       for (const sms of inbox) {
         if (!sms.body || existingSmsSet.has(sms.body)) {continue;}
 
-        const account = findAccountForSms(sms, autoAccounts);
+        const account = findAccountForSms(sms, autoAccounts, channelRules);
         if (!account) {continue;}
 
         const smsDate = parseInt(sms.date ?? '0', 10) || 0;
@@ -239,8 +272,26 @@ const SMSRetriever: React.FC = () => {
         }
 
         try {
-          const ctx: ParseContext = {...ctxBase, currentAccountId: account.id};
-          const parsed = await parseSmsWithAI(sms.body, merchantRules, authToken, merchantChannels, ctx);
+          // Rules relevant to THIS message's counterparty, plus the global
+          // head. A cheap deterministic pre-pass gives us the name to scope
+          // on before the classifier runs.
+          const preview = parseWithRegex(sms.body, ctxBase);
+          const scopedRules =
+            preview.merchant && preview.merchant !== 'Unknown'
+              ? await getMerchantRules(db, preview.merchant, userId!, 20)
+              : merchantRules;
+
+          const ctx: ParseContext = {
+            ...ctxBase,
+            currentAccountId: account.id,
+            rules: scopedRules,
+            sender: sms.address,
+          };
+          const parsed = await parseSmsWithAI(sms.body, scopedRules, authToken, merchantChannels, ctx);
+          if (parsed.parseSource === 'regex') {
+            fallbackCount++;
+            lastFallbackReason = parsed.fallbackReason ?? lastFallbackReason;
+          }
 
           const now = new Date().toISOString();
 
@@ -325,8 +376,8 @@ const SMSRetriever: React.FC = () => {
                   payee, merchant, transaction_type, fees, currency,
                   confirmed, source, confidence,
                   transfer_account_id, transfer_direction, balance_after, txn_ref,
-                  owner_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?)`,
+                  parse_source, owner_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 uuid(),
                 parsed.amount,
@@ -345,6 +396,7 @@ const SMSRetriever: React.FC = () => {
                 transferDirection,
                 parsed.balance_after,
                 parsed.txn_ref,
+                parsed.parseSource ?? 'regex',
                 userId,
                 now,
               ],
@@ -357,8 +409,8 @@ const SMSRetriever: React.FC = () => {
                  (id, amount, account_id, category, subcategory, date_time, sms, sender,
                   payee, merchant, transaction_type, fees, currency,
                   confirmed, source, confidence, transfer_account_id,
-                  balance_after, txn_ref, owner_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?, ?)`,
+                  balance_after, txn_ref, parse_source, owner_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?, ?, ?)`,
               [
                 uuid(),
                 parsed.amount,
@@ -376,6 +428,7 @@ const SMSRetriever: React.FC = () => {
                 transferAccountId,
                 parsed.balance_after,
                 parsed.txn_ref,
+                parsed.parseSource ?? 'regex',
                 userId,
                 now,
               ],
@@ -410,6 +463,22 @@ const SMSRetriever: React.FC = () => {
         'DELETE FROM auto_records WHERE owner_id = ? AND (account_id IS NULL OR account_id NOT IN (SELECT id FROM accounts))',
         [userId],
       );
+
+      // Tell the user once if the classifier was unreachable — otherwise a
+      // dark AI pipeline just looks like the parser got worse.
+      if (fallbackCount > 0) {
+        console.warn(
+          `[SMSRetriever] ${fallbackCount} SMS classified without AI (${lastFallbackReason})`,
+        );
+        toast.show(
+          lastFallbackReason === 'not-signed-in'
+            ? 'Session expired — sign in again for AI tagging.'
+            : `AI tagging unavailable (${lastFallbackReason}) — ${fallbackCount} message${
+                fallbackCount === 1 ? '' : 's'
+              } tagged offline. Tap Retry on any record.`,
+          {type: 'warning', duration: 6000},
+        );
+      }
     } catch (e) {
       console.error('[SMSRetriever] Error:', e);
     } finally {

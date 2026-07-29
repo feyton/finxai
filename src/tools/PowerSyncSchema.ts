@@ -41,6 +41,7 @@ const transactions = new Table({
   transfer_direction: column.text,  // 'in' | 'out' (transfers only)
   balance_after: column.real,       // bank-reported balance after this txn (audit)
   txn_ref: column.text,             // bank's Ref/Event # — de-dupes multi-sender alerts
+  parse_source: column.text,        // 'ai' | 'regex' — which path classified this
   owner_id: column.text,
   created_at: column.text,
 });
@@ -73,6 +74,7 @@ const auto_records = new Table({
   transfer_account_id: column.text, // counterparty account for transfers
   balance_after: column.real,  // bank-reported balance after this txn
   txn_ref: column.text,        // bank's Ref/Event # — de-dupes multi-sender alerts
+  parse_source: column.text,   // 'ai' | 'regex' — which path classified this
   owner_id: column.text,
   created_at: column.text,
 });
@@ -258,8 +260,10 @@ const shopping_items = new Table({
 });
 
 const merchant_rules = new Table({
-  pattern: column.text,            // lowercase normalised merchant name
+  pattern: column.text,            // normalizeMerchant() key — stable, reusable
   category: column.text,           // CategoryId the user assigned
+  subcategory: column.text,        // subcategory the user picked, '' if none
+  display_name: column.text,       // name the user chose; fixes future SMS too
   correction_count: column.integer, // times user corrected this mapping
   confirmation_count: column.integer,// times user confirmed this mapping
   owner_id: column.text,

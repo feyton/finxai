@@ -30,11 +30,28 @@ export interface ParsedSMS {
   // When the counterparty account number matches another of the user's OWN
   // accounts, this is that account's id (drives transfer_account_id).
   transferAccountId?: string | null;
+  // Which path actually classified this SMS: 'ai' when the server-side model
+  // answered, 'regex' when we degraded to on-device pattern matching.
+  //
+  // This exists because the fallback was previously invisible — the only tell
+  // was regexClassify's hardcoded confidence values (0.45 / 0.9) leaking into
+  // the UI, so a totally dark AI pipeline looked like a merchant-parsing bug.
+  parseSource?: 'ai' | 'regex';
+  // Why the fallback happened, for diagnostics. Never shown as-is to users.
+  fallbackReason?: string;
 }
 
 export interface MerchantRule {
+  // Normalized lookup key (see normalizeMerchant in ./merchantMemory) — NOT
+  // the display text. Stable across messages so a rule can match more than
+  // once.
   pattern: string;
   category: string;
+  // Subcategory the user picked for this counterparty, '' when none.
+  subcategory?: string | null;
+  // Name the user chose for this counterparty; applied to future SMS so a
+  // badly-extracted name gets corrected everywhere, not just once.
+  display_name?: string | null;
   correction_count: number;
   confirmation_count: number;
 }

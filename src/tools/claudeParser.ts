@@ -12,13 +12,23 @@
 // confidence) rather than blocking the transaction from being recorded.
 
 import {classifySms} from './aiProxyClient';
-import {MerchantChannel} from './merchantMemory';
+import type {MerchantChannel} from './merchantMemory';
+// Pure helpers only — importing ./merchantMemory itself would pull AsyncStorage
+// into this module and into every plain-Jest test that touches the parser.
+import {
+  isUsablePattern,
+  normalizeMerchant,
+  ruleDisplayName,
+} from './merchantNormalize';
 import {MerchantRule, ParsedSMS} from './geminiParser';
-import {CategoryId, resolveCat} from '../theme';
+import {pickSmsFormat} from './smsFormats';
+import {CATS as CAT_MAP, CategoryId, resolveCat} from '../theme';
 import categoriesData from './data.json';
 
-const CATS =
-  'food, groceries, transport, utilities, airtime, rent, health, shopping, salary, family, fun, savings, education';
+// Derived from CATS rather than hand-maintained — this string drifted out of
+// sync with theme.ts before, so the model was never told some categories
+// existed and could not pick them.
+const CATS = Object.keys(CAT_MAP).join(', ');
 const CHANNELS =
   'MoMoPay, Send money, Receive, Bank transfer, Cash Power, Airtime, Bill, Other';
 
@@ -57,21 +67,52 @@ export interface ParseContext {
   // Learned merchant rules. category === 'transfer' means the user taught us
   // this counterparty IS a transfer; any real category means it is NOT one.
   rules?: MerchantRule[];
+  // SMS sender address (e.g. 'M-Money', 'BK BANK'), used to select the
+  // provider-specific prompt/extractor in ./smsFormats.
+  sender?: string;
 }
 
-// Find the learned rule whose pattern overlaps the merchant name.
+// Find the learned rule for a merchant name.
+//
+// Matching is deliberately tiered, because the old one-line version
+// (`norm.includes(r.pattern) || r.pattern.includes(norm)`) misfired badly:
+//   • A rule stored under 'unknown' — trivially created by fixing a record
+//     whose merchant read "Unknown" — matched EVERY unparseable SMS, and the
+//     caller then forced confidence to 0.95, above THRESHOLD_AUTO_SAVE. Those
+//     records were silently auto-saved with no review.
+//   • Two-or-three character patterns ('bk', 'mtn') matched unrelated names
+//     anywhere they appeared as a substring.
+// `exact` is reported so callers can treat a fuzzy hit as weaker evidence.
 export function findRule(
   rules: MerchantRule[] | undefined,
   merchant: string,
-): MerchantRule | undefined {
+): (MerchantRule & {exact: boolean}) | undefined {
   if (!rules?.length || !merchant) {
     return undefined;
   }
-  const norm = merchant.toLowerCase().replace(/\s+/g, ' ').trim();
-  if (!norm) {
+  const key = normalizeMerchant(merchant).key;
+  if (!isUsablePattern(key)) {
     return undefined;
   }
-  return rules.find(r => norm.includes(r.pattern) || r.pattern.includes(norm));
+
+  const usable = rules.filter(r => isUsablePattern(r.pattern ?? ''));
+
+  // 1. Exact key match — the only kind we fully trust.
+  const exact = usable.find(r => r.pattern === key);
+  if (exact) {
+    return {...exact, exact: true};
+  }
+
+  // 2. Whole-word containment, and only for patterns long enough to be
+  //    meaningful. Longest pattern first so the most specific rule wins.
+  const wordBoundary = usable
+    .filter(r => r.pattern.length >= 4)
+    .sort((a, b) => b.pattern.length - a.pattern.length)
+    .find(r => {
+      const escaped = r.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`\\b${escaped}\\b`).test(key);
+    });
+  return wordBoundary ? {...wordBoundary, exact: false} : undefined;
 }
 
 // Transfer verdict with clear precedence: account-number PROOF beats
@@ -444,6 +485,11 @@ function detectChannel(raw: string, isCredit: boolean): string {
   return 'Other';
 }
 
+// Where a counterparty name ends. Shared by every "name follows a preposition"
+// pattern below: cut at the sentence tail ("was completed"), an " at <date>"
+// clause, an opening paren (a masked phone number), a period, or end of string.
+const NAME_STOP = String.raw`(?=\s+(?:was|has\s+been|is)\s+(?:completed|successful|processed)\b|\s+at\s+\d|\s*[.(]|\s*$)`;
+
 // Regex-only merchant + category guess (fallback when no AI).
 function regexClassify(
   raw: string,
@@ -456,9 +502,29 @@ function regexClassify(
   const bkHead = raw.match(
     /^\s*(?:TRANSFER|BILL\s*PAYMENT|PAYMENT)\s*-\s*([\s\S]*?)\s+(?:credited|debited)\s+account/i,
   );
-  const payTo = raw.match(/payment of [\d,.]+ (?:RWF|FRW) to ([^.]+)/i);
-  const from = raw.match(/received .+ from ([^\(.]+)/i);
-  const sentTo = raw.match(/sent to ([^\(.]+)/i);
+  // MTN MoMo's merchant template: "A transaction of 2000 RWF by ComzAfrica
+  // Rwanda Limited was completed at ...". There was previously NO pattern for
+  // this at all, so the most common MTN merchant alert fell through every
+  // branch and came out as 'Unknown'.
+  const byMerchant = raw.match(
+    new RegExp(String.raw`\btransaction\s+of\s+[\d,.]+\s*(?:RWF|FRW)\s+by\s+(.+?)` + NAME_STOP, 'i'),
+  );
+  // These three previously captured with `([^.]+)` / `([^\(.]+)`, which only
+  // stopped at a period or paren — so "to Valentine 002597 was completed at
+  // 2026-07-29 11:37:48" was captured whole, timestamp included, making the
+  // learned rule key unique per message and therefore never reusable.
+  const payTo = raw.match(
+    new RegExp(String.raw`payment\s+of\s+[\d,.]+\s*(?:RWF|FRW)\s+to\s+(.+?)` + NAME_STOP, 'i'),
+  );
+  // `.+?` is deliberately LAZY: with a greedy `.+` this bound to the LAST
+  // " from " in the message, so "You have received ... from FABRICE ...
+  // Message from sender: ." yielded the merchant "sender:".
+  const from = raw.match(
+    new RegExp(String.raw`received\s+.+?\bfrom\s+(.+?)` + NAME_STOP, 'i'),
+  );
+  const sentTo = raw.match(
+    new RegExp(String.raw`sent\s+to\s+(.+?)` + NAME_STOP, 'i'),
+  );
   const narration = raw.match(/narration:\s*([^.]+)/i);
   // BK's second alert format ("BK BANK" sender): "... Txn Description:
   // Card Purchase. Txn Charge: ..." — no counterparty name either, but the
@@ -471,6 +537,12 @@ function regexClassify(
     /\bat\s+([A-Z][A-Za-z0-9&. ]{2,30}?)\.\s*(?:Transaction Charge|Notification Charge|Your balance|For inquiry)/i,
   );
 
+  // Whether the matched branch yielded a COUNTERPARTY NAME (a person or shop,
+  // safe to tidy) or a bank DESCRIPTION field. Descriptions like "EKASH
+  // P2P-NEW APP" or "Incoming Trsf frm local banks" are the bank's own wording
+  // — title-casing them loses information, so they pass through verbatim.
+  let fromNameSlot = false;
+
   if (facts.transferAccount) {
     merchant =
       facts.direction === 'debit'
@@ -478,12 +550,23 @@ function regexClassify(
         : `From ${facts.transferAccount.name}`;
   } else if (bkHead) {
     merchant = bkHead[1].trim();
-  } else if (payTo) {merchant = payTo[1].trim();}
-  else if (from) {merchant = from[1].trim();}
-  else if (sentTo) {merchant = sentTo[1].trim();}
+  } else if (byMerchant) {merchant = byMerchant[1].trim(); fromNameSlot = true;}
+  else if (payTo) {merchant = payTo[1].trim(); fromNameSlot = true;}
+  else if (from) {merchant = from[1].trim(); fromNameSlot = true;}
+  else if (sentTo) {merchant = sentTo[1].trim(); fromNameSlot = true;}
   else if (narration) {merchant = narration[1].trim();}
   else if (txnDesc) {merchant = txnDesc[1].trim();}
   else if (atBank) {merchant = atBank[1].trim();}
+
+  // Tidy real names only: strip the over-captured tail/code and title-case, so
+  // the fallback produces the same shape the AI path is asked for ("SAWA CITI
+  // LTD" → "Sawa Citi Ltd").
+  if (fromNameSlot) {
+    const norm = normalizeMerchant(merchant);
+    if (norm.display) {
+      merchant = norm.display;
+    }
+  }
 
   const isCredit = facts.direction === 'credit';
   const hay = (merchant + ' ' + raw).toLowerCase();
@@ -527,8 +610,20 @@ export function detectTransfer(raw: string, userName?: string): boolean {
   return false;
 }
 
-function factsToParsed(f: RegexFacts, merchant: string, category: CategoryId, confidence: number, channel: string, isTransfer: boolean, subcategory: string = ''): ParsedSMS {
+function factsToParsed(
+  f: RegexFacts,
+  merchant: string,
+  category: CategoryId,
+  confidence: number,
+  channel: string,
+  isTransfer: boolean,
+  subcategory: string = '',
+  parseSource: 'ai' | 'regex' = 'regex',
+  fallbackReason?: string,
+): ParsedSMS {
   return {
+    parseSource,
+    fallbackReason,
     direction: f.direction,
     amount: f.amount,
     merchant,
@@ -556,10 +651,28 @@ export function parseWithRegex(raw: string, ctx?: ParseContext): ParsedSMS {
       ? (rule.category as CategoryId)
       : classified.category;
   const isTransfer = resolveTransfer(f, rule, raw, ctx?.userName);
-  // FAILED SMS carry full confidence in that one fact; a learned rule also
-  // lifts confidence — the user taught us this exact counterparty.
-  const confidence = f.status === 'failed' ? 1 : rule ? 0.9 : 0.45;
-  return factsToParsed(f, classified.merchant, category, confidence, f.channelHint, isTransfer);
+  // A learned display name applies on this path too — otherwise a rename only
+  // sticks while the AI is reachable.
+  let merchant = classified.merchant;
+  if (!f.transferAccount) {
+    merchant = ruleDisplayName(ctx?.rules, merchant) ?? merchant;
+  }
+  // FAILED SMS carry full confidence in that one fact. A learned rule lifts
+  // confidence, but an inexact match is capped below THRESHOLD_AUTO_SAVE so a
+  // partial name match can't silently auto-file a regex-only guess.
+  const confidence =
+    f.status === 'failed' ? 1 : rule ? (rule.exact ? 0.9 : 0.7) : 0.45;
+  const subcategory =
+    rule?.subcategory && rule.category === category ? rule.subcategory : '';
+  return factsToParsed(
+    f,
+    merchant,
+    category,
+    confidence,
+    f.channelHint,
+    isTransfer,
+    subcategory,
+  );
 }
 
 // ── Main: AI classification over regex-extracted facts ─────────
@@ -578,9 +691,15 @@ export async function parseSmsWithAI(
     return factsToParsed(f, merchant, category, 1, f.channelHint, false);
   }
 
+  // Only the matched provider's guidance goes into the prompt — previously
+  // every call shipped BK + BK-BANK + BPR instructions regardless of sender,
+  // and had nothing at all for MTN.
+  const format = pickSmsFormat(ctx?.sender ?? '', raw);
+  const deterministic = format.extractCounterparty?.(raw) ?? null;
+
   const ruleLines = rules
     .slice(0, 12)
-    .map(r => `- "${r.pattern}" → ${r.category}`)
+    .map(r => `- "${r.pattern}" → ${r.category}${r.display_name ? ` (shown as "${r.display_name}")` : ''}`)
     .join('\n');
   const channelLines = Object.entries(merchantChannels)
     .slice(0, 12)
@@ -598,16 +717,8 @@ Rules:
 Subcategories per category:
 ${SUBCATS_PROMPT_BLOCK}
 - channel is the payment rail.
-- Bank of Kigali alert format: "TRANSFER - <rail> Credited account: X Debited account: Y Amount: RWF N ..." —
-  the words Credited/Debited name the two ACCOUNTS, not the user. The direction fact below is already
-  resolved from the user's own account numbers; never contradict it.
-- BPR Bank format: "your account X has been debited/credited RWF N ... at BPR Bank. Transaction Charge:
-  ... Notification Charge: ... Your balance is RWF Z." never names the counterparty — use "BPR Bank" or
-  the bank/agent named after "at" as the merchant unless a learned rule or transfer fact says otherwise.
-- Bank of Kigali ALSO sends a second alert format, from a different sender ("BK BANK"): "your account X
-  has been debited/credited RWF N ... Txn Description: <desc> ... Available Balance: RWF Z." No counterparty
-  name is given either — use the Txn Description (e.g. "Card Purchase", "EKASH P2P-NEW APP", "Incoming Trsf
-  frm local banks") as the merchant/description unless a learned rule or transfer fact says otherwise.
+Format notes for THIS message (${format.label}):
+${format.guidance}
 - is_transfer is TRUE when the money moved between the USER'S OWN accounts —
   i.e. the counterparty is the user themselves (name matches the account holder),
   a Mokash savings pocket, a bank↔wallet top-up, or an explicit "fund-transfer"
@@ -620,7 +731,11 @@ ${SUBCATS_PROMPT_BLOCK}
 
   const factLines = `direction=${f.direction}, amount=${f.amount} RWF, fee=${f.fee}, channelHint=${f.channelHint}` +
     (f.counterpartyNumber ? `, counterpartyAccount=${f.counterpartyNumber}` : '') +
-    (f.transferAccount ? `, counterpartyIsUsersOwnAccount="${f.transferAccount.name}"` : '');
+    (f.transferAccount ? `, counterpartyIsUsersOwnAccount="${f.transferAccount.name}"` : '') +
+    // Where the template is rigid, the counterparty is deterministic — hand it
+    // over as a fact so the model only has to classify, not re-extract.
+    (deterministic ? `, counterparty="${deterministic.name}"` : '') +
+    (deterministic?.code ? `, counterpartyCode=${deterministic.code}` : '');
 
   const user = `SMS: ${raw}
 ${ctx?.userName ? `\nAccount holder (the user): ${ctx.userName}` : ''}
@@ -636,6 +751,23 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
     let subcategory = String(j.subcategory || '').trim();
     let confidence = Math.min(1, Math.max(0, Number(j.confidence) || 0.7));
 
+    // On a rigid template the deterministic name wins over the model's, but
+    // only when the model clearly failed (empty/Unknown) or drifted onto text
+    // that isn't a name at all. A model cleanup of casing/suffix is welcome.
+    if (deterministic?.name) {
+      const modelKey = normalizeMerchant(merchant).key;
+      const detKey = normalizeMerchant(deterministic.name).key;
+      const modelUnusable = !isUsablePattern(modelKey);
+      // Keep the model's version if it's recognisably the same counterparty.
+      const sameParty =
+        modelKey === detKey ||
+        (modelKey.length >= 4 && detKey.includes(modelKey)) ||
+        (detKey.length >= 4 && modelKey.includes(detKey));
+      if (modelUnusable || !sameParty) {
+        merchant = normalizeMerchant(deterministic.name).display;
+      }
+    }
+
     // A matched own account is the most trustworthy label there is.
     if (f.transferAccount) {
       merchant =
@@ -647,13 +779,34 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
 
     // Hard-apply a learned rule if the merchant matches one. 'transfer'
     // rules govern is_transfer below rather than the category.
+    //
+    // Only an EXACT key match may lift confidence to auto-save territory. A
+    // fuzzy (word-boundary) hit still applies the category — the user did
+    // teach us something — but caps below THRESHOLD_AUTO_SAVE so the record
+    // goes to review rather than being filed silently on a partial match.
     const rule = findRule(rules, merchant);
+    const ruleCeiling = rule?.exact ? 0.95 : 0.9;
     if (rule && rule.category !== 'transfer') {
       category = rule.category as CategoryId;
-      confidence = Math.max(confidence, 0.95);
+      confidence = Math.max(confidence, ruleCeiling);
     }
     if (rule?.category === 'transfer') {
-      confidence = Math.max(confidence, 0.95);
+      confidence = Math.max(confidence, ruleCeiling);
+    }
+    // Reapply the name the user chose for this counterparty. Without this a
+    // merchant the user renamed once reverts to the model's/regex's version on
+    // every subsequent SMS — the single most visible "my fix didn't stick".
+    // Skipped when an own-account match already produced a "To/From X" label.
+    if (!f.transferAccount) {
+      const learntName = ruleDisplayName(rules, merchant);
+      if (learntName) {
+        merchant = learntName;
+      }
+      // The learned subcategory only applies if the category still matches
+      // the one it was learned under.
+      if (rule?.subcategory && rule.category === category && !subcategory) {
+        subcategory = rule.subcategory;
+      }
     }
     // Facts are solid → don't let a shaky category sink an otherwise clear txn.
     if (f.amount > 0 && merchant && merchant !== 'Unknown') {
@@ -681,9 +834,22 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
       String(j.channel || f.channelHint),
       isTransfer,
       subcategory,
+      'ai',
     );
-  } catch (e) {
-    console.warn('[AIParser] falling back to regex:', e);
-    return parseWithRegex(raw, ctx);
+  } catch (e: any) {
+    // Keep degrading rather than dropping the transaction — but record WHY, so
+    // a persistently dark classifier is visible in the UI and in logs instead
+    // of being inferable only from a confidence number.
+    const reason =
+      e?.name === 'MissingAuthError'
+        ? 'not-signed-in'
+        : e?.name === 'AbortError'
+        ? 'timeout'
+        : e?.status
+        ? `http-${e.status}`
+        : e?.message ?? 'unknown';
+    console.warn(`[AIParser] falling back to regex (${reason}):`, e);
+    const parsed = parseWithRegex(raw, ctx);
+    return {...parsed, parseSource: 'regex', fallbackReason: reason};
   }
 }

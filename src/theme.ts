@@ -36,7 +36,9 @@ export const R = {
 
 export type CategoryId =
   | 'food' | 'groceries' | 'transport' | 'utilities' | 'airtime' | 'rent'
-  | 'health' | 'shopping' | 'salary' | 'family' | 'fun' | 'savings' | 'education';
+  | 'health' | 'shopping' | 'salary' | 'family' | 'fun' | 'savings' | 'education'
+  | 'personal_care' | 'housing' | 'technology' | 'debt' | 'gifts' | 'misc'
+  | 'freelance';
 
 export const CATS: Record<CategoryId, {id: CategoryId; label: string; icon: string; color: string}> = {
   food:      {id: 'food',      label: 'Food & Dining',      icon: 'UtensilsCrossed', color: '#F59E0B'},
@@ -52,9 +54,22 @@ export const CATS: Record<CategoryId, {id: CategoryId; label: string; icon: stri
   fun:       {id: 'fun',       label: 'Entertainment',      icon: 'Flame',           color: '#FB923C'},
   savings:   {id: 'savings',   label: 'Savings',            icon: 'Target',          color: '#2DD4BF'},
   education: {id: 'education', label: 'Education',          icon: 'Star',            color: '#818CF8'},
+  // Present in data.json but previously missing here — every one of these
+  // silently collapsed into 'shopping' via resolveCat's default, so they
+  // could never be picked in any CATS-driven picker (Fix sheet, budgets,
+  // Edit transaction, Manage categories).
+  personal_care: {id: 'personal_care', label: 'Personal Care',        icon: 'Scissors',   color: '#F0ABFC'},
+  housing:       {id: 'housing',       label: 'Housing',              icon: 'Building2',  color: '#C084FC'},
+  technology:    {id: 'technology',    label: 'Technology',           icon: 'Laptop',     color: '#22D3EE'},
+  debt:          {id: 'debt',          label: 'Debt Payments',        icon: 'CreditCard', color: '#EF4444'},
+  gifts:         {id: 'gifts',         label: 'Gifts & Donations',    icon: 'Gift',       color: '#FDA4AF'},
+  misc:          {id: 'misc',          label: 'Miscellaneous',        icon: 'Tag',        color: '#94A3B8'},
+  freelance:     {id: 'freelance',     label: 'Freelance/Side Hustle', icon: 'Handshake', color: '#4ADE80'},
 };
 
-// Maps legacy category strings from existing data to the new CategoryId
+// Maps legacy category strings from existing data to the new CategoryId.
+// Order matters — earlier branches win, so the narrower checks added below
+// sit ahead of the broader ones they would otherwise be swallowed by.
 export function resolveCat(raw: string): CategoryId {
   const s = (raw ?? '').toLowerCase();
   if (s.includes('food') || s.includes('dining') || s.includes('restaurant') || s.includes('cafe')) return 'food';
@@ -62,14 +77,30 @@ export function resolveCat(raw: string): CategoryId {
   if (s.includes('transport') || s.includes('travel') || s.includes('fuel') || s.includes('moto') || s.includes('cab')) return 'transport';
   if (s.includes('utilit') || s.includes('electric') || s.includes('water') || s.includes('power') || s.includes('wasac') || s.includes('reg')) return 'utilities';
   if (s.includes('airtime') || s.includes('data') || s.includes('bundle')) return 'airtime';
+  // Before 'rent': "Housing" does NOT contain "house", so it used to fall all
+  // the way through to the default rather than landing on rent.
+  if (s.includes('housing') || s.includes('mortgage')) return 'housing';
   if (s.includes('rent') || s.includes('house') || s.includes('apartment')) return 'rent';
+  // Before 'health': "Personal Care" shares no token with health, but keep it
+  // early so 'beauty'/'salon' can never be claimed by a later broad branch.
+  if (s.includes('personal care') || s.includes('personal_care') || s.includes('grooming') || s.includes('salon') || s.includes('barber') || s.includes('beauty')) return 'personal_care';
   if (s.includes('health') || s.includes('medical') || s.includes('pharmacy') || s.includes('hospital')) return 'health';
+  if (s.includes('tech') || s.includes('software') || s.includes('gadget') || s.includes('electronics')) return 'technology';
+  if (s.includes('debt') || s.includes('loan') || s.includes('credit card') || s.includes('repayment')) return 'debt';
+  if (s.includes('gift') || s.includes('donat') || s.includes('charity')) return 'gifts';
+  // Before 'salary': "Freelance/Side Hustle" shares no token with salary
+  // today, but this keeps side-income out of the salary bucket if either
+  // list gains a wording like "freelance income".
+  if (s.includes('freelance') || s.includes('side hustle') || s.includes('gig') || s.includes('consult')) return 'freelance';
   if (s.includes('shopping') || s.includes('clothes') || s.includes('clothing') || s.includes('fashion')) return 'shopping';
   if (s.includes('salary') || s.includes('wage') || s.includes('payroll') || s.includes('income')) return 'salary';
   if (s.includes('family') || s.includes('transfer') || s.includes('send') || s.includes('from ') || s.includes('to ')) return 'family';
   if (s.includes('entertainment') || s.includes('fun') || s.includes('leisure') || s.includes('canal') || s.includes('movie')) return 'fun';
   if (s.includes('saving') || s.includes('invest')) return 'savings';
   if (s.includes('education') || s.includes('school') || s.includes('tuition') || s.includes('uni')) return 'education';
+  // Deliberately matches only 'misc', never a bare 'other' — "Other Income"
+  // must keep resolving to salary, as it does today.
+  if (s.includes('misc')) return 'misc';
   return 'shopping';
 }
 

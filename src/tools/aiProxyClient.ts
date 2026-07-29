@@ -34,24 +34,76 @@ function authHeaders(authToken: string): Record<string, string> {
 // part of the parsing pipeline in src/tools/claudeParser.ts. Deterministic
 // facts (amount, fee, balance, direction, ...) are still extracted on-device
 // via regex; only this classification step needs the model.
+// A hung request used to block SMS processing indefinitely — `fetch` has no
+// default timeout, so a cold-starting or wedged server stalled the whole
+// inbox loop rather than failing fast.
+const CLASSIFY_TIMEOUT_MS = 12_000;
+
+export class MissingAuthError extends Error {
+  constructor() {
+    super('Not signed in — cannot reach the AI classifier');
+    this.name = 'MissingAuthError';
+  }
+}
+
+async function postClassify(
+  system: string,
+  user: string,
+  authToken: string,
+): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CLASSIFY_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/api/ai/classify-sms`, {
+      method: 'POST',
+      headers: authHeaders(authToken),
+      body: JSON.stringify({system, user}),
+      signal: controller.signal,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err: any = new Error(
+        body?.error ?? `classify-sms failed (${res.status})`,
+      );
+      err.status = res.status;
+      throw err;
+    }
+    if (!body.reply) {
+      throw new Error('Empty response from AI classifier');
+    }
+    return body.reply;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function classifySms(
   system: string,
   user: string,
   authToken: string,
 ): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/ai/classify-sms`, {
-    method: 'POST',
-    headers: authHeaders(authToken),
-    body: JSON.stringify({system, user}),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(body?.error ?? `classify-sms failed (${res.status})`);
+  // Don't burn a request (and a silent regex fallback) on a missing session —
+  // `session?.access_token ?? ''` upstream would send a bare `Bearer `, the
+  // server would 401, and the failure would look like a parser bug.
+  if (!authToken) {
+    throw new MissingAuthError();
   }
-  if (!body.reply) {
-    throw new Error('Empty response from AI classifier');
+  try {
+    return await postClassify(system, user, authToken);
+  } catch (e: any) {
+    // Retry once on transient failures only: timeout/abort, network error, or
+    // 5xx. A 4xx is a real rejection (bad token, bad request) and retrying it
+    // just doubles the latency before the same fallback.
+    const status = e?.status;
+    const transient =
+      e?.name === 'AbortError' ||
+      status == null ||
+      (typeof status === 'number' && status >= 500);
+    if (!transient) {
+      throw e;
+    }
+    return await postClassify(system, user, authToken);
   }
-  return body.reply;
 }
 
 // AI Coach chat — one agentic tool-use turn. Tool EXECUTION stays on-device

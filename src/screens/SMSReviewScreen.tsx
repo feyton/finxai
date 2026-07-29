@@ -17,8 +17,16 @@ import {CATS, CategoryId, FONTS, R, T, accountIcon, accountTint, resolveCat} fro
 import {CatChip, ConfPill, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {useSubcategories} from '../hooks/useSubcategories';
-import {recordChannel, recordConfirmation, recordCorrection} from '../tools/merchantMemory';
-import {extractBalance, regexExtract} from '../tools/claudeParser';
+import {useToast} from 'react-native-toast-notifications';
+import {
+  getMerchantChannels,
+  getMerchantRules,
+  recordChannel,
+  recordConfirmation,
+  recordCorrection,
+} from '../tools/merchantMemory';
+import {extractBalance, parseSmsWithAI, regexExtract} from '../tools/claudeParser';
+import {supabase} from '../tools/supabase';
 import {syncAccountBalance} from '../tools/balance';
 
 function uuid(): string {
@@ -253,14 +261,17 @@ function SmsCard({
   onConfirm,
   onFix,
   onIgnore,
+  onRetry,
 }: {
   record: any;
   accounts: any[];
   onConfirm: () => Promise<void>;
   onFix: (fix: Fix) => Promise<void>;
   onIgnore: () => Promise<void>;
+  onRetry: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [fixSheet, setFixSheet] = useState(false);
   const localCat = (resolveCat(record.category ?? '') as CategoryId) ?? 'shopping';
   const isExpense = record.transaction_type === 'expense';
@@ -280,6 +291,12 @@ function SmsCard({
     setBusy(false);
   };
 
+  const handleRetry = async () => {
+    setRetrying(true);
+    await onRetry();
+    setRetrying(false);
+  };
+
   const handleFix = async (fix: Fix) => {
     setFixSheet(false);
     setBusy(true);
@@ -291,9 +308,39 @@ function SmsCard({
     <View style={styles.card}>
       {/* Raw SMS */}
       <View style={styles.smsBox}>
-        <Text style={styles.smsFrom} numberOfLines={1}>
-          {record.sender ?? 'SMS'}
-        </Text>
+        <View style={styles.smsHead}>
+          <Text style={styles.smsFrom} numberOfLines={1}>
+            {record.sender ?? 'SMS'}
+          </Text>
+          {/* Which path classified this. 'Offline' means the AI classifier was
+              unreachable and this is a regex-only guess — previously invisible,
+              which is how a fully dark AI pipeline went unnoticed. */}
+          {record.parse_source === 'regex' ? (
+            <Pressable
+              onPress={handleRetry}
+              disabled={retrying}
+              hitSlop={8}
+              style={({pressed}) => [
+                styles.srcBadgeOffline,
+                {opacity: pressed || retrying ? 0.6 : 1},
+              ]}>
+              <Icon
+                name="RefreshCcw"
+                size={10}
+                color={T.warn}
+                strokeWidth={2.4}
+              />
+              <Text style={styles.srcBadgeOfflineText}>
+                {retrying ? 'Retrying…' : 'Offline · Retry'}
+              </Text>
+            </Pressable>
+          ) : record.parse_source === 'ai' ? (
+            <View style={styles.srcBadgeAi}>
+              <Icon name="Sparkles" size={10} color={T.accent} strokeWidth={2.4} />
+              <Text style={styles.srcBadgeAiText}>AI</Text>
+            </View>
+          ) : null}
+        </View>
         <Text style={styles.smsBody}>{record.sms ?? '—'}</Text>
       </View>
 
@@ -390,7 +437,8 @@ function SmsCard({
 // ── Screen ─────────────────────────────────────────────────────
 export default function SMSReviewScreen({navigation}: any) {
   const db = usePowerSync();
-  const {userId} = useCurrentUser();
+  const {userId, name} = useCurrentUser();
+  const toast = useToast();
 
   const {data: records} = useQuery(
     'SELECT * FROM auto_records WHERE owner_id = ? ORDER BY created_at DESC',
@@ -432,8 +480,8 @@ export default function SMSReviewScreen({navigation}: any) {
             payee, merchant, transaction_type, fees, currency,
             confirmed, source, confidence,
             transfer_account_id, transfer_direction, balance_after, txn_ref,
-            owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?)`,
+            parse_source, owner_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           uuid(),
           record.amount,
@@ -452,6 +500,7 @@ export default function SMSReviewScreen({navigation}: any) {
           txType === 'transfer' ? (dir === 'credit' ? 'in' : 'out') : null,
           bal,
           record.txn_ref ?? null,
+          record.parse_source ?? null,
           userId,
           now,
         ],
@@ -473,10 +522,88 @@ export default function SMSReviewScreen({navigation}: any) {
           record.merchant,
           txType === 'transfer' ? 'transfer' : record.category,
           userId!,
+          txType === 'transfer' ? '' : record.subcategory ?? '',
         );
       }
     } catch (e) {
       console.warn('[SMSReview] confirm error:', e);
+    }
+  };
+
+  // Re-run classification for ONE pending record, using its stored SMS text.
+  // The deterministic facts (amount, fee, balance, direction) don't move — only
+  // the fuzzy fields do — so this is safe to repeat, and it's the quickest way
+  // to recover a record that was tagged while the classifier was unreachable.
+  const handleRetry = async (record: any) => {
+    if (!record?.sms) {
+      return;
+    }
+    try {
+      const {
+        data: {session},
+      } = await supabase.auth.getSession();
+      const authToken = session?.access_token ?? '';
+      if (!authToken) {
+        toast.show('Session expired — sign in again to use AI tagging.', {
+          type: 'warning',
+        });
+        return;
+      }
+
+      const rules = await getMerchantRules(db, record.merchant ?? '', userId!, 20);
+      const parsed = await parseSmsWithAI(
+        record.sms,
+        rules,
+        authToken,
+        await getMerchantChannels(),
+        {
+          userName: name ?? '',
+          accounts: (accounts as any[]).map(a => ({
+            id: a.id,
+            name: a.name ?? '',
+            number: a.number ?? '',
+          })),
+          currentAccountId: record.account_id,
+          rules,
+          sender: record.sender ?? '',
+        },
+      );
+
+      if (parsed.parseSource !== 'ai') {
+        toast.show(
+          `AI still unreachable (${parsed.fallbackReason ?? 'unknown'}) — kept the offline guess.`,
+          {type: 'warning', duration: 5000},
+        );
+        return;
+      }
+
+      const txType = parsed.isTransfer
+        ? 'transfer'
+        : parsed.direction === 'credit'
+        ? 'income'
+        : 'expense';
+      await db.execute(
+        `UPDATE auto_records
+         SET category = ?, subcategory = ?, merchant = ?, payee = ?,
+             transaction_type = ?, confidence = ?, parse_source = ?,
+             transfer_account_id = ?
+         WHERE id = ?`,
+        [
+          parsed.category,
+          parsed.subcategory ?? '',
+          parsed.merchant,
+          parsed.merchant,
+          txType,
+          parsed.confidence,
+          'ai',
+          parsed.isTransfer ? parsed.transferAccountId ?? null : null,
+          record.id,
+        ],
+      );
+      toast.show(`Re-tagged as ${parsed.merchant}`, {type: 'success'});
+    } catch (e: any) {
+      console.warn('[SMSReview] retry error:', e);
+      toast.show('Could not re-run classification.', {type: 'danger'});
     }
   };
 
@@ -496,8 +623,8 @@ export default function SMSReviewScreen({navigation}: any) {
             payee, merchant, transaction_type, fees, currency,
             confirmed, source, confidence,
             transfer_account_id, transfer_direction, balance_after, txn_ref,
-            owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?)`,
+            parse_source, owner_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           uuid(),
           record.amount,
@@ -516,6 +643,7 @@ export default function SMSReviewScreen({navigation}: any) {
           txType === 'transfer' ? (fixDir === 'credit' ? 'in' : 'out') : null,
           bal,
           record.txn_ref ?? null,
+          record.parse_source ?? null,
           userId,
           now,
         ],
@@ -530,12 +658,18 @@ export default function SMSReviewScreen({navigation}: any) {
       // Train the AI: 'transfer' is a learned outcome just like a category —
       // this counterparty will auto-classify as a transfer next time (and a
       // real category explicitly teaches "NOT a transfer").
+      //
+      // `merchant` is also passed as the display name, so the name the user
+      // typed here is reapplied to future SMS from this counterparty instead
+      // of reverting to whatever the parser extracted.
       if (merchant) {
         await recordCorrection(
           db,
           merchant,
           txType === 'transfer' ? 'transfer' : fix.category,
           userId!,
+          txType === 'transfer' ? '' : fix.subcategory ?? '',
+          merchant,
         );
         if (record.sender && accountId) {
           await recordChannel(db, record.sender, accountId, userId!);
@@ -613,6 +747,7 @@ export default function SMSReviewScreen({navigation}: any) {
               onConfirm={() => handleConfirm(item)}
               onFix={fix => handleFix(item, fix)}
               onIgnore={() => handleIgnore(item)}
+              onRetry={() => handleRetry(item)}
             />
           )}
         />
@@ -703,13 +838,50 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 4,
   },
+  smsHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 4,
+  },
   smsFrom: {
+    flex: 1,
     fontFamily: FONTS.semibold,
     fontSize: 10,
     color: T.text3,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
-    marginBottom: 4,
+  },
+  srcBadgeAi: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: R.pill,
+    backgroundColor: T.accentSoft,
+  },
+  srcBadgeAiText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 9,
+    color: T.accent,
+    letterSpacing: 0.3,
+  },
+  srcBadgeOffline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: R.pill,
+    backgroundColor: 'rgba(251,191,36,0.14)',
+  },
+  srcBadgeOfflineText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 9,
+    color: T.warn,
+    letterSpacing: 0.3,
   },
   smsBody: {
     fontFamily: 'monospace',
