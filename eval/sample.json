@@ -1,0 +1,7 @@
+[
+  {"sms":"*164*S*Y'ello, A transaction of 2000 RWF by ComzAfrica Rwanda Limited was completed at 2026-07-29 12:51:17. Balance:1152 RWF. Fee  0 RWF. FT Id: 29508026690.*EN#","sender":"M-Money","merchant":"ComzAfrica Rwanda","category":"airtime","transaction_type":"expense","amount":2000,"fees":0,"balance_after":1152},
+  {"sms":"TxId:29506397578*S*Your payment of 1,500 RWF to Valentine 002597 was completed at 2026-07-29 11:37:48.  Balance: 3,152 RWF. Fee 0 RWF.*EN#","sender":"M-Money","merchant":"Valentine","category":"food","transaction_type":"expense","amount":1500,"fees":0,"balance_after":3152},
+  {"sms":"You have received 105000 RWF from FABRICE HAFASHIMANA (*********915) at 2026-07-29 10:56:04. Message from sender: . Balance:108180 RWF. FT Id: 29505457081.","sender":"M-Money","merchant":"Fabrice Hafashimana","category":"savings","transaction_type":"transfer","amount":105000,"fees":0,"balance_after":108180},
+  {"sms":"*164*S*Y'ello, A transaction of 1000 RWF by Mokash Savings Account was completed at 2026-07-29 08:45:31. Balance:3180 RWF. Fee  0 RWF.*EN#","sender":"M-Money","merchant":"Mokash Savings Account","category":"savings","transaction_type":"transfer","amount":1000,"fees":0,"balance_after":3180},
+  {"sms":"TxId:29496587489*S*Your payment of 6,300 RWF to Lambert 005868 was completed at 2026-07-28 19:52:04.  Balance: 4,180 RWF. Fee 0 RWF.*EN#","sender":"M-Money","merchant":"Lambert","category":"family","transaction_type":"expense","amount":6300,"fees":0,"balance_after":4180}
+]

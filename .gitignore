@@ -75,3 +75,10 @@ yarn-error.log
 gradle.properties
 google-services.json
 keystore_base64.txt
+
+# SMS evaluation harness — a harvested golden set is REAL SMS bodies with
+# account numbers, balances and counterparty names. Never commit it. The
+# generated report embeds the same text in its failure list.
+eval/golden.json
+eval/report.json
+eval/*.local.json

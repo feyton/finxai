@@ -757,23 +757,42 @@ export function parseWithRegex(
   );
 }
 
-// ── Main: AI classification over regex-extracted facts ─────────
-export async function parseSmsWithAI(
+// ── Classification, split into build / call / apply ────────────
+// The split exists so the offline evaluation harness (scripts/eval-sms.mjs) can
+// drive the REAL prompt and the REAL post-processing against any provider,
+// rather than maintaining a second copy that drifts out of sync.
+export interface ClassificationPlan {
+  system: string;
+  user: string;
+  facts: RegexFacts;
+  formatId: string;
+  deterministic: {name: string; code?: string | null} | null;
+  // Set when the answer is already determined and no model call is needed.
+  shortCircuit?: ParsedSMS;
+}
+
+export function buildClassification(
   raw: string,
   rules: MerchantRule[],
-  authToken: string,
   merchantChannels: Record<string, MerchantChannel> = {},
   ctx?: ParseContext,
-  // Pre-computed facts, when the caller already ran regexExtract to scope the
-  // rule lookup. Avoids extracting twice per SMS.
   facts?: RegexFacts,
-): Promise<ParsedSMS> {
+): ClassificationPlan {
   const f = facts ?? regexExtract(raw, ctx);
+
+  const asPlan = (shortCircuit?: ParsedSMS): ClassificationPlan => ({
+    system: '',
+    user: '',
+    facts: f,
+    formatId: pickSmsFormat(ctx?.sender ?? '', raw).id,
+    deterministic: null,
+    shortCircuit,
+  });
 
   // Failed transactions never become records — skip the model call entirely.
   if (f.status === 'failed') {
     const {merchant, category} = regexClassify(raw, f);
-    return factsToParsed(f, merchant, category, 1, f.channelHint, false);
+    return asPlan(factsToParsed(f, merchant, category, 1, f.channelHint, false));
   }
 
   // Only the matched provider's guidance goes into the prompt — previously
@@ -795,7 +814,9 @@ export async function parseSmsWithAI(
       f.direction === 'debit'
         ? `To ${f.transferAccount.name}`
         : `From ${f.transferAccount.name}`;
-    return factsToParsed(f, merchant, 'savings', 0.97, f.channelHint, true, '', 'ai');
+    return asPlan(
+      factsToParsed(f, merchant, 'savings', 0.97, f.channelHint, true, '', 'ai'),
+    );
   }
   const preRule = findRuleForNames(rules, [
     deterministic?.name,
@@ -806,15 +827,17 @@ export async function parseSmsWithAI(
       preRule.display_name?.trim() ||
       normalizeMerchant(deterministic?.name ?? preRule.pattern).display;
     const isTransfer = preRule.category === 'transfer';
-    return factsToParsed(
-      f,
-      name,
-      isTransfer ? 'savings' : (preRule.category as CategoryId),
-      0.95,
-      f.channelHint,
-      isTransfer,
-      isTransfer ? '' : preRule.subcategory ?? '',
-      'ai',
+    return asPlan(
+      factsToParsed(
+        f,
+        name,
+        isTransfer ? 'savings' : (preRule.category as CategoryId),
+        0.95,
+        f.channelHint,
+        isTransfer,
+        isTransfer ? '' : preRule.subcategory ?? '',
+        'ai',
+      ),
     );
   }
 
@@ -874,8 +897,22 @@ Deterministic facts (already extracted — do not change): ${factLines}
 ${ruleLines ? `\nLearned category rules:\n${ruleLines}` : ''}
 ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
 
-  try {
-    const reply = await classifySms(system, user, authToken);
+  return {system, user, facts: f, formatId: format.id, deterministic};
+}
+
+// Post-processing of a model reply. Deterministic and provider-agnostic: the
+// same reply plus the same plan always yields the same ParsedSMS, which is what
+// makes cross-provider evaluation meaningful.
+export function applyClassification(
+  reply: string,
+  planned: ClassificationPlan,
+  raw: string,
+  rules: MerchantRule[],
+  ctx?: ParseContext,
+): ParsedSMS {
+  const f = planned.facts;
+  const deterministic = planned.deterministic;
+  {
     const j = extractJson(reply);
     // Normalize the model's name the same way the regex path does — otherwise
     // the two paths write differently-shaped keys into the same rule store.
@@ -983,6 +1020,27 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
       subcategory,
       'ai',
     );
+  }
+}
+
+// ── Main: AI classification over regex-extracted facts ─────────
+export async function parseSmsWithAI(
+  raw: string,
+  rules: MerchantRule[],
+  authToken: string,
+  merchantChannels: Record<string, MerchantChannel> = {},
+  ctx?: ParseContext,
+  // Pre-computed facts, when the caller already ran regexExtract to scope the
+  // rule lookup. Avoids extracting twice per SMS.
+  facts?: RegexFacts,
+): Promise<ParsedSMS> {
+  const planned = buildClassification(raw, rules, merchantChannels, ctx, facts);
+  if (planned.shortCircuit) {
+    return planned.shortCircuit;
+  }
+  try {
+    const reply = await classifySms(planned.system, planned.user, authToken);
+    return applyClassification(reply, planned, raw, rules, ctx);
   } catch (e: any) {
     // Keep degrading rather than dropping the transaction — but record WHY, so
     // a persistently dark classifier is visible in the UI and in logs instead
@@ -996,7 +1054,7 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
         ? `http-${e.status}`
         : e?.message ?? 'unknown';
     console.warn(`[AIParser] falling back to regex (${reason}):`, e);
-    const parsed = parseWithRegex(raw, ctx);
+    const parsed = parseWithRegex(raw, ctx, planned.facts);
     return {...parsed, parseSource: 'regex', fallbackReason: reason};
   }
 }
