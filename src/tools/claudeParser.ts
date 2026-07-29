@@ -32,6 +32,21 @@ const CATS = Object.keys(CAT_MAP).join(', ');
 const CHANNELS =
   'MoMoPay, Send money, Receive, Bank transfer, Cash Power, Airtime, Bill, Other';
 
+// One line per genuinely ambiguous boundary. A bare list of category keys gives
+// the model no way to decide the cases that actually matter in Rwanda — most of
+// all person-to-person MoMo, which can legitimately read as family, transport,
+// food, or a service depending on who the counterparty is.
+const CATEGORY_HINTS = [
+  '  • food vs groceries: a prepared meal/restaurant/cafe is food; supermarket or market shopping to cook later is groceries.',
+  '  • family vs savings: money to/from another PERSON (not a shop, not the user themselves) is family. savings is only the user moving money into their own savings pocket.',
+  '  • airtime vs utilities: phone credit and data bundles are airtime; electricity (Cash Power), water (WASAC) and similar household services are utilities.',
+  '  • housing vs rent: a monthly rent payment is rent; purchases for the home itself (furniture, repairs, fittings) are housing.',
+  '  • personal_care vs health: salon, barber, beauty and grooming are personal_care; clinic, pharmacy and hospital are health.',
+  '  • debt vs family: repaying a loan or credit facility is debt, even when paid to a person.',
+  '  • transport: moto, taxi, bus, fuel, and ride-hailing.',
+  "  • misc: use only when nothing else fits — prefer a real category when the merchant's business is identifiable.",
+].join('\n');
+
 // Same grouping useSubcategories() computes for the pickers (built-ins only —
 // the AI has no visibility into a user's custom subcategories), so a guess
 // here is always one the user can actually see/select in the Fix sheet.
@@ -113,6 +128,39 @@ export function findRule(
       return new RegExp(`\\b${escaped}\\b`).test(key);
     });
   return wordBoundary ? {...wordBoundary, exact: false} : undefined;
+}
+
+// Try several candidate spellings of the same counterparty and take the best
+// hit. An EXACT match on any candidate beats a fuzzy match on all of them.
+//
+// Why: a rule used to be looked up against the model's cleaned name only, so it
+// fired only if that cleaning was byte-stable across calls. It isn't reliably —
+// the prompt itself changes between calls as learned rules change, so "Sawa
+// Citi" vs "Sawa Citi Ltd" can come back differently and normalize to
+// different keys. Checking the deterministic name and the regex name too is
+// what makes "my fix stuck" hold.
+export function findRuleForNames(
+  rules: MerchantRule[] | undefined,
+  names: (string | null | undefined)[],
+): (MerchantRule & {exact: boolean}) | undefined {
+  let fuzzy: (MerchantRule & {exact: boolean}) | undefined;
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (!name) {
+      continue;
+    }
+    const key = normalizeMerchant(name).key;
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    const hit = findRule(rules, name);
+    if (hit?.exact) {
+      return hit;
+    }
+    fuzzy = fuzzy ?? hit;
+  }
+  return fuzzy;
 }
 
 // Transfer verdict with clear precedence: account-number PROOF beats
@@ -307,6 +355,10 @@ export interface TransferHint {
   amount: number;
   dateKey: string; // 'YYYY-MM-DD', from the confirmation message's own date
   destSuffix: string; // trailing visible digits of the destination account
+  // Trailing digits of the SOURCE account. Was previously parsed and thrown
+  // away, which left hint matching on amount+day only — loose enough that two
+  // unrelated same-amount movements on one day could collide.
+  srcSuffix: string;
 }
 
 // Trailing contiguous digit run of a masked account string, e.g.
@@ -353,19 +405,20 @@ export function maskedSuffixMatches(a: string, b: string): boolean {
 // this date is D/M/YYYY, not M/D/YYYY.
 export function extractTransferHint(raw: string): TransferHint | null {
   const m = raw.match(
-    /of\s+RWF\s*([\d,.]+)\s+from\s+A\/c\s*[\d*]+\s+to\s+A\/c\s*([\d*]+)\s+on\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+is\s+(?:completed|your request is being processing)/i,
+    /of\s+RWF\s*([\d,.]+)\s+from\s+A\/c\s*([\d*]+)\s+to\s+A\/c\s*([\d*]+)\s+on\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+is\s+(?:completed|your request is being processing)/i,
   );
   if (!m) {
     return null;
   }
   const amount = num(m[1]);
-  const destSuffix = trailingDigits(m[2]);
+  const srcSuffix = trailingDigits(m[2]);
+  const destSuffix = trailingDigits(m[3]);
   if (!destSuffix || amount <= 0) {
     return null;
   }
-  const day = m[3].padStart(2, '0');
-  const month = m[4].padStart(2, '0');
-  return {amount, dateKey: `${m[5]}-${month}-${day}`, destSuffix};
+  const day = m[4].padStart(2, '0');
+  const month = m[5].padStart(2, '0');
+  return {amount, dateKey: `${m[6]}-${month}-${day}`, destSuffix, srcSuffix};
 }
 
 // 'YYYY-MM-DD' in LOCAL time — for matching a parsed transaction's own date
@@ -489,6 +542,22 @@ function detectChannel(raw: string, isCredit: boolean): string {
 // pattern below: cut at the sentence tail ("was completed"), an " at <date>"
 // clause, an opening paren (a masked phone number), a period, or end of string.
 const NAME_STOP = String.raw`(?=\s+(?:was|has\s+been|is)\s+(?:completed|successful|processed)\b|\s+at\s+\d|\s*[.(]|\s*$)`;
+
+// The counterparty names we can derive WITHOUT the model, cheapest first.
+// Used to scope the learned-rule lookup (and to decide whether the model call
+// is needed at all) before spending a network round-trip.
+export function candidateNames(raw: string, facts: RegexFacts, sender = ''): string[] {
+  const out: string[] = [];
+  const deterministic = pickSmsFormat(sender, raw).extractCounterparty?.(raw);
+  if (deterministic?.name) {
+    out.push(deterministic.name);
+  }
+  const viaRegex = regexClassify(raw, facts).merchant;
+  if (viaRegex && viaRegex !== 'Unknown') {
+    out.push(viaRegex);
+  }
+  return out;
+}
 
 // Regex-only merchant + category guess (fallback when no AI).
 function regexClassify(
@@ -642,10 +711,20 @@ function factsToParsed(
 }
 
 // ── Regex-only fallback ────────────────────────────────────────
-export function parseWithRegex(raw: string, ctx?: ParseContext): ParsedSMS {
-  const f = regexExtract(raw, ctx);
+export function parseWithRegex(
+  raw: string,
+  ctx?: ParseContext,
+  facts?: RegexFacts,
+): ParsedSMS {
+  const f = facts ?? regexExtract(raw, ctx);
   const classified = regexClassify(raw, f);
-  const rule = findRule(ctx?.rules, classified.merchant);
+  // Same multi-candidate lookup as the AI path: the deterministic name from the
+  // provider template is often a better rule key than the generic regex one.
+  const deterministic = pickSmsFormat(ctx?.sender ?? '', raw).extractCounterparty?.(raw);
+  const rule = findRuleForNames(ctx?.rules, [
+    classified.merchant,
+    deterministic?.name,
+  ]);
   const category =
     rule && rule.category !== 'transfer'
       ? (rule.category as CategoryId)
@@ -655,7 +734,10 @@ export function parseWithRegex(raw: string, ctx?: ParseContext): ParsedSMS {
   // sticks while the AI is reachable.
   let merchant = classified.merchant;
   if (!f.transferAccount) {
-    merchant = ruleDisplayName(ctx?.rules, merchant) ?? merchant;
+    merchant =
+      ruleDisplayName(ctx?.rules, merchant) ??
+      (rule?.display_name?.trim() ? rule.display_name.trim() : null) ??
+      merchant;
   }
   // FAILED SMS carry full confidence in that one fact. A learned rule lifts
   // confidence, but an inexact match is capped below THRESHOLD_AUTO_SAVE so a
@@ -682,8 +764,11 @@ export async function parseSmsWithAI(
   authToken: string,
   merchantChannels: Record<string, MerchantChannel> = {},
   ctx?: ParseContext,
+  // Pre-computed facts, when the caller already ran regexExtract to scope the
+  // rule lookup. Avoids extracting twice per SMS.
+  facts?: RegexFacts,
 ): Promise<ParsedSMS> {
-  const f = regexExtract(raw, ctx);
+  const f = facts ?? regexExtract(raw, ctx);
 
   // Failed transactions never become records — skip the model call entirely.
   if (f.status === 'failed') {
@@ -697,6 +782,42 @@ export async function parseSmsWithAI(
   const format = pickSmsFormat(ctx?.sender ?? '', raw);
   const deterministic = format.extractCounterparty?.(raw) ?? null;
 
+  // ── Skip the model when the answer is already determined ──────────────
+  // Two cases where a network round-trip can only introduce disagreement:
+  //  1. The counterparty is provably one of the user's OWN accounts — the
+  //     merchant is "To/From <account>" and it's a transfer, full stop.
+  //  2. The deterministic counterparty already hits an EXACT learned rule —
+  //     the user has told us the answer for this exact counterparty.
+  // Once someone has a few dozen rules this covers much of steady-state
+  // traffic: cheaper, faster, and consistent by construction.
+  if (f.transferAccount) {
+    const merchant =
+      f.direction === 'debit'
+        ? `To ${f.transferAccount.name}`
+        : `From ${f.transferAccount.name}`;
+    return factsToParsed(f, merchant, 'savings', 0.97, f.channelHint, true, '', 'ai');
+  }
+  const preRule = findRuleForNames(rules, [
+    deterministic?.name,
+    ...candidateNames(raw, f, ctx?.sender ?? ''),
+  ]);
+  if (preRule?.exact) {
+    const name =
+      preRule.display_name?.trim() ||
+      normalizeMerchant(deterministic?.name ?? preRule.pattern).display;
+    const isTransfer = preRule.category === 'transfer';
+    return factsToParsed(
+      f,
+      name,
+      isTransfer ? 'savings' : (preRule.category as CategoryId),
+      0.95,
+      f.channelHint,
+      isTransfer,
+      isTransfer ? '' : preRule.subcategory ?? '',
+      'ai',
+    );
+  }
+
   const ruleLines = rules
     .slice(0, 12)
     .map(r => `- "${r.pattern}" → ${r.category}${r.display_name ? ` (shown as "${r.display_name}")` : ''}`)
@@ -706,12 +827,27 @@ export async function parseSmsWithAI(
     .map(([m, c]) => `- "${m}" → ${c.channel}`)
     .join('\n');
 
+  // Deliberately asks for FOUR fields only.
+  //
+  // is_transfer used to be requested here, but resolveTransfer gives
+  // account-number proof and learned rules precedence over the model anyway, so
+  // the answer was usually discarded — and asking invited confident wrongness on
+  // a field we overwrite, while diluting the one number we do want calibrated.
+  // The same went for "if a learned rule matches, set confidence ≥ 0.95": rules
+  // are re-applied in code below, so instructing the model to do it too just
+  // taught it to inflate confidence.
+  //
+  // The transfer heuristics still run (detectTransfer + resolveTransfer); they
+  // simply no longer need the model's opinion. `is_transfer` is still read if
+  // the model volunteers it, as a last-resort signal when no fact and no rule
+  // applies — see resolveTransfer.
   const system = `You classify a single Rwandan mobile-money / bank SMS. Return ONLY a JSON object, no prose, no markdown.
 Fields:
-{"merchant": "<clean title-case seller/counterparty>", "category": "<one of: ${CATS}>", "subcategory": "<one of that category's subcategories below, or \\"\\">", "channel": "<one of: ${CHANNELS}>", "is_transfer": <true|false>, "confidence": <0..1>}
+{"merchant": "<clean title-case seller/counterparty>", "category": "<one of: ${CATS}>", "subcategory": "<one of that category's subcategories below, or \\"\\">", "channel": "<one of: ${CHANNELS}>", "confidence": <0..1>}
 Rules:
 - merchant is the shop or person, cleaned (e.g. "SAWA CITI LTD" → "Sawa Citi").
-- category is your best fit from the list.
+- category is your best fit from the list. Boundary guidance:
+${CATEGORY_HINTS}
 - subcategory must be copied EXACTLY (spelling, punctuation) from the list below for
   whichever category you picked, only when one clearly fits; otherwise "". Never invent one.
 Subcategories per category:
@@ -719,19 +855,14 @@ ${SUBCATS_PROMPT_BLOCK}
 - channel is the payment rail.
 Format notes for THIS message (${format.label}):
 ${format.guidance}
-- is_transfer is TRUE when the money moved between the USER'S OWN accounts —
-  i.e. the counterparty is the user themselves (name matches the account holder),
-  a Mokash savings pocket, a bank↔wallet top-up, or an explicit "fund-transfer"
-  to the user's own number. It is FALSE for real payments to shops or other people.
-- If a learned rule matches the merchant, use its category and set confidence ≥ 0.95.
-- A learned rule of "transfer" means the USER confirmed that counterparty is a
-  transfer between their own accounts → is_transfer=true. A learned rule with a
-  real category means the user confirmed it is NOT a transfer → is_transfer=false.
-- confidence reflects how sure you are of merchant + category.`;
+- confidence reflects how sure you are of merchant + category. Be honest: a low
+  number sends the record to the user for review, which is the correct outcome
+  when the message is genuinely ambiguous.`;
 
+  // No counterpartyIsUsersOwnAccount line here: that case returned above
+  // without calling the model at all.
   const factLines = `direction=${f.direction}, amount=${f.amount} RWF, fee=${f.fee}, channelHint=${f.channelHint}` +
     (f.counterpartyNumber ? `, counterpartyAccount=${f.counterpartyNumber}` : '') +
-    (f.transferAccount ? `, counterpartyIsUsersOwnAccount="${f.transferAccount.name}"` : '') +
     // Where the template is rigid, the counterparty is deterministic — hand it
     // over as a fact so the model only has to classify, not re-extract.
     (deterministic ? `, counterparty="${deterministic.name}"` : '') +
@@ -746,10 +877,22 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
   try {
     const reply = await classifySms(system, user, authToken);
     const j = extractJson(reply);
-    let merchant = String(j.merchant || 'Unknown').trim();
+    // Normalize the model's name the same way the regex path does — otherwise
+    // the two paths write differently-shaped keys into the same rule store.
+    const rawMerchant = String(j.merchant || 'Unknown').trim();
+    let merchant =
+      rawMerchant === 'Unknown'
+        ? rawMerchant
+        : normalizeMerchant(rawMerchant).display || rawMerchant;
     let category = String(j.category || 'shopping').trim() as CategoryId;
     let subcategory = String(j.subcategory || '').trim();
-    let confidence = Math.min(1, Math.max(0, Number(j.confidence) || 0.7));
+    // `Number(x) || 0.7` turned a legitimately-returned 0 into 0.7. Only fall
+    // back when the value is genuinely absent or non-numeric.
+    const rawConf = Number(j.confidence);
+    let confidence = Math.min(
+      1,
+      Math.max(0, Number.isFinite(rawConf) ? rawConf : 0.7),
+    );
 
     // On a rigid template the deterministic name wins over the model's, but
     // only when the model clearly failed (empty/Unknown) or drifted onto text
@@ -768,14 +911,8 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
       }
     }
 
-    // A matched own account is the most trustworthy label there is.
-    if (f.transferAccount) {
-      merchant =
-        f.direction === 'debit'
-          ? `To ${f.transferAccount.name}`
-          : `From ${f.transferAccount.name}`;
-      confidence = Math.max(confidence, 0.95);
-    }
+    // (An own-account match short-circuits before the model call — see the
+    // prefilter above — so there is no transferAccount case to handle here.)
 
     // Hard-apply a learned rule if the merchant matches one. 'transfer'
     // rules govern is_transfer below rather than the category.
@@ -784,7 +921,14 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
     // fuzzy (word-boundary) hit still applies the category — the user did
     // teach us something — but caps below THRESHOLD_AUTO_SAVE so the record
     // goes to review rather than being filed silently on a partial match.
-    const rule = findRule(rules, merchant);
+    // Match against the model's name AND the deterministic/regex names — a
+    // rule shouldn't be missed just because the model spelled the counterparty
+    // slightly differently this time.
+    const rule = findRuleForNames(rules, [
+      merchant,
+      deterministic?.name,
+      ...candidateNames(raw, f, ctx?.sender ?? ''),
+    ]);
     const ruleCeiling = rule?.exact ? 0.95 : 0.9;
     if (rule && rule.category !== 'transfer') {
       category = rule.category as CategoryId;
@@ -798,7 +942,10 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
     // every subsequent SMS — the single most visible "my fix didn't stick".
     // Skipped when an own-account match already produced a "To/From X" label.
     if (!f.transferAccount) {
-      const learntName = ruleDisplayName(rules, merchant);
+      // Look the learned name up under whichever spelling actually matched.
+      const learntName =
+        ruleDisplayName(rules, merchant) ??
+        (rule?.display_name?.trim() ? rule.display_name.trim() : null);
       if (learntName) {
         merchant = learntName;
       }

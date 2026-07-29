@@ -8,7 +8,9 @@ import {
   extractAccountRef,
   extractBalance,
   extractTransferHint,
+  candidateNames,
   findRule,
+  findRuleForNames,
   isTransferStatusOnly,
   maskedSuffixMatches,
   normalizeAccountNumber,
@@ -556,5 +558,62 @@ describe('SMS format registry', () => {
       name: 'THRIVE G Ltd',
       code: '888840',
     });
+  });
+});
+
+// ── Review follow-ups ──────────────────────────────────────────────────────
+describe('rule matching across candidate spellings', () => {
+  const rule = (pattern: string, category = 'food', display_name?: string) => ({
+    pattern,
+    category,
+    display_name,
+    correction_count: 1,
+    confirmation_count: 0,
+  });
+
+  it('an exact hit on ANY candidate beats a fuzzy hit on another', () => {
+    // 'sawa citi' is exact for the second spelling, 'sawa' would only be fuzzy.
+    const hit = findRuleForNames([rule('sawa'), rule('sawa citi', 'groceries')], [
+      'Sawa Citi Ltd',
+      'Sawa Citi',
+    ]);
+    expect(hit?.exact).toBe(true);
+    expect(hit?.category).toBe('groceries');
+  });
+
+  it('finds the rule even when only the deterministic spelling matches', () => {
+    const hit = findRuleForNames([rule('valentine')], ['Something Else', 'Valentine 002597']);
+    expect(hit?.exact).toBe(true);
+  });
+
+  it('ignores unusable candidates without throwing', () => {
+    expect(findRuleForNames([rule('valentine')], [null, undefined, '', 'Unknown'])).toBeUndefined();
+  });
+});
+
+describe('candidateNames', () => {
+  it('offers the deterministic name for a rigid MTN template, code already split off', () => {
+    const raw = 'TxId:1*S*Your payment of 2,500 RWF to THRIVE G Ltd 888840 was completed at 2026-07-29 20:04:10.*EN#';
+    const names = candidateNames(raw, regexExtract(raw), 'M-Money');
+    expect(names).toContain('THRIVE G Ltd');
+    // Both spellings are offered so a rule stored under either one still hits.
+    expect(names.map(n => normalizeMerchant(n).key)).toContain('thrive g');
+  });
+
+  it('returns nothing to scope on when no counterparty is named', () => {
+    const raw = 'your account ********5558 has been debited RWF 500 at BPR Bank.';
+    expect(candidateNames(raw, regexExtract(raw), 'BPR')).toEqual([]);
+  });
+});
+
+describe('transfer hints', () => {
+  const HINT =
+    'Transaction Ref: TR1 of RWF 5,000 from A/c 0*****2911 to A/c 4******947 on 20/07/2026 is Completed';
+
+  it('keeps the SOURCE account suffix, not just the destination', () => {
+    const hint = extractTransferHint(HINT);
+    expect(hint?.destSuffix).toBe('947');
+    // Previously discarded — without it, matching was amount+day only.
+    expect(hint?.srcSuffix).toBe('2911');
   });
 });
