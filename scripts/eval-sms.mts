@@ -29,7 +29,7 @@
  *   ANTHROPIC_API_KEY, ANTHROPIC_MODEL (default claude-haiku-4-5)
  *   EVAL_CONCURRENCY                   (default 4)
  */
-import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
+import {existsSync, readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {argv, env, exit} from 'node:process';
 import Anthropic from '@anthropic-ai/sdk';
@@ -43,6 +43,39 @@ import {
   parseWithRegex,
   regexExtract,
 } from '../src/tools/smsParser';
+
+// ── Env loading ────────────────────────────────────────────────────────────
+// Read .env files ourselves rather than requiring the caller to export things:
+// the credentials this needs already live in the repo's env files, and asking
+// for them to be re-exported by hand is how a harness stops getting run.
+// Existing process.env always wins, so a one-off override still works.
+function loadEnvFiles(paths: string[]) {
+  for (const p of paths) {
+    if (!existsSync(p)) {
+      continue;
+    }
+    for (const line of readFileSync(p, 'utf8').split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (!m || line.trim().startsWith('#')) {
+        continue;
+      }
+      const key = m[1];
+      // Strip surrounding quotes and any trailing inline comment.
+      const val = m[2].trim().replace(/^(['"])(.*)\1$/, '$2');
+      if (env[key] === undefined) {
+        env[key] = val;
+      }
+    }
+  }
+}
+loadEnvFiles(['.env', '.env.local', 'apps/web/.env.local', 'apps/web/.env']);
+
+// Supabase renamed its API keys: `publishable`/`secret` replaced
+// `anon`/`service_role`. Accept either name so the harness works against
+// whichever convention the repo's env files use.
+const supabaseUrl = () => env.SUPABASE_URL ?? env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAdminKey = () =>
+  env.SUPABASE_SECRET_KEY ?? env.SUPABASE_SERVICE_ROLE_KEY;
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 const cmd = argv[2] ?? 'run';
@@ -162,19 +195,42 @@ function merchantMatches(got: unknown, want: unknown) {
   return false;
 }
 
+// Which labels are real ground truth and which are not:
+//
+//   merchant / category / transaction_type — the user SAW these in SMS Review
+//     and either confirmed or corrected them. Genuine human labels.
+//
+//   amount / fees — written by the same regex extractor being measured, so
+//     comparing against them is CIRCULAR: 100% proves the extractor is
+//     deterministic, not that it is correct. Reported under "consistency", and
+//     a drop is still a useful regression alarm.
+//
+//   balance_after — also written by the app, but NOT always by extraction (it
+//     can come from the balance replay in tools/balance.ts), so it disagrees
+//     with the SMS text on rows where those two paths diverge. Scored against
+//     what the MESSAGE says instead, which is the only thing extraction can be
+//     held to.
+const HUMAN_FIELDS = ['merchant', 'category', 'isTransfer'] as const;
+const CONSISTENCY_FIELDS = ['amount', 'fee', 'balanceVsSms'] as const;
+
+function balanceFromSms(sms: string): number | null {
+  const m = sms.match(
+    /(?:available\s+balance|new\s+balance|mokash\s+balance|balance)\s*(?:is)?\s*:?\s*(?:RWF|FRW)?\s*([\d,]+(?:\.\d+)?)/i,
+  );
+  return m ? Math.round(parseFloat(m[1].replace(/,/g, ''))) : null;
+}
+
 function scoreOne(parsed: any, expected: any) {
   const wantTransfer = expected.transaction_type === 'transfer';
+  const smsBalance = balanceFromSms(expected.sms ?? '');
   return {
     merchant: merchantMatches(parsed.merchant, expected.merchant),
     category: wantTransfer ? null : norm(parsed.category) === norm(expected.category),
     isTransfer: !!parsed.isTransfer === wantTransfer,
-    // Deterministic fields — these should be ~100%. Anything less is a regex
-    // bug, not a model problem, and is the most valuable signal in the report.
     amount: Number(parsed.amount) === Number(expected.amount ?? 0),
     fee: Number(parsed.fee) === Number(expected.fees ?? 0),
-    balance:
-      expected.balance_after == null ||
-      Number(parsed.balance_after) === Number(expected.balance_after),
+    balanceVsSms:
+      smsBalance == null ? null : Number(parsed.balance_after) === smsBalance,
   };
 }
 
@@ -215,7 +271,26 @@ async function run() {
     exit(1);
   }
 
+  // The user's own accounts matter: regexExtract identifies an inter-account
+  // transfer by matching the counterparty against them, so an empty list makes
+  // every genuine own-account transfer look like an ordinary payment. Optional
+  // sidecar file, written by `harvest --accounts`.
+  let accounts: {id: string; name: string; number?: string}[] = [];
+  const accountsPath = flag('accounts', 'eval/accounts.local.json');
+  if (existsSync(accountsPath)) {
+    try {
+      accounts = JSON.parse(readFileSync(accountsPath, 'utf8'));
+    } catch {
+      /* leave empty */
+    }
+  }
+
   console.log(`Golden set: ${cases.length} messages from ${setPath}`);
+  console.log(
+    accounts.length
+      ? `Accounts: ${accounts.length} (own-account transfer detection active)`
+      : 'Accounts: none — transfer detection will under-report. Run: npm run eval:harvest -- --accounts',
+  );
   const report: any = {at: new Date().toISOString(), setPath, count: cases.length, providers: {}};
 
   for (const name of providers) {
@@ -236,7 +311,13 @@ async function run() {
       const ctx = {
         sender: c.sender ?? '',
         userName: c.userName ?? accountHolder,
-        accounts: [],
+        accounts,
+        // The account this message arrived for, matched by sender name — needed
+        // so regexExtract can tell which side of a "Credited/Debited account"
+        // alert is the user's.
+        currentAccountId: accounts.find(
+          a => norm(a.name) && norm(c.sender).includes(norm(a.name)),
+        )?.id,
       };
       const facts = regexExtract(c.sms, ctx);
       const planned = buildClassification(c.sms, [], {}, ctx, facts);
@@ -254,7 +335,7 @@ async function run() {
     });
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-    const fields = ['merchant', 'category', 'isTransfer', 'amount', 'fee', 'balance'];
+    const fields = [...HUMAN_FIELDS, ...CONSISTENCY_FIELDS] as unknown as string[];
     const tally: Record<string, {ok: number; n: number}> = Object.fromEntries(
       fields.map(f => [f, {ok: 0, n: 0}]),
     );
@@ -294,8 +375,15 @@ async function run() {
 
     console.log(`\n  model        ${model || '(n/a)'}`);
     console.log(`  wall clock   ${elapsed}s   errors ${errors}   short-circuited ${skipped}`);
-    for (const f of fields) {
-      console.log(`  ${f.padEnd(12)} ${String(pct(f)).padStart(5)}%  (${tally[f].ok}/${tally[f].n})`);
+    console.log('  -- accuracy vs human labels (what the user confirmed/fixed) --');
+    for (const f of HUMAN_FIELDS) {
+      console.log(`  ${f.padEnd(14)} ${String(pct(f)).padStart(5)}%  (${tally[f].ok}/${tally[f].n})`);
+    }
+    console.log(
+      "  -- consistency vs the app's own extraction (circular; regression alarm only) --",
+    );
+    for (const f of CONSISTENCY_FIELDS) {
+      console.log(`  ${f.padEnd(14)} ${String(pct(f)).padStart(5)}%  (${tally[f].ok}/${tally[f].n})`);
     }
     console.log(`  tokens       ${inTok} in / ${outTok} out`);
     console.log(`  cost         $${cost.toFixed(4)} total, $${(cost / cases.length).toFixed(5)}/SMS`);
@@ -327,25 +415,57 @@ async function run() {
 }
 
 async function harvest() {
-  const url = env.SUPABASE_URL;
-  const key = env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = supabaseUrl();
+  const key = supabaseAdminKey();
   if (!url || !key) {
-    console.error('Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, or run this SQL');
-    console.error('in the Supabase editor and save the JSON result to eval/golden.json:\n');
+    console.error(
+      'Need SUPABASE_URL plus SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY)',
+    );
+    console.error('in .env / apps/web/.env.local — or run this SQL in the Supabase');
+    console.error('editor and save the JSON result to eval/golden.json:\n');
     console.error(HARVEST_SQL);
     exit(1);
   }
+  // A service/secret key bypasses RLS, so this returns EVERY user's rows. Scope
+  // to one owner when asked, otherwise report the spread so a multi-user pull
+  // isn't mistaken for one person's data.
+  const owner = flag('owner', '');
   const res = await fetch(
     `${url}/rest/v1/transactions?source=eq.sms&confirmed=eq.1&sms=not.is.null` +
-      `&select=sms,sender,merchant,category,subcategory,transaction_type,amount,fees,balance_after` +
-      `&order=created_at.desc&limit=500`,
+      (owner ? `&owner_id=eq.${owner}` : '') +
+      `&select=owner_id,sms,sender,merchant,category,subcategory,transaction_type,amount,fees,balance_after` +
+      `&order=created_at.desc&limit=${flag('limit', '500')}`,
     {headers: {apikey: key, Authorization: `Bearer ${key}`}},
   );
   if (!res.ok) {
     console.error(`Supabase ${res.status}: ${(await res.text()).slice(0, 300)}`);
     exit(1);
   }
+  // `--accounts` writes the sidecar the runner needs for transfer detection.
+  if (argv.includes('--accounts')) {
+    const ares = await fetch(
+      `${url}/rest/v1/accounts?select=id,name,number,owner_id` +
+        (owner ? `&owner_id=eq.${owner}` : ''),
+      {headers: {apikey: key, Authorization: `Bearer ${key}`}},
+    );
+    if (!ares.ok) {
+      console.error(`Supabase ${ares.status}: ${(await ares.text()).slice(0, 200)}`);
+      exit(1);
+    }
+    const accts = (await ares.json()) as any[];
+    mkdirSync('eval', {recursive: true});
+    writeFileSync('eval/accounts.local.json', JSON.stringify(accts, null, 1));
+    console.error(`wrote eval/accounts.local.json (${accts.length} accounts)`);
+  }
+
   const rows = ((await res.json()) as any[]).filter(r => (r.sms ?? '').length > 20);
+  const owners = new Set(rows.map(r => r.owner_id));
+  if (owners.size > 1) {
+    console.error(
+      `warning: ${rows.length} rows span ${owners.size} users — pass --owner <uuid> to scope`,
+    );
+  }
+  console.error(`harvested ${rows.length} labelled messages`);
   console.log(JSON.stringify(rows, null, 2));
 }
 
