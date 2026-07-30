@@ -22,7 +22,7 @@ import {downloadAndInstall} from '../tools/updateInstaller';
 import {format} from 'date-fns';
 import {reconnect} from '../tools/database';
 import {syncAccountBalance} from '../tools/balance';
-import {pendingUploadGap, repairSync} from '../tools/syncRepair';
+import {pendingUploadGap, repairSync, syncHealth} from '../tools/syncRepair';
 
 function monthStart() {
   const d = new Date();
@@ -87,6 +87,22 @@ export default function HomeScreen({navigation}: any) {
       return;
     }
     setSyncGap(await pendingUploadGap(userId));
+    // Logged, not just measured. PowerSync will not APPLY a downloaded checkpoint
+    // while it still has local writes outstanding — it protects un-uploaded changes
+    // from being overwritten — so a stuck upload queue silently stops downloads
+    // too, in both directions at once. None of that is visible from the UI, and
+    // guessing at it has already cost several rounds. `pending` and the two error
+    // fields are the numbers that actually distinguish the cases.
+    try {
+      const h = await syncHealth();
+      console.log(
+        `[sync] connected=${h.connected} pending=${h.pending} ` +
+          `lastSynced=${h.lastSyncedAt ? h.lastSyncedAt.toISOString() : 'never'} ` +
+          `uploadError=${h.uploadError ?? '-'} downloadError=${h.downloadError ?? '-'}`,
+      );
+    } catch (e) {
+      console.warn('[sync] health check failed:', e);
+    }
   }, [userId]);
 
   const outOfSync = syncGap.rows > 0 || syncGap.balancesDiffer;
