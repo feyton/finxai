@@ -18,7 +18,7 @@
  * Auth: a signed-in caller (mobile: Bearer token; web: session cookie).
  */
 import Anthropic from '@anthropic-ai/sdk';
-import {NextResponse} from 'next/server';
+import {NextResponse, after} from 'next/server';
 import {authedUser} from '@/lib/authedUser';
 import {logAiUsage} from '@/lib/aiUsage';
 import {MODELS, apiKeyFor, providerForUser} from '@/lib/aiProvider';
@@ -69,8 +69,17 @@ export async function POST(request: Request) {
     );
   }
 
-  const fail = async (message: string, status: number) => {
-    await logAiUsage(supabase, {
+  // Usage logging is telemetry, not part of the answer, so it runs AFTER the
+  // response is sent (next/server `after`). Awaiting it put a Supabase insert
+  // (~20ms warm, ~55ms cold) on the critical path of every classification —
+  // paid once per SMS, for a row nobody reads in real time. Failures are
+  // already swallowed inside logAiUsage, so nothing is lost by not awaiting.
+  const logUsage = (args: Parameters<typeof logAiUsage>[1]) => {
+    after(() => logAiUsage(supabase, args));
+  };
+
+  const fail = (message: string, status: number) => {
+    logUsage({
       ownerId: user.id,
       provider,
       model,
@@ -163,7 +172,10 @@ export async function POST(request: Request) {
       outputTokens = data?.usageMetadata?.candidatesTokenCount ?? 0;
     }
 
-    await logAiUsage(supabase, {
+    if (!reply) {
+      return fail(`Empty response from ${provider}`, 502);
+    }
+    logUsage({
       ownerId: user.id,
       provider,
       model,
@@ -172,10 +184,6 @@ export async function POST(request: Request) {
       outputTokens,
       ok: true,
     });
-
-    if (!reply) {
-      return fail(`Empty response from ${provider}`, 502);
-    }
     // `provider`/`model` are echoed so the client can attribute a record and so
     // the eval harness can confirm which model actually served the request.
     return NextResponse.json({reply, provider, model});

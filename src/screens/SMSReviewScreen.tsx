@@ -45,6 +45,9 @@ export interface Fix {
   subcategory: string;
   accountId: string;
   type: 'expense' | 'income' | 'transfer';
+  // Free-text note, captured here so a review doesn't have to be finished and
+  // then re-opened from the Transactions list just to add context.
+  note: string;
 }
 
 const FIX_TYPES: {id: Fix['type']; label: string}[] = [
@@ -70,6 +73,7 @@ function FixSheet({
   const [merchant, setMerchant] = useState('');
   const [cat, setCat] = useState<CategoryId>('shopping');
   const [subcategory, setSubcategory] = useState('');
+  const [note, setNote] = useState('');
   const [accountId, setAccountId] = useState('');
   const [fixType, setFixType] = useState<Fix['type']>('expense');
   const {subcatsFor} = useSubcategories();
@@ -81,6 +85,10 @@ function FixSheet({
       setMerchant(record.merchant || record.payee || '');
       setCat((resolveCat(record.category ?? '') as CategoryId) ?? 'shopping');
       setSubcategory(record.subcategory ?? '');
+      // auto_records has no `note` column in Postgres (only transactions does),
+      // so this is always blank today — read it anyway so the sheet keeps
+      // working unchanged if that column is ever added.
+      setNote(record.note ?? '');
       setAccountId(record.account_id ?? '');
       setFixType(
         record.transaction_type === 'income'
@@ -239,11 +247,33 @@ function FixSheet({
           )}
           </>
           )}
+
+          {/* Note — kept out of the transfer branch's conditional above so it is
+              available for every type. Multiline because the useful notes are
+              "split with Jean, he owes 3000", not one word. */}
+          <Text style={styles.fixLabel}>Note (optional)</Text>
+          <TextInput
+            value={note}
+            onChangeText={setNote}
+            placeholder="Why this transaction, who it was with…"
+            placeholderTextColor={T.text3}
+            multiline
+            numberOfLines={3}
+            textAlignVertical="top"
+            style={[styles.fixInput, styles.fixNoteInput]}
+          />
           </ScrollView>
 
           <Pressable
             onPress={() =>
-              onSave({merchant: merchant.trim(), category: cat, subcategory, accountId, type: fixType})
+              onSave({
+                merchant: merchant.trim(),
+                category: cat,
+                subcategory,
+                accountId,
+                type: fixType,
+                note: note.trim(),
+              })
             }
             style={({pressed}) => [styles.fixSave, {opacity: pressed ? 0.85 : 1}]}>
             <Icon name="Check" size={16} color={T.accentInk} strokeWidth={2.6} />
@@ -368,12 +398,26 @@ function SmsCard({
             <Text style={styles.merchant} numberOfLines={1}>
               {record.merchant || record.payee || 'Unknown'}
             </Text>
-            <Text style={styles.catLabel}>
-              {isTransfer
-                ? 'Between your accounts'
-                : (CATS[localCat]?.label ?? localCat) +
-                  (record.subcategory ? ` · ${record.subcategory}` : '')}
-            </Text>
+            {/* Category, plus the AI's subcategory guess as its own chip.
+                It used to be appended as "Category · Sub" in the same dim grey
+                run of text, which made it easy to miss — and the whole point of
+                showing it is to let a correct guess be confirmed straight from
+                this card instead of opening Fix to check it. */}
+            <View style={styles.catLine}>
+              <Text style={styles.catLabel}>
+                {isTransfer
+                  ? 'Between your accounts'
+                  : CATS[localCat]?.label ?? localCat}
+              </Text>
+              {!isTransfer && !!record.subcategory && (
+                <View style={styles.subSuggest}>
+                  <Icon name="Sparkles" size={9} color={T.accent} strokeWidth={2.4} />
+                  <Text style={styles.subSuggestText} numberOfLines={1}>
+                    {record.subcategory}
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
           {isTransfer && (
             <View style={styles.transferPill}>
@@ -649,8 +693,8 @@ export default function SMSReviewScreen({navigation}: any) {
             payee, merchant, transaction_type, fees, currency,
             confirmed, source, confidence,
             transfer_account_id, transfer_direction, balance_after, txn_ref,
-            parse_source, owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?)`,
+            parse_source, note, owner_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           // The auto_record id IS the deterministic transaction id (see
           // tools/txnId.ts) — reuse it so confirming the same record on two
@@ -673,6 +717,9 @@ export default function SMSReviewScreen({navigation}: any) {
           bal,
           record.txn_ref ?? null,
           record.parse_source ?? null,
+          // NULL rather than '' when blank, so "has a note" is a simple IS NOT
+          // NULL check everywhere downstream.
+          fix.note || null,
           userId,
           now,
         ],
@@ -936,6 +983,31 @@ const styles = StyleSheet.create({
     color: T.text3,
     lineHeight: 16,
   },
+  catLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    // Wraps rather than truncating: a long category plus a long subcategory on
+    // a narrow phone should drop to a second line, not hide the guess.
+    flexWrap: 'wrap',
+  },
+  subSuggest: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: R.small,
+    backgroundColor: T.accent + '18',
+    borderWidth: 1,
+    borderColor: T.accent + '33',
+  },
+  subSuggestText: {
+    fontFamily: FONTS.medium,
+    fontSize: 10,
+    color: T.accent,
+    lineHeight: 14,
+  },
   amount: {
     fontFamily: FONTS.bold,
     fontSize: 14,
@@ -1150,6 +1222,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     padding: 12,
     gap: 8,
+  },
+  fixNoteInput: {
+    minHeight: 76,
+    paddingTop: 11,
   },
   subChip: {
     flexDirection: 'row',

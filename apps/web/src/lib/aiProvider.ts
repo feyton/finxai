@@ -28,6 +28,24 @@ export function defaultProvider(): AiProvider {
 }
 
 /**
+ * Short-lived cache of each user's provider choice.
+ *
+ * WHY: this lookup sat on the critical path of every single SMS classification,
+ * costing a Supabase round trip (~20ms warm, ~55ms cold from the Contabo box)
+ * to read a value that changes only when someone opens AI Settings and toggles
+ * it. Classifying an inbox of 20 messages paid for 20 identical queries.
+ *
+ * The TTL is the ONLY invalidation, by necessity: the setting is written on
+ * mobile via PowerSync straight into Postgres (see src/hooks/useAiProvider.ts),
+ * so no Next route is involved in the write and there is nothing to hook a
+ * cache-bust onto. 60s is chosen to keep that invisible — a user who switches
+ * provider in AI Settings sees it honoured within a minute, which is well inside
+ * the gap between SMS arrivals.
+ */
+const PROVIDER_TTL_MS = 60_000;
+const providerCache = new Map<string, {value: AiProvider; at: number}>();
+
+/**
  * Reads the user's stored choice, falling back to the server default.
  *
  * Never throws: a settings-table hiccup must not take down classification, so
@@ -36,7 +54,12 @@ export function defaultProvider(): AiProvider {
 export async function providerForUser(
   supabase: SupabaseClient,
   ownerId: string,
+  now: number = Date.now(),
 ): Promise<AiProvider> {
+  const hit = providerCache.get(ownerId);
+  if (hit && now - hit.at < PROVIDER_TTL_MS) {
+    return hit.value;
+  }
   try {
     const {data} = await supabase
       .from('user_settings')
@@ -45,12 +68,18 @@ export async function providerForUser(
       .maybeSingle();
     const chosen = (data?.ai_provider ?? '').toLowerCase();
     if ((VALID as string[]).includes(chosen)) {
+      providerCache.set(ownerId, {value: chosen as AiProvider, at: now});
       return chosen as AiProvider;
     }
   } catch {
     // fall through to the default
   }
-  return defaultProvider();
+  // Cache the default too — otherwise a user who has never opened AI Settings
+  // (no row) pays the round trip on every message forever, which is the common
+  // case for a new install.
+  const fallback = defaultProvider();
+  providerCache.set(ownerId, {value: fallback, at: now});
+  return fallback;
 }
 
 /**
