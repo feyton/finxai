@@ -100,6 +100,16 @@ android {
             signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            // NOTE: ABI selection is NOT configured here. scripts/release.mjs passes
+            // -PreactNativeArchitectures=arm64-v8a, which is the React Native
+            // mechanism and the one that actually filters prebuilt .so files coming
+            // from AAR dependencies. A buildType `ndk { abiFilters }` block does not:
+            // it applies to NDK-compiled code only, and was verified to leave all four
+            // ABIs in the packaged APK.
+            //
+            // So a bare `./gradlew assembleRelease` produces a four-ABI APK (~146 MB
+            // with MapLibre) that is NOT what gets released. Always measure size from
+            // the release script's output, not a manual assemble.
         }
     }
 }

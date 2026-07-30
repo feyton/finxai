@@ -1,11 +1,13 @@
 /**
  * Where the money goes, geographically.
  *
- * This is the data layer of the map view: transactions carrying a location,
- * clustered by proximity, ranked by spend. It is deliberately shipped before the
- * tile layer — a rendered map needs a native SDK and (for Google) an API key,
- * whereas the clustering, ranking and drill-down are the parts that actually answer
- * "where do I spend the most", and they work from the first located transaction.
+ * Transactions carrying a location, clustered by proximity, shown as a heatmap over
+ * real streets and ranked by spend below it.
+ *
+ * Rendered with MapLibre on OpenFreeMap tiles: no API key, no billing, no request
+ * cap, and nothing to configure outside this repository — which is why it was chosen
+ * over Google Maps, whose SDK would have made the feature wait on a Cloud console
+ * setup step.
  *
  * Only money-out captured live carries a position (see tools/smsIngest
  * locationForParsed), so this list is always a subset of spending, and the empty
@@ -17,9 +19,25 @@ import {Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View} from '
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {format} from 'date-fns';
 
+// Aliased: MapLibre exports its map component as `Map`, which would shadow the
+// JavaScript Map constructor used for clustering below.
+import {
+  Camera,
+  GeoJSONSource,
+  Layer,
+  Map as MapLibreMap,
+} from '@maplibre/maplibre-react-native';
+
 import {CatChip, Icon, Progress} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {CATS, FONTS, R, T, fmtAmount, resolveCat} from '../theme';
+
+// OpenFreeMap: full street detail, no API key, no billing, no request cap. Chosen
+// over Google Maps precisely because it needs nothing set up outside this repo.
+const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+
+// Kigali, used only when there is nothing to fit the camera to.
+const FALLBACK_CENTER: [number, number] = [30.0619, -1.9441];
 
 // ~4 decimal places is roughly 11 m at this latitude, which is tighter than the
 // accuracy of any cached fix we accept (up to 3 km, typically 100 m). Rounding to
@@ -110,6 +128,54 @@ export default function SpendingPlaces({navigation}: any) {
 
   const max = places[0]?.total ?? 0;
 
+  // GeoJSON for the map. `weight` is the place's share of the biggest place, so the
+  // heat reflects how much was SPENT there rather than how many times — two visits
+  // of 1,000 should not outrank one of 50,000.
+  const geojson = useMemo(
+    () => ({
+      type: 'FeatureCollection' as const,
+      features: places.map(p => ({
+        type: 'Feature' as const,
+        id: p.key,
+        properties: {
+          weight: max > 0 ? p.total / max : 0,
+          total: p.total,
+        },
+        geometry: {type: 'Point' as const, coordinates: [p.lon, p.lat]},
+      })),
+    }),
+    [places, max],
+  );
+
+  // Fit to the data. With a single place there are no bounds to fit, so centre on it
+  // at street zoom instead — otherwise MapLibre gets a zero-area box and zooms to
+  // maximum, which looks broken.
+  const camera = useMemo(() => {
+    if (places.length === 0) {
+      return {center: FALLBACK_CENTER, zoom: 11};
+    }
+    const lats = places.map(p => p.lat);
+    const lons = places.map(p => p.lon);
+    const spread = Math.max(
+      Math.max(...lats) - Math.min(...lats),
+      Math.max(...lons) - Math.min(...lons),
+    );
+    if (places.length === 1 || spread < 0.002) {
+      return {center: [places[0].lon, places[0].lat] as [number, number], zoom: 15};
+    }
+    // LngLatBounds is a flat [west, south, east, north] tuple per the GeoJSON RFC,
+    // not the {ne, sw} object shape older versions used.
+    return {
+      bounds: [
+        Math.min(...lons),
+        Math.min(...lats),
+        Math.max(...lons),
+        Math.max(...lats),
+      ] as [number, number, number, number],
+      padding: {top: 40, right: 40, bottom: 40, left: 40},
+    };
+  }, [places]);
+
   const openInMaps = (p: Place) => {
     const q = `${p.lat},${p.lon}`;
     const nameHint = p.txns[0]?.merchant || 'Spending location';
@@ -156,6 +222,64 @@ export default function SpendingPlaces({navigation}: any) {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scroll}>
+        {places.length > 0 && (
+          <View style={styles.mapWrap}>
+            <MapLibreMap
+              style={styles.map}
+              mapStyle={MAP_STYLE}
+              logo={false}
+              compass={false}
+              scaleBar={false}
+              // Attribution stays on: OpenFreeMap serves OpenStreetMap data and the
+              // licence requires crediting it.
+              attribution>
+              <Camera {...camera} duration={0} />
+              <GeoJSONSource id="places" data={geojson}>
+                {/* Heat first, circles above it. The heatmap is what answers "where
+                    is the money concentrated" once there are dozens of points; the
+                    circles keep it legible at one or two, where a heat blob alone
+                    reads as a smudge. */}
+                <Layer
+                  id="places-heat"
+                  type="heatmap"
+                  paint={{
+                    'heatmap-weight': ['get', 'weight'],
+                    'heatmap-intensity': 1,
+                    'heatmap-radius': 42,
+                    'heatmap-opacity': 0.75,
+                    'heatmap-color': [
+                      'interpolate',
+                      ['linear'],
+                      ['heatmap-density'],
+                      0,
+                      'rgba(34,197,94,0)',
+                      0.3,
+                      'rgba(34,197,94,0.45)',
+                      0.6,
+                      'rgba(251,191,36,0.7)',
+                      1,
+                      'rgba(220,38,38,0.85)',
+                    ],
+                  }}
+                />
+                <Layer
+                  id="places-dots"
+                  type="circle"
+                  paint={{
+                    // Scaled by spend share, floored so the smallest place is still
+                    // tappable-looking rather than a speck.
+                    'circle-radius': ['interpolate', ['linear'], ['get', 'weight'], 0, 5, 1, 11],
+                    'circle-color': '#22C55E',
+                    'circle-opacity': 0.9,
+                    'circle-stroke-width': 2,
+                    'circle-stroke-color': '#0A0D10',
+                  }}
+                />
+              </GeoJSONSource>
+            </MapLibreMap>
+          </View>
+        )}
+
         {places.length > 0 && (
           <View style={styles.totalCard}>
             <Text style={styles.totalLabel}>Traced to a place</Text>
@@ -291,6 +415,16 @@ const styles = StyleSheet.create({
   },
   monthLabel: {fontFamily: FONTS.semibold, fontSize: 14, color: T.text},
   scroll: {paddingHorizontal: 16, paddingBottom: 40},
+  mapWrap: {
+    height: 260,
+    borderRadius: R.card,
+    overflow: 'hidden',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.surface2,
+  },
+  map: {flex: 1},
   totalCard: {
     padding: 14,
     marginBottom: 12,
