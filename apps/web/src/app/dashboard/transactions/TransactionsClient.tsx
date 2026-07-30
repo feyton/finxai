@@ -128,6 +128,7 @@ export function TransactionsClient({
       .then(({data}) => setCustomSubcats((data ?? []) as Subcategory[]));
   }, [supabase]);
 
+
   const accName = useMemo(() => new Map(accounts.map(a => [a.id, a.name ?? 'Account'])), [accounts]);
   const splitsByTx = useMemo(() => {
     const m = new Map<string, any[]>();
@@ -160,6 +161,107 @@ export function TransactionsClient({
       }),
     [tx, q, acct, cat, source, type, onlyReview, needsReview],
   );
+
+  // ── Keyboard review ──────────────────────────────────────────────────────
+  // The reason to do this work at a desk rather than on the phone is speed, and
+  // reaching for the mouse on every row throws that away. j/k move, Enter opens,
+  // Space selects, x toggles selection, Esc closes — the vocabulary people already
+  // know from mail clients, so there is nothing new to learn.
+  //
+  // `cursor` is an index into the VISIBLE rows, so it follows filtering rather than
+  // pointing at a row that scrolled out of the result set.
+  const [cursor, setCursor] = useState<number>(-1);
+  const visible = useMemo(() => filtered.slice(0, limit), [filtered, limit]);
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+
+  useEffect(() => {
+    // Keep the cursor inside the list as filters change.
+    setCursor(c => (c >= visible.length ? visible.length - 1 : c));
+  }, [visible.length]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Never hijack typing. Without this, `j` in the search box would move the
+      // cursor instead of filtering, which is the classic way keyboard shortcuts
+      // become infuriating.
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === 'INPUT' ||
+          el.tagName === 'TEXTAREA' ||
+          el.tagName === 'SELECT' ||
+          el.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) {
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        if (openId) {
+          setOpenId(null);
+        } else if (sel.size) {
+          setSel(new Set());
+        }
+        return;
+      }
+      // While the drawer is open the only key that should do anything is Escape —
+      // arrowing the table underneath an open editor is disorienting.
+      if (openId) {
+        return;
+      }
+
+      const move = (delta: number) => {
+        e.preventDefault();
+        setCursor(c => {
+          const next = Math.min(Math.max((c < 0 ? -1 : c) + delta, 0), visible.length - 1);
+          const row = visible[next];
+          if (row) {
+            rowRefs.current.get(row.id)?.scrollIntoView({block: 'nearest'});
+          }
+          return next;
+        });
+      };
+
+      switch (e.key) {
+        case 'j':
+        case 'ArrowDown':
+          move(1);
+          break;
+        case 'k':
+        case 'ArrowUp':
+          move(-1);
+          break;
+        case 'Enter':
+          if (cursor >= 0 && visible[cursor]) {
+            e.preventDefault();
+            setOpenId(visible[cursor].id);
+          }
+          break;
+        case 'x':
+        case ' ':
+          if (cursor >= 0 && visible[cursor]) {
+            e.preventDefault();
+            const id = visible[cursor].id;
+            setSel(s => {
+              const n = new Set(s);
+              if (n.has(id)) {
+                n.delete(id);
+              } else {
+                n.add(id);
+              }
+              return n;
+            });
+          }
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [visible, cursor, openId, sel.size]);
 
   const patchLocal = useCallback((id: string, patch: Partial<Transaction>) => {
     setTx(prev => prev.map(t => (t.id === id ? {...t, ...patch} : t)));
@@ -353,15 +455,32 @@ export function TransactionsClient({
               </tr>
             </thead>
             <tbody>
-              {filtered.slice(0, limit).map(t => {
+              {visible.map((t, i) => {
                 const review = needsReview(t);
                 const parts = splitsByTx.get(t.id) ?? [];
+                const atCursor = i === cursor;
                 return (
                   <tr
                     key={t.id}
+                    ref={el => {
+                      if (el) {
+                        rowRefs.current.set(t.id, el);
+                      } else {
+                        rowRefs.current.delete(t.id);
+                      }
+                    }}
+                    // Clicking a row moves the cursor there, so mouse and keyboard
+                    // share one position instead of fighting over two.
+                    onMouseDown={() => setCursor(i)}
                     style={{
                       borderBottom: '1px solid var(--border)',
-                      background: review ? 'rgba(217,119,6,0.04)' : 'transparent',
+                      background: atCursor
+                        ? 'var(--accent-soft)'
+                        : review
+                        ? 'rgba(217,119,6,0.04)'
+                        : 'transparent',
+                      // Inset rather than an outline so the row does not shift.
+                      boxShadow: atCursor ? 'inset 3px 0 0 0 var(--accent)' : undefined,
                     }}>
                     <td className="td pl-4">
                       <input
@@ -454,6 +573,15 @@ export function TransactionsClient({
                 Showing {Math.min(limit, filtered.length).toLocaleString()} of{' '}
                 {filtered.length.toLocaleString()}
                 {filtered.length !== tx.length && ` (filtered from ${tx.length.toLocaleString()})`}
+              </span>
+              {/* Stated, because a keyboard shortcut nobody knows about is not a
+                  feature. Kept to the four keys that carry the whole review loop. */}
+              <span className="hidden items-center gap-1.5 text-[11px] text-ink3 md:flex">
+                <Kbd>j</Kbd>
+                <Kbd>k</Kbd> move
+                <Kbd>↵</Kbd> open
+                <Kbd>x</Kbd> select
+                <Kbd>esc</Kbd> close
               </span>
               {limit < filtered.length && (
                 <>
@@ -695,15 +823,50 @@ function TxnDrawer({
         style={{background: 'var(--surface)', borderLeft: '1px solid var(--border)', boxShadow: '-16px 0 40px rgba(0,0,0,0.12)'}}>
         {/* header */}
         <div className="flex items-start justify-between border-b border-line px-5 py-4">
-          <div>
-            <div className="text-[16px] font-bold">{txn.merchant || txn.payee || 'Transaction'}</div>
+          <div className="min-w-0">
+            <h2
+              className="truncate text-[19px] font-bold tracking-[-0.01em]"
+              style={{fontFamily: 'var(--font-display), system-ui, sans-serif'}}>
+              {txn.merchant || txn.payee || 'Transaction'}
+            </h2>
             <div className="mt-0.5 text-[12px] text-ink2">
               {txn.date_time ? format(new Date(txn.date_time), 'MMM d, yyyy · HH:mm') : '—'}
               {' · '}
               {acct?.name ?? '—'}
             </div>
+            {/* Provenance, which the drawer never showed. When correcting a record the
+                first useful question is where it came from and whether the model ever
+                saw it — an SMS row marked "offline" is wrong for a different reason
+                than one the AI classified confidently. */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {txn.source === 'sms' && (
+                <Pill color="var(--accent-700)" bg="var(--accent-soft)" icon="sparkles">
+                  From SMS
+                </Pill>
+              )}
+              {txn.source === 'sms' && txn.parse_source === 'regex' && (
+                <Pill color="var(--warn)" bg="rgba(217,119,6,0.14)">
+                  offline — never reached the AI
+                </Pill>
+              )}
+              {txn.lat != null && txn.lon != null && (
+                <a
+                  href={`https://maps.google.com/?q=${txn.lat},${txn.lon}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="pill press"
+                  style={{
+                    color: 'var(--accent-700)',
+                    background: 'var(--accent-soft)',
+                  }}
+                  title={`±${Math.round(txn.accuracy_m ?? 0)}m`}>
+                  <Icon name="pin" size={11} />
+                  {txn.lat.toFixed(4)}, {txn.lon.toFixed(4)}
+                </a>
+              )}
+            </div>
           </div>
-          <button className="btn" onClick={onClose}>
+          <button className="btn shrink-0" onClick={onClose} title="Close (Esc)">
             <Icon name="x" size={15} />
           </button>
         </div>
@@ -897,5 +1060,16 @@ function FieldRow({label, children}: {label: string; children: React.ReactNode})
       <span className="text-[12.5px] text-ink2">{label}</span>
       {children}
     </div>
+  );
+}
+
+/** Keycap, for the shortcut hint under the table. */
+function Kbd({children}: {children: React.ReactNode}) {
+  return (
+    <kbd
+      className="rounded border border-line bg-surface2 px-1.5 py-0.5 text-[10px] font-semibold text-ink2"
+      style={{fontFamily: 'var(--font-mono), ui-monospace, monospace'}}>
+      {children}
+    </kbd>
   );
 }
