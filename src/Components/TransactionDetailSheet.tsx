@@ -22,6 +22,10 @@ import React, {
 import {Linking, Platform, Pressable, StyleSheet, Text, View} from 'react-native';
 import {CATS, FONTS, R, T, fmtAmount, resolveCat} from '../theme';
 import {syncAccountBalance} from '../tools/balance';
+import {reclassifySms} from '../tools/smsIngest';
+import {supabase} from '../tools/supabase';
+import {useCurrentUser} from '../hooks/useCurrentUser';
+import {appAlert} from './AppDialog';
 import {Icon} from './ui';
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -64,12 +68,73 @@ function TransactionDetailSheet(
   const db = usePowerSync();
   const sheetRef = useRef<BottomSheet>(null);
   const [selected, setSelected] = useState<any>(null);
+  const [retrying, setRetrying] = useState(false);
   const snapPoints = useMemo(() => ['80%', '95%'], []);
+  const {userId, name} = useCurrentUser();
 
   const {data: selectedSplits} = useQuery(
     'SELECT * FROM split_details WHERE transaction_id = ?',
     [selected?.id ?? ''],
   );
+
+  // Needed for the classifier's context: it matches counterparty account numbers
+  // against the user's own accounts to decide whether a payment is really a transfer.
+  const {data: myAccounts} = useQuery(
+    'SELECT id, name, number FROM accounts WHERE owner_id = ?',
+    [userId ?? ''],
+  );
+
+  /**
+   * Re-run the AI over this row's stored SMS.
+   *
+   * Confirming a record used to be a one-way door: rows filed before the parser fixes
+   * are stuck with what the old code produced — "Unknown", "sender:", or an entire
+   * "…was completed at 2026-07-25 19:18:40" clause as the merchant — and the retry
+   * action only ever existed for rows still awaiting review. 29 of 280 SMS transactions
+   * are in that state, all predating migration v8.
+   */
+  const retrySelected = useCallback(async () => {
+    if (!selected?.sms || retrying) {
+      return;
+    }
+    setRetrying(true);
+    try {
+      const {
+        data: {session},
+      } = await supabase.auth.getSession();
+      const res = await reclassifySms(db, {
+        table: 'transactions',
+        record: selected,
+        ownerId: userId!,
+        userName: name ?? '',
+        accounts: (myAccounts as any[]).map(a => ({
+          id: a.id,
+          name: a.name ?? '',
+          number: a.number ?? '',
+        })),
+        authToken: session?.access_token ?? '',
+      });
+
+      if (res.ok) {
+        // Reflect it immediately: the sheet renders from `selected`, not from a live
+        // query, so without this the row updates underneath but the open sheet does not.
+        setSelected((prev: any) => (prev ? {...prev, merchant: res.merchant, payee: res.merchant, parse_source: 'ai'} : prev));
+        appAlert('Re-tagged', `Now filed as ${res.merchant}.`);
+      } else if (res.reason === 'no-auth') {
+        appAlert('Signed out', 'Sign in again to use AI tagging.');
+      } else if (res.reason === 'still-offline') {
+        appAlert(
+          'AI unreachable',
+          `${res.detail ?? 'The classifier did not answer'} — this record was left as it was.`,
+        );
+      }
+    } catch (e) {
+      console.warn('[TxDetail] retry failed:', e);
+      appAlert('Could not re-run', 'Check your connection and try again.');
+    } finally {
+      setRetrying(false);
+    }
+  }, [selected, retrying, db, userId, name, myAccounts]);
 
   useImperativeHandle(
     ref,
@@ -241,7 +306,39 @@ function TransactionDetailSheet(
                 <View style={styles.infoDivider} />
                 <InfoRow label="When" value={dateStr} />
                 <View style={styles.infoDivider} />
-                <InfoRow label="Source" value={sourceStr} />
+                {/* Source, plus a way to re-run the classifier. Placed here rather than
+                    with Edit/Delete because it belongs to provenance: this is the row
+                    that tells you the AI produced the name, so it is where you would
+                    look to ask it again. Only offered for rows that HAVE an SMS to
+                    re-read, and only when editing is allowed — it writes to the row. */}
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Source</Text>
+                  <View style={styles.srcVal}>
+                    <Text style={styles.infoValue} numberOfLines={1}>
+                      {sourceStr}
+                    </Text>
+                    {canEdit && !!tx.sms && (
+                      <Pressable
+                        onPress={retrySelected}
+                        disabled={retrying}
+                        hitSlop={8}
+                        style={({pressed}) => [
+                          styles.retryBtn,
+                          {opacity: retrying ? 0.5 : pressed ? 0.6 : 1},
+                        ]}>
+                        <Icon
+                          name="RefreshCcw"
+                          size={11}
+                          color={T.accent}
+                          strokeWidth={2.4}
+                        />
+                        <Text style={styles.retryText}>
+                          {retrying ? 'Working…' : 'Re-run AI'}
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
+                </View>
                 {tx.balance_after != null && (
                   <>
                     <View style={styles.infoDivider} />
@@ -401,6 +498,17 @@ const styles = StyleSheet.create({
   infoLabel: {fontFamily: FONTS.regular, fontSize: 12.5, color: T.text2},
   infoValue: {fontFamily: FONTS.medium, fontSize: 13, color: T.text, flexShrink: 1, textAlign: 'right'},
   infoDivider: {height: 1, backgroundColor: T.border},
+  srcVal: {flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1},
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: R.small,
+    backgroundColor: T.accentSoft,
+  },
+  retryText: {fontFamily: FONTS.semibold, fontSize: 11, color: T.accent, lineHeight: 15},
   locVal: {flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1},
   locText: {
     // Monospaced so the two coordinates line up and read as data rather than

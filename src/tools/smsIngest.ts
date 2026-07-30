@@ -444,3 +444,92 @@ export async function promoteAutoRecord(
   await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
   return {txType, accountId};
 }
+
+export type ReclassifyOutcome =
+  | {ok: true; merchant: string}
+  | {ok: false; reason: 'no-sms' | 'no-auth' | 'still-offline'; detail?: string};
+
+/**
+ * Re-run the AI classifier over a row's stored SMS and write the result back.
+ *
+ * Works on either table. `auto_records` needed this so a review row parsed while the
+ * classifier was unreachable could be re-tagged; `transactions` needs it because rows
+ * confirmed BEFORE the parser fixes are stuck with whatever the old code produced —
+ * "Unknown", "sender:", or a whole "…was completed at 2026-07-25 19:18:40" clause — and
+ * confirming a record was previously a one-way door with no way back.
+ *
+ * Only the classification is touched: merchant, category, subcategory, type and
+ * confidence. Amount, date, account, balance and LOCATION are left exactly as they are,
+ * because none of them is the classifier's to decide and the location in particular was
+ * captured once and cannot be recovered if overwritten.
+ *
+ * Extracted rather than copied. Four hand-written copies of the promotion INSERT is what
+ * silently dropped locations on confirm; this would have been the second copy of the
+ * retry path.
+ */
+export async function reclassifySms(
+  db: any,
+  args: {
+    table: 'transactions' | 'auto_records';
+    record: any;
+    ownerId: string;
+    userName: string;
+    accounts: {id: string; name: string; number: string}[];
+    authToken: string;
+  },
+): Promise<ReclassifyOutcome> {
+  const {table, record, ownerId, userName, accounts, authToken} = args;
+  if (!record?.sms) {
+    return {ok: false, reason: 'no-sms'};
+  }
+  if (!authToken) {
+    return {ok: false, reason: 'no-auth'};
+  }
+
+  const rules = await getMerchantRules(db, record.merchant ?? '', ownerId, 20);
+  const parsed = await parseSmsWithAI(
+    record.sms,
+    rules,
+    authToken,
+    await getMerchantChannels(),
+    {
+      userName,
+      accounts,
+      currentAccountId: record.account_id,
+      rules,
+      sender: record.sender ?? '',
+    },
+  );
+
+  // Refuse to write a regex result over an existing one. A failed round trip must leave
+  // the row alone rather than replacing a considered guess with a worse one.
+  if (parsed.parseSource !== 'ai') {
+    return {ok: false, reason: 'still-offline', detail: parsed.fallbackReason};
+  }
+
+  const txType = parsed.isTransfer
+    ? 'transfer'
+    : parsed.direction === 'credit'
+    ? 'income'
+    : 'expense';
+
+  await db.execute(
+    `UPDATE ${table}
+        SET category = ?, subcategory = ?, merchant = ?, payee = ?,
+            transaction_type = ?, confidence = ?, parse_source = 'ai',
+            transfer_account_id = ?
+      WHERE id = ?`,
+    [
+      parsed.category,
+      parsed.subcategory ?? '',
+      parsed.merchant,
+      parsed.merchant,
+      txType,
+      parsed.confidence,
+      parsed.isTransfer ? parsed.transferAccountId ?? null : null,
+      record.id,
+    ],
+  );
+
+  return {ok: true, merchant: parsed.merchant};
+}

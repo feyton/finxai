@@ -29,7 +29,7 @@ import {extractBalance, parseSmsWithAI, regexExtract} from '../tools/smsParser';
 import {supabase} from '../tools/supabase';
 import {syncAccountBalance} from '../tools/balance';
 import {ignoredSmsId} from '../tools/txnId';
-import {promoteAutoRecord} from '../tools/smsIngest';
+import {promoteAutoRecord, reclassifySms} from '../tools/smsIngest';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -569,72 +569,40 @@ export default function SMSReviewScreen({navigation}: any) {
   // the fuzzy fields do — so this is safe to repeat, and it's the quickest way
   // to recover a record that was tagged while the classifier was unreachable.
   const handleRetry = async (record: any) => {
-    if (!record?.sms) {
-      return;
-    }
     try {
       const {
         data: {session},
       } = await supabase.auth.getSession();
-      const authToken = session?.access_token ?? '';
-      if (!authToken) {
-        toast.show('Session expired — sign in again to use AI tagging.', {
-          type: 'warning',
-        });
+
+      // Shared with the transaction detail sheet's "Re-run AI" — one implementation of
+      // the retry path rather than one per screen.
+      const res = await reclassifySms(db, {
+        table: 'auto_records',
+        record,
+        ownerId: userId!,
+        userName: name ?? '',
+        accounts: (accounts as any[]).map(a => ({
+          id: a.id,
+          name: a.name ?? '',
+          number: a.number ?? '',
+        })),
+        authToken: session?.access_token ?? '',
+      });
+
+      if (res.ok) {
+        toast.show(`Re-tagged as ${res.merchant}`, {type: 'success'});
         return;
       }
-
-      const rules = await getMerchantRules(db, record.merchant ?? '', userId!, 20);
-      const parsed = await parseSmsWithAI(
-        record.sms,
-        rules,
-        authToken,
-        await getMerchantChannels(),
-        {
-          userName: name ?? '',
-          accounts: (accounts as any[]).map(a => ({
-            id: a.id,
-            name: a.name ?? '',
-            number: a.number ?? '',
-          })),
-          currentAccountId: record.account_id,
-          rules,
-          sender: record.sender ?? '',
-        },
-      );
-
-      if (parsed.parseSource !== 'ai') {
+      if (res.reason === 'no-auth') {
+        toast.show('Session expired — sign in again to use AI tagging.', {type: 'warning'});
+        return;
+      }
+      if (res.reason === 'still-offline') {
         toast.show(
-          `AI still unreachable (${parsed.fallbackReason ?? 'unknown'}) — kept the offline guess.`,
+          `AI still unreachable (${res.detail ?? 'unknown'}) — kept the offline guess.`,
           {type: 'warning', duration: 5000},
         );
-        return;
       }
-
-      const txType = parsed.isTransfer
-        ? 'transfer'
-        : parsed.direction === 'credit'
-        ? 'income'
-        : 'expense';
-      await db.execute(
-        `UPDATE auto_records
-         SET category = ?, subcategory = ?, merchant = ?, payee = ?,
-             transaction_type = ?, confidence = ?, parse_source = ?,
-             transfer_account_id = ?
-         WHERE id = ?`,
-        [
-          parsed.category,
-          parsed.subcategory ?? '',
-          parsed.merchant,
-          parsed.merchant,
-          txType,
-          parsed.confidence,
-          'ai',
-          parsed.isTransfer ? parsed.transferAccountId ?? null : null,
-          record.id,
-        ],
-      );
-      toast.show(`Re-tagged as ${parsed.merchant}`, {type: 'success'});
     } catch (e: any) {
       console.warn('[SMSReview] retry error:', e);
       toast.show('Could not re-run classification.', {type: 'danger'});
