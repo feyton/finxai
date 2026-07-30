@@ -16,7 +16,7 @@
  * 7. Saves review-needed records to auto_records
  */
 import {useQuery, usePowerSync} from '@powersync/react-native';
-import React, {useEffect, useRef} from 'react';
+import React, {useEffect, useMemo, useRef} from 'react';
 // @ts-ignore
 import SmsAndroid from 'react-native-get-sms-android';
 import {useToast} from 'react-native-toast-notifications';
@@ -91,6 +91,40 @@ const SMSRetriever: React.FC = () => {
 
   const autoAccounts = (accounts as any[]).filter(a => a.auto === 1 && a.address);
 
+  // A signature of ONLY the account fields that change how SMS are matched.
+  //
+  // This effect writes accounts.log_date at the end of every run, and it used to
+  // depend on the whole `accounts` array. PowerSync's useQuery is reactive, so that
+  // write re-emitted a new array, which changed the dependency, which ran the effect
+  // again — a self-feeding loop. `processing.current` prevents overlapping runs but
+  // not this: the guard is released when a run finishes, and the changed dependency
+  // immediately starts the next one.
+  //
+  // Each iteration queued one accounts:PATCH per account, which is how the upload
+  // queue reached 11,245 entries — 100% of them {"type":"accounts",
+  // "data":{"log_date":...}}. That backlog then jammed uploads, and because
+  // PowerSync will not apply a downloaded checkpoint while local writes are
+  // outstanding, it silently stopped DOWNLOADS too. Every symptom of the last few
+  // hours — edits on the web never arriving, balances diverging, the queue refilling
+  // after being cleared — comes back to this dependency array.
+  //
+  // Depending on a signature keeps the behaviour the comment below asks for (an
+  // edited account number or sender address still triggers a re-run) while making a
+  // log_date or balance write a no-op for this effect.
+  const accountsSignature = useMemo(
+    () =>
+      (accounts as any[])
+        .map(a => `${a.id}:${a.auto}:${a.address ?? ''}:${a.number ?? ''}`)
+        .sort()
+        .join('|'),
+    [accounts],
+  );
+
+  // Readiness, not a change signal. The dedupe queries must have RESOLVED before a
+  // run starts, but they also change on every insert this effect makes — depending
+  // on their contents would reintroduce the same loop by a different route.
+  const dedupeReady = existingRecords !== undefined && existingTxnRefs !== undefined;
+
   useEffect(() => {
     if (!userId || autoAccounts.length === 0 || processing.current) {return;}
     // Wait for the dedupe queries too. These are three INDEPENDENT PowerSync
@@ -99,11 +133,12 @@ const SMSRetriever: React.FC = () => {
     // (`?? []`) and already-processed messages looked new. The log_date floor
     // hides most of it, but a run interrupted before log_date advanced — or a
     // second device processing the same SMS before it syncs — re-inserts.
-    if (existingRecords === undefined || existingTxnRefs === undefined) {return;}
+    if (!dedupeReady) {return;}
     processSms();
     // accounts.length alone missed edits to an account's number/sender address,
-    // so a corrected account only took effect after a restart.
-  }, [userId, accounts, existingRecords, existingTxnRefs]);
+    // so a corrected account only took effect after a restart — hence the
+    // signature above rather than the length.
+  }, [userId, accountsSignature, dedupeReady]);
 
   const existingSmsSet = new Set(
     (existingRecords ?? []).map((r: any) => r.sms).filter(Boolean),
