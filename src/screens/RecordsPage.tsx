@@ -146,6 +146,11 @@ export default function RecordsPage({navigation, route}: any) {
         <Text style={styles.title}>Records</Text>
         <View style={{flexDirection: 'row', gap: 8}}>
           <Pressable
+            onPress={() => navigation.navigate('SpendingPlaces')}
+            style={({pressed}) => [styles.statsBtn, {opacity: pressed ? 0.7 : 1}]}>
+            <Icon name="MapPin" size={17} color={T.accent} strokeWidth={2.2} />
+          </Pressable>
+          <Pressable
             onPress={() => navigation.navigate('CategoryStats')}
             style={({pressed}) => [styles.statsBtn, {opacity: pressed ? 0.7 : 1}]}>
             <Icon name="PieChart" size={17} color={T.accent} strokeWidth={2.2} />

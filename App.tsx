@@ -31,6 +31,7 @@ import CreateRecord from './src/screens/CreateRecord';
 import EditTransaction from './src/screens/EditTransaction';
 import CategoryStats from './src/screens/CategoryStats';
 import CategoryTransactions from './src/screens/CategoryTransactions';
+import SpendingPlaces from './src/screens/SpendingPlaces';
 import DebtScreen from './src/screens/DebtScreen';
 import DebtDetails from './src/screens/DebtDetails';
 import AddDebt from './src/screens/AddDebt';
@@ -218,6 +219,7 @@ function App(): React.JSX.Element {
                 <Stack.Screen name="EditTransaction" component={EditTransaction} />
                 <Stack.Screen name="CategoryStats" component={CategoryStats} />
                 <Stack.Screen name="CategoryTransactions" component={CategoryTransactions} />
+                <Stack.Screen name="SpendingPlaces" component={SpendingPlaces} />
                 <Stack.Screen name="CreateAccount" component={CreateAccountScreen} />
                 <Stack.Screen name="Confirm" component={ConfirmTransactionsScreen} />
                 <Stack.Screen name="CreateBudget" component={CreateBudgetScreen} />
