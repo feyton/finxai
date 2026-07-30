@@ -106,7 +106,15 @@ class SmsReceiver : BroadcastReceiver() {
             val sender = messages[0].originatingAddress ?: ""
             val timestamp = messages[0].timestampMillis
 
-            if (text.isBlank() || !looksFinancial(text)) return
+            if (text.isBlank()) {
+                Log.i(TAG, "sms from $sender ignored: empty body")
+                return
+            }
+            if (!looksFinancial(text)) {
+                Log.i(TAG, "sms from $sender ignored: not financial (len=${text.length})")
+                return
+            }
+            Log.i(TAG, "financial sms from $sender accepted, len=${text.length}")
 
             val payload = android.os.Bundle().apply {
                 putString("body", text)
@@ -115,20 +123,53 @@ class SmsReceiver : BroadcastReceiver() {
             }
 
             if (looksMoneyOut(text)) {
-                cachedLocation(context)?.let { loc ->
+                val loc = cachedLocation(context)
+                if (loc != null) {
                     payload.putDouble("lat", loc.latitude)
                     payload.putDouble("lon", loc.longitude)
                     payload.putDouble("accuracy", loc.accuracy.toDouble())
                     payload.putDouble("locationAt", loc.time.toDouble())
+                    Log.i(
+                        TAG,
+                        "money-out: attached cached fix acc=${loc.accuracy}m " +
+                            "age=${(System.currentTimeMillis() - loc.time) / 1000}s",
+                    )
+                } else {
+                    Log.i(TAG, "money-out: no usable cached fix, sending without location")
                 }
+            } else {
+                Log.i(TAG, "not money-out, no location read")
             }
 
             val service = Intent(context, SmsHeadlessTaskService::class.java)
             service.putExtras(payload)
-            context.startService(service)
-            // Keeps the device awake just long enough for the JS task to start;
-            // HeadlessJsTaskService releases it when the task completes.
+
+            // Keeps the device awake long enough for the JS task to start;
+            // HeadlessJsTaskService releases it when the task completes. Acquired
+            // BEFORE the start so there is no window where the device can sleep
+            // between the two.
             com.facebook.react.HeadlessJsTaskService.acquireWakeLockNow(context)
+
+            // A broadcast receiver runs in the background whenever the app is not
+            // foregrounded, and from Android 8 a plain startService() in that state
+            // throws IllegalStateException. An SMS broadcast usually comes with a
+            // short background-start allowlist, so startService normally succeeds —
+            // but "usually" silently loses transactions, and this was previously a
+            // bare startService() whose only failure signal was a Log.w nobody was
+            // reading. Try the cheap path, then fall back to a foreground service,
+            // which is always permitted.
+            try {
+                context.startService(service)
+                Log.i(TAG, "headless task started via startService")
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "startService refused in background, using foreground service", e)
+                try {
+                    ContextCompat.startForegroundService(context, service)
+                    Log.i(TAG, "headless task started via startForegroundService")
+                } catch (e2: Throwable) {
+                    Log.e(TAG, "could not start headless task at all; poller will catch up", e2)
+                }
+            }
         } catch (e: Throwable) {
             // A crash in a broadcast receiver surfaces to the user as an app
             // crash toast for an SMS they may not even care about. The poller
@@ -147,7 +188,10 @@ class SmsReceiver : BroadcastReceiver() {
         val coarse = ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_COARSE_LOCATION,
         ) == PackageManager.PERMISSION_GRANTED
-        if (!fine && !coarse) return null
+        if (!fine && !coarse) {
+            Log.i(TAG, "location: no fine/coarse permission")
+            return null
+        }
 
         // From Android 10 the app also needs background-location access to read
         // a position while not in the foreground, which is exactly the case
@@ -156,11 +200,17 @@ class SmsReceiver : BroadcastReceiver() {
             val bg = ContextCompat.checkSelfPermission(
                 context, Manifest.permission.ACCESS_BACKGROUND_LOCATION,
             ) == PackageManager.PERMISSION_GRANTED
-            if (!bg) return null
+            if (!bg) {
+                Log.i(TAG, "location: background permission not granted (needs 'Allow all the time')")
+                return null
+            }
         }
 
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-            ?: return null
+        if (lm == null) {
+            Log.i(TAG, "location: no LocationManager")
+            return null
+        }
 
         // PASSIVE first: it is purely other apps' fixes, so it is the cheapest
         // and most likely to be warm. NETWORK next. GPS last — its cached fix
@@ -172,17 +222,38 @@ class SmsReceiver : BroadcastReceiver() {
         )
         val now = System.currentTimeMillis()
         var best: Location? = null
+        // Recorded so a "no location" outcome says WHY — stale, too coarse, or
+        // simply nothing cached. Without this the feature is untestable: a
+        // transaction with no position looks identical in every failure case.
+        val rejects = StringBuilder()
         for (p in providers) {
             val loc = try {
-                if (!lm.isProviderEnabled(p)) continue
+                if (!lm.isProviderEnabled(p)) {
+                    rejects.append("$p:disabled ")
+                    continue
+                }
                 lm.getLastKnownLocation(p)
             } catch (e: SecurityException) {
+                rejects.append("$p:denied ")
+                null
+            } ?: run {
+                rejects.append("$p:empty ")
                 null
             } ?: continue
 
-            if (now - loc.time > MAX_LOCATION_AGE_MS) continue
-            if (loc.accuracy > MAX_ACCURACY_M) continue
+            val ageS = (now - loc.time) / 1000
+            if (now - loc.time > MAX_LOCATION_AGE_MS) {
+                rejects.append("$p:stale(${ageS}s) ")
+                continue
+            }
+            if (loc.accuracy > MAX_ACCURACY_M) {
+                rejects.append("$p:coarse(${loc.accuracy}m) ")
+                continue
+            }
             if (best == null || loc.time > best.time) best = loc
+        }
+        if (best == null) {
+            Log.i(TAG, "location: nothing usable — $rejects")
         }
         return best
     }

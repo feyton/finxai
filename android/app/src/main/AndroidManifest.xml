@@ -21,6 +21,15 @@
        <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
        <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
        <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+       <!-- SmsReceiver falls back to a foreground service when a background
+            startService() is refused (Android 8+). dataSync is the correct type:
+            the task's whole job is writing a transaction to the local DB and
+            letting PowerSync upload it. -->
+       <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+       <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+       <!-- Needed to post the MIN-importance notification that a foreground
+            service is required to show on Android 13+. -->
+       <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
       android:name=".MainApplication"
@@ -56,7 +65,8 @@
 
       <service
         android:name=".sms.SmsHeadlessTaskService"
-        android:exported="false" />
+        android:exported="false"
+        android:foregroundServiceType="dataSync" />
 
       <!-- Home-screen balance widget (react-native-android-widget) -->
       <service

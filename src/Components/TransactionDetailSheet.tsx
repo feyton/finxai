@@ -19,7 +19,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {Linking, Platform, Pressable, StyleSheet, Text, View} from 'react-native';
 import {CATS, FONTS, R, T, fmtAmount, resolveCat} from '../theme';
 import {syncAccountBalance} from '../tools/balance';
 import {Icon} from './ui';
@@ -263,6 +263,41 @@ function TransactionDetailSheet(
                     <InfoRow label="Note" value={tx.note} />
                   </>
                 ) : null}
+                {/* Where the money went out. Captured only for money-out
+                    captured live (see tools/smsIngest locationForParsed), so most
+                    rows will not have it — and until now there was nowhere in the
+                    app it could be seen even when present, which made the whole
+                    feature untestable from the user's side. */}
+                {tx.lat != null && tx.lon != null && (
+                  <>
+                    <View style={styles.infoDivider} />
+                    <Pressable
+                      onPress={() => {
+                        const q = `${tx.lat},${tx.lon}`;
+                        Linking.openURL(
+                          Platform.OS === 'android'
+                            ? `geo:${q}?q=${q}(${encodeURIComponent(
+                                tx.merchant || tx.payee || 'Transaction',
+                              )})`
+                            : `https://maps.google.com/?q=${q}`,
+                        ).catch(() =>
+                          Linking.openURL(`https://maps.google.com/?q=${q}`).catch(
+                            () => {},
+                          ),
+                        );
+                      }}
+                      style={({pressed}) => [styles.infoRow, {opacity: pressed ? 0.6 : 1}]}>
+                      <Text style={styles.infoLabel}>Where</Text>
+                      <View style={styles.locVal}>
+                        <Icon name="MapPin" size={12} color={T.accent} strokeWidth={2.2} />
+                        <Text style={styles.locText} numberOfLines={1}>
+                          {Number(tx.lat).toFixed(4)}, {Number(tx.lon).toFixed(4)}
+                          {tx.accuracy_m ? ` · ±${Math.round(tx.accuracy_m)}m` : ''}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  </>
+                )}
               </View>
 
               {tx.sms ? (
@@ -366,6 +401,15 @@ const styles = StyleSheet.create({
   infoLabel: {fontFamily: FONTS.regular, fontSize: 12.5, color: T.text2},
   infoValue: {fontFamily: FONTS.medium, fontSize: 13, color: T.text, flexShrink: 1, textAlign: 'right'},
   infoDivider: {height: 1, backgroundColor: T.border},
+  locVal: {flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1},
+  locText: {
+    // Monospaced so the two coordinates line up and read as data rather than
+    // prose; accent-coloured because the row is tappable and opens a map.
+    fontFamily: 'monospace',
+    fontSize: 12,
+    color: T.accent,
+    flexShrink: 1,
+  },
   smsText: {
     fontFamily: 'monospace',
     fontSize: 11.5,
