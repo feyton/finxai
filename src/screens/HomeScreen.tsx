@@ -77,6 +77,12 @@ export default function HomeScreen({navigation}: any) {
   const db = usePowerSync();
   const [refreshing, setRefreshing] = useState(false);
   const [syncGap, setSyncGap] = useState({rows: 0, balancesDiffer: false});
+  // Tracked separately from the row/balance gap because a jammed queue is its own
+  // fault condition. Gating the banner on a gap alone made the recovery
+  // UNREACHABLE: the missing rows had already been pushed by hand, so the gap read
+  // zero and the banner hid itself while 11,245 operations sat stuck, blocking sync
+  // in both directions.
+  const [pendingOps, setPendingOps] = useState(0);
   const [repairing, setRepairing] = useState(false);
 
   // Check what the server is missing. Counts and balances only — no row data
@@ -95,6 +101,7 @@ export default function HomeScreen({navigation}: any) {
     // fields are the numbers that actually distinguish the cases.
     try {
       const h = await syncHealth();
+      setPendingOps(h.pending);
       console.log(
         `[sync] connected=${h.connected} pending=${h.pending} ` +
           `lastSynced=${h.lastSyncedAt ? h.lastSyncedAt.toISOString() : 'never'} ` +
@@ -105,13 +112,51 @@ export default function HomeScreen({navigation}: any) {
     }
   }, [userId]);
 
-  const outOfSync = syncGap.rows > 0 || syncGap.balancesDiffer;
+  // A few queued operations is normal — that is just a write on its way out. A
+  // backlog this size never drains on its own and is actively blocking downloads.
+  const queueStuck = pendingOps > 200;
+  const outOfSync = syncGap.rows > 0 || syncGap.balancesDiffer || queueStuck;
 
   useEffect(() => {
     checkSyncGap();
-  }, [checkSyncGap, userId]);
+  }, [checkSyncGap, userId, queueStuck, pendingOps]);
 
   const runRepair = useCallback(async () => {
+    // A stuck queue goes straight to the heavier recovery. Running the ordinary
+    // push first would be wasted work: its uploads land, but the queue stays jammed
+    // and sync stays dead in both directions, which is exactly the loop of tapping
+    // with no visible effect that this is meant to end.
+    if (queueStuck) {
+      appAlert(
+        'Repair sync',
+        `${pendingOps.toLocaleString()} operations are queued and not sending. Until that clears, nothing uploads AND nothing from the web can reach this phone.\n\nRepair uploads everything on this phone to the server first, then clears the stuck queue. Your records go up before anything is cleared, so nothing is lost.`,
+        [
+          {text: 'Not now', style: 'cancel'},
+          {
+            text: 'Repair now',
+            onPress: async () => {
+              setRepairing(true);
+              try {
+                const r = await forceResync(userId ?? '');
+                await checkSyncGap();
+                appAlert(
+                  'Repair finished',
+                  `Pushed ${r.pushed} records. Queued operations now: ${r.queueAfter.toLocaleString()}.` +
+                    (r.cleared ? '' : '\n\nThe queue could not be cleared — send me the logs.'),
+                );
+              } catch (e) {
+                console.warn('[Home] force resync failed:', e);
+                appAlert('Repair failed', 'Check your connection and try again.');
+              } finally {
+                setRepairing(false);
+              }
+            },
+          },
+        ],
+      );
+      return;
+    }
+
     setRepairing(true);
     try {
       const res = await repairSync(userId ?? '');
@@ -119,41 +164,6 @@ export default function HomeScreen({navigation}: any) {
       // No artificial wait: the repair writes to Supabase directly, so by the time
       // it returns the server already has the rows and the re-count is accurate.
       await checkSyncGap();
-
-      // If the queue is deep, the ordinary upload path is wedged: PowerSync will
-      // not apply a downloaded checkpoint while local writes are outstanding, so
-      // a stuck queue stops sync in BOTH directions. Offer the heavier recovery
-      // rather than leaving the banner to be tapped forever with no effect.
-      const h = await syncHealth();
-      if (h.pending > 200) {
-        appAlert(
-          'Sync is stuck',
-          `${h.pending.toLocaleString()} pending operations are blocking sync in both directions, so changes made on the web can’t reach this phone either.\n\nRepair now uploads everything on this phone to the server, then clears the stuck queue. Your records are pushed first, so nothing is lost.`,
-          [
-            {text: 'Not now', style: 'cancel'},
-            {
-              text: 'Repair sync',
-              onPress: async () => {
-                setRepairing(true);
-                try {
-                  const r = await forceResync(userId ?? '');
-                  await checkSyncGap();
-                  appAlert(
-                    'Repair finished',
-                    `Pushed ${r.pushed} records. Pending operations: ${r.queueAfter.toLocaleString()}.`,
-                  );
-                } catch (e) {
-                  console.warn('[Home] force resync failed:', e);
-                  appAlert('Repair failed', 'Check your connection and try again.');
-                } finally {
-                  setRepairing(false);
-                }
-              },
-            },
-          ],
-        );
-        return;
-      }
 
       if (res.touched === 0) {
         // Say so rather than leaving the banner sitting there looking ignored.
@@ -168,7 +178,7 @@ export default function HomeScreen({navigation}: any) {
     } finally {
       setRepairing(false);
     }
-  }, [checkSyncGap, userId]);
+  }, [checkSyncGap, userId, queueStuck, pendingOps]);
 
   // Pull-to-refresh: force a sync reconnect AND recompute every account's
   // balance. Both are needed for different reasons — reconnect() makes PowerSync
@@ -332,13 +342,17 @@ export default function HomeScreen({navigation}: any) {
               </View>
               <View style={{flex: 1}}>
                 <Text style={styles.syncTitle}>
-                  {syncGap.rows > 0
+                  {queueStuck
+                    ? 'Sync is stuck'
+                    : syncGap.rows > 0
                     ? `${syncGap.rows} record${syncGap.rows === 1 ? '' : 's'} not backed up`
                     : 'Balances not backed up'}
                 </Text>
                 <Text style={styles.syncSub}>
                   {repairing
-                    ? 'Uploading…'
+                    ? 'Repairing…'
+                    : queueStuck
+                    ? `${pendingOps.toLocaleString()} operations are queued and not sending, which also stops web changes reaching this phone.`
                     : syncGap.rows > 0
                     ? 'On this phone but not on the server yet. Other devices and the web won’t show them.'
                     : 'Your balances here are newer than the server’s, so the web shows different totals.'}
@@ -352,7 +366,7 @@ export default function HomeScreen({navigation}: any) {
                   {opacity: repairing ? 0.6 : pressed ? 0.85 : 1},
                 ]}>
                 <Text style={styles.syncBtnText}>
-                  {repairing ? 'Working' : 'Upload now'}
+                  {repairing ? 'Working' : queueStuck ? 'Repair' : 'Upload now'}
                 </Text>
               </Pressable>
             </View>
