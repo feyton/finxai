@@ -119,6 +119,13 @@ function ConfirmTransactionsScreen() {
         }
       } else {
         await db.execute(
+          // UNREACHABLE as of 2026-07-30: registered in App.tsx but nothing navigates
+          // to 'Confirm' — SMSReviewScreen superseded it. Left in place rather than
+          // deleted mid-task, but note it is missing several columns the live path
+          // writes: lat/lon/accuracy_m/location_at, parse_source, merchant, sender,
+          // confidence, txn_ref, balance_after. If this screen is ever wired up again
+          // it will silently drop a captured location — the exact bug just fixed in
+          // SMSReviewScreen. Prefer deleting it to reviving it.
           'INSERT INTO transactions (id, amount, account_id, category, subcategory, date_time, sms, confirmed, currency, payee, transaction_type, note, fees, budget_id, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             generateUUID(),

@@ -547,8 +547,8 @@ export default function SMSReviewScreen({navigation}: any) {
             payee, merchant, transaction_type, fees, currency,
             confirmed, source, confidence,
             transfer_account_id, transfer_direction, balance_after, txn_ref,
-            parse_source, owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?)`,
+            parse_source, lat, lon, accuracy_m, location_at, owner_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           // The auto_record id IS the deterministic transaction id (see
           // tools/txnId.ts) — reuse it so confirming the same record on two
@@ -571,6 +571,19 @@ export default function SMSReviewScreen({navigation}: any) {
           bal,
           record.txn_ref ?? null,
           record.parse_source ?? null,
+          // Carry the location through.
+          //
+          // persistParsedSms already writes lat/lon onto the auto_records row when a
+          // money-out SMS is captured live, but confirming that row built a fresh
+          // transactions INSERT that simply omitted these four columns — so the
+          // position was captured, stored, and then thrown away at the exact moment
+          // the record became real. The visible effect was that only high-confidence
+          // transactions (which skip auto_records entirely) ever kept a location,
+          // making it look as though low-confidence parses never got one.
+          record.lat ?? null,
+          record.lon ?? null,
+          record.accuracy_m ?? null,
+          record.location_at ?? null,
           userId,
           now,
         ],
@@ -693,8 +706,8 @@ export default function SMSReviewScreen({navigation}: any) {
             payee, merchant, transaction_type, fees, currency,
             confirmed, source, confidence,
             transfer_account_id, transfer_direction, balance_after, txn_ref,
-            parse_source, note, owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            parse_source, note, lat, lon, accuracy_m, location_at, owner_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           // The auto_record id IS the deterministic transaction id (see
           // tools/txnId.ts) — reuse it so confirming the same record on two
@@ -720,6 +733,14 @@ export default function SMSReviewScreen({navigation}: any) {
           // NULL rather than '' when blank, so "has a note" is a simple IS NOT
           // NULL check everywhere downstream.
           fix.note || null,
+          // Same carry-through as handleConfirm — fixing a record must not cost it
+          // its location either. Kept even when the user changes the type: the fix
+          // sheet cannot change WHERE the payment happened, only how it is filed, and
+          // the money-out check that gated capture already ran at ingest.
+          record.lat ?? null,
+          record.lon ?? null,
+          record.accuracy_m ?? null,
+          record.location_at ?? null,
           userId,
           now,
         ],
