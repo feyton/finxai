@@ -15,7 +15,16 @@
  */
 import {useQuery} from '@powersync/react-native';
 import React, {useMemo, useState} from 'react';
-import {Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {
+  Linking,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {format} from 'date-fns';
 
@@ -38,6 +47,40 @@ const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 
 // Kigali, used only when there is nothing to fit the camera to.
 const FALLBACK_CENTER: [number, number] = [30.0619, -1.9441];
+
+// Layer paint hoisted to module scope. These were inline object literals, which are
+// a new object on every render — and every new object is a prop change pushed across
+// the bridge to a native layer, forcing MapLibre to re-evaluate the style. They never
+// depend on state, so they should be created once for the life of the module.
+const HEAT_PAINT = {
+  'heatmap-weight': ['get', 'weight'],
+  'heatmap-intensity': 1,
+  'heatmap-radius': 42,
+  'heatmap-opacity': 0.75,
+  'heatmap-color': [
+    'interpolate',
+    ['linear'],
+    ['heatmap-density'],
+    0,
+    'rgba(34,197,94,0)',
+    0.3,
+    'rgba(34,197,94,0.45)',
+    0.6,
+    'rgba(251,191,36,0.7)',
+    1,
+    'rgba(220,38,38,0.85)',
+  ],
+} as const;
+
+const DOT_PAINT = {
+  // Scaled by spend share, floored so the smallest place is still a visible target
+  // rather than a speck.
+  'circle-radius': ['interpolate', ['linear'], ['get', 'weight'], 0, 5, 1, 11],
+  'circle-color': '#22C55E',
+  'circle-opacity': 0.9,
+  'circle-stroke-width': 2,
+  'circle-stroke-color': '#0A0D10',
+} as const;
 
 // ~4 decimal places is roughly 11 m at this latitude, which is tighter than the
 // accuracy of any cached fix we accept (up to 3 km, typically 100 m). Rounding to
@@ -63,6 +106,7 @@ export default function SpendingPlaces({navigation}: any) {
   const {userId} = useCurrentUser();
   const [monthOffset, setMonthOffset] = useState(0);
   const [open, setOpen] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
 
   const {start, end, label, isCurrent} = useMemo(() => {
     const now = new Date();
@@ -176,6 +220,36 @@ export default function SpendingPlaces({navigation}: any) {
     };
   }, [places]);
 
+  // One definition of the map, rendered inline and again full screen. Built with
+  // useMemo so switching to fullscreen does not rebuild the layer tree — and so the
+  // GeoJSON and camera props stay referentially stable across unrelated re-renders
+  // (opening a place, changing month), which otherwise push new props to the native
+  // layers on every state change.
+  const mapBody = useMemo(
+    () => (
+      <MapLibreMap
+        style={styles.map}
+        mapStyle={MAP_STYLE}
+        logo={false}
+        compass={false}
+        scaleBar={false}
+        // Attribution stays on: OpenFreeMap serves OpenStreetMap data and the
+        // licence requires crediting it.
+        attribution>
+        <Camera {...camera} duration={0} />
+        <GeoJSONSource id="places" data={geojson}>
+          {/* Heat first, circles above it. The heatmap is what answers "where is
+              the money concentrated" once there are dozens of points; the circles
+              keep it legible at one or two, where a heat blob alone reads as a
+              smudge. */}
+          <Layer id="places-heat" type="heatmap" paint={HEAT_PAINT as any} />
+          <Layer id="places-dots" type="circle" paint={DOT_PAINT as any} />
+        </GeoJSONSource>
+      </MapLibreMap>
+    ),
+    [camera, geojson],
+  );
+
   const openInMaps = (p: Place) => {
     const q = `${p.lat},${p.lon}`;
     const nameHint = p.txns[0]?.merchant || 'Spending location';
@@ -224,59 +298,14 @@ export default function SpendingPlaces({navigation}: any) {
         contentContainerStyle={styles.scroll}>
         {places.length > 0 && (
           <View style={styles.mapWrap}>
-            <MapLibreMap
-              style={styles.map}
-              mapStyle={MAP_STYLE}
-              logo={false}
-              compass={false}
-              scaleBar={false}
-              // Attribution stays on: OpenFreeMap serves OpenStreetMap data and the
-              // licence requires crediting it.
-              attribution>
-              <Camera {...camera} duration={0} />
-              <GeoJSONSource id="places" data={geojson}>
-                {/* Heat first, circles above it. The heatmap is what answers "where
-                    is the money concentrated" once there are dozens of points; the
-                    circles keep it legible at one or two, where a heat blob alone
-                    reads as a smudge. */}
-                <Layer
-                  id="places-heat"
-                  type="heatmap"
-                  paint={{
-                    'heatmap-weight': ['get', 'weight'],
-                    'heatmap-intensity': 1,
-                    'heatmap-radius': 42,
-                    'heatmap-opacity': 0.75,
-                    'heatmap-color': [
-                      'interpolate',
-                      ['linear'],
-                      ['heatmap-density'],
-                      0,
-                      'rgba(34,197,94,0)',
-                      0.3,
-                      'rgba(34,197,94,0.45)',
-                      0.6,
-                      'rgba(251,191,36,0.7)',
-                      1,
-                      'rgba(220,38,38,0.85)',
-                    ],
-                  }}
-                />
-                <Layer
-                  id="places-dots"
-                  type="circle"
-                  paint={{
-                    // Scaled by spend share, floored so the smallest place is still
-                    // tappable-looking rather than a speck.
-                    'circle-radius': ['interpolate', ['linear'], ['get', 'weight'], 0, 5, 1, 11],
-                    'circle-color': '#22C55E',
-                    'circle-opacity': 0.9,
-                    'circle-stroke-width': 2,
-                    'circle-stroke-color': '#0A0D10',
-                  }}
-                />
-              </GeoJSONSource>
-            </MapLibreMap>
+            {mapBody}
+            <Pressable
+              onPress={() => setFullscreen(true)}
+              hitSlop={8}
+              style={({pressed}) => [styles.mapBtnFloat, {opacity: pressed ? 0.7 : 1}]}
+              accessibilityLabel="View map full screen">
+              <Icon name="Maximize2" size={15} color={T.text} strokeWidth={2.2} />
+            </Pressable>
           </View>
         )}
 
@@ -374,6 +403,34 @@ export default function SpendingPlaces({navigation}: any) {
           })}
         </View>
       </ScrollView>
+
+      {/* Fullscreen map. `mapBody` is the same element tree as the inline map, so
+          expanding does not tear down and rebuild the layers — it just gets a bigger
+          container. onRequestClose wires up the Android back button, which is what
+          people reach for first out of a fullscreen view. */}
+      <Modal
+        visible={fullscreen}
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setFullscreen(false)}>
+        <View style={styles.fsRoot}>
+          {mapBody}
+          <SafeAreaView style={styles.fsBar} edges={['top']} pointerEvents="box-none">
+            <Pressable
+              onPress={() => setFullscreen(false)}
+              hitSlop={10}
+              style={({pressed}) => [styles.fsClose, {opacity: pressed ? 0.7 : 1}]}
+              accessibilityLabel="Close full screen map">
+              <Icon name="Minimize2" size={16} color={T.text} strokeWidth={2.2} />
+            </Pressable>
+            <View style={styles.fsLegend}>
+              <Text style={styles.fsLegendText}>
+                {places.length} place{places.length === 1 ? '' : 's'} · {label}
+              </Text>
+            </View>
+          </SafeAreaView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -425,6 +482,51 @@ const styles = StyleSheet.create({
     backgroundColor: T.surface2,
   },
   map: {flex: 1},
+  // Floating control over the inline map.
+  mapBtnFloat: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 34,
+    height: 34,
+    borderRadius: R.small,
+    backgroundColor: T.surface + 'E6',
+    borderWidth: 1,
+    borderColor: T.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fsRoot: {flex: 1, backgroundColor: T.bg},
+  fsBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+  },
+  fsClose: {
+    width: 38,
+    height: 38,
+    borderRadius: R.iconBtn,
+    backgroundColor: T.surface + 'E6',
+    borderWidth: 1,
+    borderColor: T.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fsLegend: {
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: R.pill,
+    backgroundColor: T.surface + 'E6',
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  fsLegendText: {fontFamily: FONTS.medium, fontSize: 11.5, color: T.text2},
   totalCard: {
     padding: 14,
     marginBottom: 12,
