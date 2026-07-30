@@ -22,7 +22,7 @@ import {downloadAndInstall} from '../tools/updateInstaller';
 import {format} from 'date-fns';
 import {reconnect} from '../tools/database';
 import {syncAccountBalance} from '../tools/balance';
-import {pendingUploadGap, repairSync, syncHealth} from '../tools/syncRepair';
+import {forceResync, pendingUploadGap, repairSync, syncHealth} from '../tools/syncRepair';
 
 function monthStart() {
   const d = new Date();
@@ -119,6 +119,42 @@ export default function HomeScreen({navigation}: any) {
       // No artificial wait: the repair writes to Supabase directly, so by the time
       // it returns the server already has the rows and the re-count is accurate.
       await checkSyncGap();
+
+      // If the queue is deep, the ordinary upload path is wedged: PowerSync will
+      // not apply a downloaded checkpoint while local writes are outstanding, so
+      // a stuck queue stops sync in BOTH directions. Offer the heavier recovery
+      // rather than leaving the banner to be tapped forever with no effect.
+      const h = await syncHealth();
+      if (h.pending > 200) {
+        appAlert(
+          'Sync is stuck',
+          `${h.pending.toLocaleString()} pending operations are blocking sync in both directions, so changes made on the web can’t reach this phone either.\n\nRepair now uploads everything on this phone to the server, then clears the stuck queue. Your records are pushed first, so nothing is lost.`,
+          [
+            {text: 'Not now', style: 'cancel'},
+            {
+              text: 'Repair sync',
+              onPress: async () => {
+                setRepairing(true);
+                try {
+                  const r = await forceResync(userId ?? '');
+                  await checkSyncGap();
+                  appAlert(
+                    'Repair finished',
+                    `Pushed ${r.pushed} records. Pending operations: ${r.queueAfter.toLocaleString()}.`,
+                  );
+                } catch (e) {
+                  console.warn('[Home] force resync failed:', e);
+                  appAlert('Repair failed', 'Check your connection and try again.');
+                } finally {
+                  setRepairing(false);
+                }
+              },
+            },
+          ],
+        );
+        return;
+      }
+
       if (res.touched === 0) {
         // Say so rather than leaving the banner sitting there looking ignored.
         appAlert(
