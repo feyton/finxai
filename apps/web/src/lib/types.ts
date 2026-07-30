@@ -40,6 +40,17 @@ export interface Transaction {
   transfer_account_id: string | null; // counterparty account for transfers
   transfer_direction: string | null; // 'in' | 'out' (transfers only)
   balance_after: number | null; // bank-reported balance after this txn (audit)
+  // Which path classified this: 'ai' when the server-side model answered, 'regex'
+  // when it fell back to on-device pattern matching. Null on rows written before
+  // migration v8 added the column.
+  parse_source: string | null;
+  // Where the money went out. Only set for money-out captured live from a position
+  // the phone already had — see locationForParsed in the mobile app. Null everywhere
+  // else, which is most rows.
+  lat: number | null;
+  lon: number | null;
+  accuracy_m: number | null;
+  location_at: string | null;
   owner_id: string;
   created_at: string | null;
 }

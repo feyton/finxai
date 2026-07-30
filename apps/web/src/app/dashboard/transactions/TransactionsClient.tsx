@@ -109,6 +109,17 @@ export function TransactionsClient({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [customSubcats, setCustomSubcats] = useState<Subcategory[]>([]);
+  // The table used to render `filtered.slice(0, 300)` with nothing on screen to say
+  // so. Past 300 matches the rest were simply absent — no count, no control — which
+  // silently misrepresents a filter as showing everything it found. The cap stays (a
+  // few thousand rows of DOM is genuinely slow) but it is now stated and liftable.
+  const PAGE = 300;
+  const [limit, setLimit] = useState(PAGE);
+  // Back to the first page whenever the result set changes, so "Show all" on a narrow
+  // filter does not silently carry a huge limit into a broad one.
+  useEffect(() => {
+    setLimit(PAGE);
+  }, [q, acct, cat, source, type, onlyReview]);
 
   useEffect(() => {
     supabase
@@ -342,7 +353,7 @@ export function TransactionsClient({
               </tr>
             </thead>
             <tbody>
-              {filtered.slice(0, 300).map(t => {
+              {filtered.slice(0, limit).map(t => {
                 const review = needsReview(t);
                 const parts = splitsByTx.get(t.id) ?? [];
                 return (
@@ -377,6 +388,23 @@ export function TransactionsClient({
                           <div className="flex items-center gap-1.5 text-[13px] font-medium">
                             {t.merchant || t.payee || '—'}
                             {t.source === 'sms' && <Icon name="sparkles" size={11} color="var(--accent-700)" />}
+                            {/* Which path classified this. An SMS row that never
+                                reached the model is the single most useful thing to
+                                see while reviewing — a dark classifier looks exactly
+                                like a merchant-parsing problem otherwise, which is how
+                                it went unnoticed for weeks. Shown only for 'regex',
+                                since 'ai' is the expected case and a badge on every
+                                row would be noise. */}
+                            {t.source === 'sms' && t.parse_source === 'regex' && (
+                              <Pill color="var(--warn)" bg="rgba(217,119,6,0.14)">
+                                offline
+                              </Pill>
+                            )}
+                            {/* A location means this was captured live as money out —
+                                also the only rows the map can show. */}
+                            {t.lat != null && (
+                              <Icon name="pin" size={11} color="var(--accent-700)" />
+                            )}
                             {parts.length > 0 && (
                               <Pill color="var(--info)" bg="rgba(37,99,235,0.12)">
                                 split ×{parts.length}
@@ -417,6 +445,28 @@ export function TransactionsClient({
               })}
             </tbody>
           </table>
+
+          {/* Row count, always shown. Says what is on screen versus what the filter
+              actually matched, so a capped table can never read as a complete one. */}
+          {filtered.length > 0 && (
+            <div className="flex flex-wrap items-center justify-center gap-3 border-t border-line px-4 py-3">
+              <span className="tabnum text-[12px] text-ink2">
+                Showing {Math.min(limit, filtered.length).toLocaleString()} of{' '}
+                {filtered.length.toLocaleString()}
+                {filtered.length !== tx.length && ` (filtered from ${tx.length.toLocaleString()})`}
+              </span>
+              {limit < filtered.length && (
+                <>
+                  <button className="btn" onClick={() => setLimit(l => l + PAGE)}>
+                    Show {Math.min(PAGE, filtered.length - limit)} more
+                  </button>
+                  <button className="btn" onClick={() => setLimit(filtered.length)}>
+                    Show all {filtered.length.toLocaleString()}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
         {filtered.length === 0 && <WEmpty title="No transactions match" sub="Try adjusting filters" />}
       </Card>
