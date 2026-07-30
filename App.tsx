@@ -119,17 +119,35 @@ function App(): React.JSX.Element {
     supabase.auth.getSession().then(({data: {session: s}}) => {
       setSession(s);
       setLoading(false);
-      if (s) {
+      // Guarded for the same reason as the listener below: onAuthStateChange also
+      // fires INITIAL_SESSION around now, so without this the app connects twice
+      // before it has finished starting.
+      if (s && !db.connected) {
         db.connect(connector);
       }
     });
 
     const {
       data: {subscription},
-    } = supabase.auth.onAuthStateChange((_event, s) => {
+    } = supabase.auth.onAuthStateChange((event, s) => {
       setSession(s);
       if (s) {
-        db.connect(connector);
+        // Only connect when NOT already connected.
+        //
+        // This used to call db.connect(connector) on every auth event. Supabase
+        // fires TOKEN_REFRESHED roughly hourly, so a long-lived session
+        // re-connected an already-connected client again and again — on top of
+        // the connect in getSession() above. That left PowerSync reporting
+        // `connected: true` (downloads fine) while the CRUD upload loop was dead,
+        // so local writes were recorded and never uploaded, silently, for hours.
+        // The tell in logcat was "Trying to close for the second time".
+        //
+        // PowerSync does NOT need a reconnect to pick up a refreshed token: it
+        // calls fetchCredentials itself when the current one expires.
+        if (!db.connected) {
+          console.log(`[PowerSync] connecting (auth event: ${event})`);
+          db.connect(connector);
+        }
       } else {
         // Plain disconnect — NOT disconnectAndClear. This fires on any
         // session loss, including a transient one Supabase recovers from

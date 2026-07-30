@@ -22,6 +22,7 @@ import {downloadAndInstall} from '../tools/updateInstaller';
 import {format} from 'date-fns';
 import {reconnect} from '../tools/database';
 import {syncAccountBalance} from '../tools/balance';
+import {pendingUploadGap, repairSync} from '../tools/syncRepair';
 
 function monthStart() {
   const d = new Date();
@@ -75,6 +76,37 @@ export default function HomeScreen({navigation}: any) {
   const {userId, firstName, picture} = useCurrentUser();
   const db = usePowerSync();
   const [refreshing, setRefreshing] = useState(false);
+  const [syncGap, setSyncGap] = useState(0);
+  const [repairing, setRepairing] = useState(false);
+
+  // Check for rows the server hasn't got. Cheap (two COUNTs, no row data) and
+  // silent on failure, so being offline never looks like a data problem.
+  const checkSyncGap = useCallback(async () => {
+    if (!userId) {
+      return;
+    }
+    setSyncGap(await pendingUploadGap(userId));
+  }, [userId]);
+
+  useEffect(() => {
+    checkSyncGap();
+  }, [checkSyncGap]);
+
+  const runRepair = useCallback(async () => {
+    setRepairing(true);
+    try {
+      const res = await repairSync();
+      console.log('[Home] sync repair re-queued', res.touched, res.perTable);
+      // Give the upload a moment before re-measuring, otherwise the banner
+      // reports the gap it had a second ago and looks like the fix did nothing.
+      await new Promise(r => setTimeout(r, 2500));
+      await checkSyncGap();
+    } catch (e) {
+      console.warn('[Home] sync repair failed:', e);
+    } finally {
+      setRepairing(false);
+    }
+  }, [checkSyncGap]);
 
   // Pull-to-refresh: force a sync reconnect AND recompute every account's
   // balance. Both are needed for different reasons — reconnect() makes PowerSync
@@ -93,6 +125,7 @@ export default function HomeScreen({navigation}: any) {
       for (const a of (rows?._array ?? []) as {id: string}[]) {
         await syncAccountBalance(db, a.id);
       }
+      await checkSyncGap();
     } catch (e) {
       // Offline is the common case here and not worth interrupting the user for
       // — the local data on screen is still valid.
@@ -100,7 +133,7 @@ export default function HomeScreen({navigation}: any) {
     } finally {
       setRefreshing(false);
     }
-  }, [db, userId]);
+  }, [db, userId, checkSyncGap]);
   const ms = useMemo(() => monthStart(), []);
 
   const {data: accounts} = useQuery(
@@ -223,6 +256,42 @@ export default function HomeScreen({navigation}: any) {
         </View>
 
         <View style={styles.content}>
+          {/* Sync-gap banner.
+              Only appears when the server is genuinely missing local rows. That
+              case used to be completely invisible: PowerSync reports connected
+              with an empty queue and no error, because as far as the client is
+              concerned the work was done — so the only way to notice is to ask the
+              server what it actually has. Tapping repairs it by re-queueing the
+              rows (see tools/syncRepair). */}
+          {syncGap > 0 && (
+            <View style={styles.syncBanner}>
+              <View style={styles.syncIcon}>
+                <Icon name="RefreshCcw" size={17} color={T.warn} strokeWidth={2.4} />
+              </View>
+              <View style={{flex: 1}}>
+                <Text style={styles.syncTitle}>
+                  {syncGap} record{syncGap === 1 ? '' : 's'} not backed up
+                </Text>
+                <Text style={styles.syncSub}>
+                  {repairing
+                    ? 'Uploading…'
+                    : 'On this phone but not on the server yet. Other devices and the web won’t show them.'}
+                </Text>
+              </View>
+              <Pressable
+                onPress={runRepair}
+                disabled={repairing}
+                style={({pressed}) => [
+                  styles.syncBtn,
+                  {opacity: repairing ? 0.6 : pressed ? 0.85 : 1},
+                ]}>
+                <Text style={styles.syncBtnText}>
+                  {repairing ? 'Working' : 'Upload now'}
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
           {/* Update banner */}
           {update && !updateDismissed && (
             <View style={styles.updateBanner}>
@@ -492,6 +561,36 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(34,197,94,0.3)',
     marginBottom: 12,
   },
+  // Amber, not green: this is something to act on, but nothing is lost — the
+  // records are safe on the phone, just not backed up yet.
+  syncBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    padding: 12,
+    borderRadius: R.card,
+    backgroundColor: 'rgba(217,119,6,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(217,119,6,0.32)',
+    marginBottom: 12,
+  },
+  syncIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: R.iconBtn,
+    backgroundColor: 'rgba(217,119,6,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  syncTitle: {fontFamily: FONTS.semibold, fontSize: 13, color: T.text, lineHeight: 18},
+  syncSub: {fontFamily: FONTS.regular, fontSize: 11.5, color: T.text2, lineHeight: 16},
+  syncBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: R.small,
+    backgroundColor: T.warn,
+  },
+  syncBtnText: {fontFamily: FONTS.semibold, fontSize: 12, color: '#3A2400'},
   updateIcon: {
     width: 34,
     height: 34,
