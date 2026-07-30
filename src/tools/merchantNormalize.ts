@@ -1,10 +1,10 @@
 // Pure merchant-name normalization. No React Native, no AsyncStorage, no DB.
 //
 // Deliberately separate from ./merchantMemory (which owns persistence and does
-// import AsyncStorage): claudeParser.ts needs these helpers, and it is unit
+// import AsyncStorage): smsParser.ts needs these helpers, and it is unit
 // tested in plain Jest with no RN mocking — the same reason aiProxyClient.ts
 // takes an auth token as a parameter instead of importing ./supabase.
-import type {MerchantRule} from './geminiParser';
+import type {MerchantRule} from './smsTypes';
 
 // Patterns that must never become a learning key. 'unknown' is the dangerous
 // one: regexClassify defaults merchant to 'Unknown', so a single fix on an

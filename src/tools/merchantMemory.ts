@@ -1,17 +1,18 @@
 /**
  * Merchant memory — learns from user corrections and confirmations.
  *
- * Pattern: lowercase, space-collapsed merchant name.
+ * Pattern: the normalizeMerchant() key — stable across messages, so a rule
+ * can actually match more than once.
  * Corrections (user fixes category) count more than confirmations.
- * Top rules are passed to Gemini as context on each parse.
+ * Top rules are passed to the model as context on each parse.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {MerchantRule} from './geminiParser';
+import {MerchantRule} from './smsTypes';
 import {isUsablePattern, normalizeMerchant} from './merchantNormalize';
 
 // Normalization lives in ./merchantNormalize (pure, no RN/AsyncStorage) so
-// claudeParser.ts can use it without dragging AsyncStorage into its Jest tests.
+// smsParser.ts can use it without dragging AsyncStorage into its Jest tests.
 // Re-exported here so existing importers of this module keep working.
 export {
   isUsablePattern,

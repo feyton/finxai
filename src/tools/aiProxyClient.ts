@@ -5,9 +5,9 @@
 //
 // Deliberately takes the auth token as a plain parameter instead of calling
 // supabase.auth.getSession() itself — this file is imported by
-// claudeParser.ts, which is unit-tested in plain Jest with no RN/AsyncStorage
+// smsParser.ts, which is unit-tested in plain Jest with no RN/AsyncStorage
 // mocking. Importing ./supabase here would pull that whole chain into every
-// claudeParser.ts test. Callers (SMSRetriever.tsx, AIChatScreen.tsx,
+// smsParser.ts test. Callers (SMSRetriever.tsx, AIChatScreen.tsx,
 // AISettingsScreen.tsx) already deal with Supabase directly and fetch the
 // token themselves, same as sendInviteEmail in ./invites.ts.
 
@@ -30,8 +30,8 @@ function authHeaders(authToken: string): Record<string, string> {
   };
 }
 
-// SMS classification (merchant/category/channel/is_transfer) — the fuzzy
-// part of the parsing pipeline in src/tools/claudeParser.ts. Deterministic
+// SMS classification (merchant/category/subcategory/channel) — the fuzzy
+// part of the parsing pipeline in src/tools/smsParser.ts. Deterministic
 // facts (amount, fee, balance, direction, ...) are still extracted on-device
 // via regex; only this classification step needs the model.
 // A hung request used to block SMS processing indefinitely — `fetch` has no
@@ -50,6 +50,7 @@ async function postClassify(
   system: string,
   user: string,
   authToken: string,
+  schema?: Record<string, unknown>,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CLASSIFY_TIMEOUT_MS);
@@ -57,7 +58,9 @@ async function postClassify(
     const res = await fetch(`${API_BASE}/api/ai/classify-sms`, {
       method: 'POST',
       headers: authHeaders(authToken),
-      body: JSON.stringify({system, user}),
+      // `schema` lets the server enforce the reply shape at the provider, so
+      // the category/subcategory/channel enums are guaranteed on-list.
+      body: JSON.stringify({system, user, schema}),
       signal: controller.signal,
     });
     const body = await res.json().catch(() => ({}));
@@ -81,6 +84,7 @@ export async function classifySms(
   system: string,
   user: string,
   authToken: string,
+  schema?: Record<string, unknown>,
 ): Promise<string> {
   // Don't burn a request (and a silent regex fallback) on a missing session —
   // `session?.access_token ?? ''` upstream would send a bare `Bearer `, the
@@ -89,7 +93,7 @@ export async function classifySms(
     throw new MissingAuthError();
   }
   try {
-    return await postClassify(system, user, authToken);
+    return await postClassify(system, user, authToken, schema);
   } catch (e: any) {
     // Retry once on transient failures only: timeout/abort, network error, or
     // 5xx. A 4xx is a real rejection (bad token, bad request) and retrying it

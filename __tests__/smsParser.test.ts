@@ -18,10 +18,10 @@ import {
   regexExtract,
   trailingDigits,
   ParseContext,
-} from '../src/tools/claudeParser';
+} from '../src/tools/smsParser';
 import {isUsablePattern, normalizeMerchant} from '../src/tools/merchantNormalize';
 import {pickSmsFormat} from '../src/tools/smsFormats';
-import {THRESHOLD_AUTO_SAVE} from '../src/tools/geminiParser';
+import {THRESHOLD_AUTO_SAVE} from '../src/tools/smsTypes';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),

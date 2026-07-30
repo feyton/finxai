@@ -13,7 +13,7 @@
 // and immune to insertion order, so it's safe to call after every
 // SMS-sourced insert (auto-save, confirm, fix), not just from a manual
 // "Sync balance" button.
-import {extractBalance} from './claudeParser';
+import {extractBalance} from './smsParser';
 import {refreshBalanceWidget} from '../widgets/refreshWidget';
 
 export interface MovementLike {

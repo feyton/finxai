@@ -22,7 +22,7 @@ import SmsAndroid from 'react-native-get-sms-android';
 import {useToast} from 'react-native-toast-notifications';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {supabase} from '../tools/supabase';
-import {THRESHOLD_AUTO_SAVE} from '../tools/geminiParser';
+import {THRESHOLD_AUTO_SAVE} from '../tools/smsTypes';
 import {
   ParseContext,
   candidateNames,
@@ -35,7 +35,7 @@ import {
   parseSmsWithAI,
   regexExtract,
   trailingDigits,
-} from '../tools/claudeParser';
+} from '../tools/smsParser';
 import {
   getChannelRules,
   getMerchantChannels,

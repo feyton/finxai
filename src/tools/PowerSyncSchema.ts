@@ -270,6 +270,14 @@ const merchant_rules = new Table({
   updated_at: column.text,
 });
 
+// One row per user. `owner_id` is the primary key server-side, but PowerSync
+// always supplies its own `id`, so reads/writes here go through owner_id.
+const user_settings = new Table({
+  ai_provider: column.text, // 'anthropic' | 'gemini' | null (server default)
+  owner_id: column.text,
+  updated_at: column.text,
+});
+
 const shared_people = new Table({
   name: column.text,
   role: column.text,
@@ -304,4 +312,5 @@ export const AppSchema = new Schema({
   shopping_items,
   shared_people,
   merchant_rules,
+  user_settings,
 });

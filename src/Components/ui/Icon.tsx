@@ -1,7 +1,7 @@
 import {
   AlertCircle, ArrowDownLeft, ArrowLeft, ArrowLeftRight, ArrowUpRight, Ban,
   Bell, Bike, Brain, Building2, Calendar, CalendarPlus, Car, Check, CheckCircle, CheckCircle2,
-  ChevronDown, ChevronLeft, ChevronRight, Clock, CreditCard,
+  ChevronDown, ChevronLeft, ChevronRight, Circle, Clock, CreditCard,
   Coins, Delete, ExternalLink, Eye, EyeOff, Filter, Flame, Gift, Globe, Handshake, Heart, Home, Info,
   Key, Landmark, Laptop, Lock, MessageSquare, Mic, MoreHorizontal, PenLine, Pencil,
   Phone, PieChart, Plus, Receipt, RefreshCcw, Repeat,
@@ -74,6 +74,7 @@ const MAP: Record<string, any> = {
   Scissors,
   Brain,
   CheckCircle,
+  Circle,
   EyeOff,
   ExternalLink,
   Key,

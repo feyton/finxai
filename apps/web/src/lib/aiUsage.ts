@@ -1,9 +1,13 @@
 import type {SupabaseClient} from '@supabase/supabase-js';
 
-// $ per 1M tokens — update alongside AI_MODELS in the route files.
+// $ per 1M tokens — update alongside MODELS in lib/aiProvider.ts.
+// Keep in sync with the PRICING table in scripts/eval-sms.mts.
 const PRICING: Record<string, {input: number; output: number}> = {
   'gemini-3.5-flash': {input: 1.5, output: 9.0},
+  // Classification tier: cheapest model that supports structured outputs.
+  'claude-haiku-4-5': {input: 1.0, output: 5.0},
   'claude-sonnet-4-6': {input: 3.0, output: 15.0},
+  'claude-sonnet-5': {input: 3.0, output: 15.0},
 };
 
 export async function logAiUsage(

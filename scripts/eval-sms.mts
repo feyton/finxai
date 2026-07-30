@@ -8,7 +8,7 @@
  * quietly breaking another's, and nothing would tell us. This measures it.
  *
  * It drives the REAL pipeline — buildClassification() and
- * applyClassification() from src/tools/claudeParser.ts — so what is measured
+ * applyClassification() from src/tools/smsParser.ts — so what is measured
  * here is what runs on the phone. Only the network call in between is swapped
  * per provider.
  *
@@ -42,7 +42,7 @@ import {
   buildClassification,
   parseWithRegex,
   regexExtract,
-} from '../src/tools/claudeParser';
+} from '../src/tools/smsParser';
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 const cmd = argv[2] ?? 'run';

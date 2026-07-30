@@ -25,7 +25,7 @@ import {
   recordConfirmation,
   recordCorrection,
 } from '../tools/merchantMemory';
-import {extractBalance, parseSmsWithAI, regexExtract} from '../tools/claudeParser';
+import {extractBalance, parseSmsWithAI, regexExtract} from '../tools/smsParser';
 import {supabase} from '../tools/supabase';
 import {syncAccountBalance} from '../tools/balance';
 

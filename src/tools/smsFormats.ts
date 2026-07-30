@@ -13,7 +13,7 @@
 // Splitting this way also lets the rigid MTN templates skip the model for
 // merchant extraction entirely — the name is handed over as a FACT and the
 // model only classifies. That matches the design already stated at the top of
-// claudeParser.ts: regex does deterministic facts, the model does fuzzy
+// smsParser.ts: regex does deterministic facts, the model does fuzzy
 // classification.
 
 export type SmsFormatId = 'mtn' | 'bk' | 'bk_bank' | 'bpr' | 'equity' | 'generic';
@@ -38,7 +38,7 @@ export interface SmsFormat {
   guidance: string;
 }
 
-// Where a counterparty name ends — same stop-set claudeParser uses.
+// Where a counterparty name ends — same stop-set smsParser uses.
 const STOP = String.raw`(?=\s+(?:was|has\s+been|is)\s+(?:completed|successful|processed)\b|\s+at\s+\d|\s*[.(]|\s*$)`;
 
 function firstMatch(body: string, patterns: RegExp[]): string | null {

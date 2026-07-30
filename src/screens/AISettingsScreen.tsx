@@ -12,6 +12,7 @@ import {FONTS, R, T} from '../theme';
 import {Icon} from '../Components/ui';
 import {AiTestResult, testAiConnection} from '../tools/aiProxyClient';
 import {supabase} from '../tools/supabase';
+import {AiProvider, useAiProvider} from '../hooks/useAiProvider';
 
 type TestState = 'idle' | 'testing' | 'done' | 'error';
 
@@ -57,10 +58,95 @@ function ProviderCard({
   );
 }
 
+// A selectable provider, with its server-side health when a test has been run.
+function ProviderChoice({
+  value,
+  selected,
+  onSelect,
+  saving,
+  icon,
+  title,
+  desc,
+  health,
+}: {
+  value: AiProvider;
+  selected: boolean;
+  onSelect: (v: AiProvider) => void;
+  saving: boolean;
+  icon: string;
+  title: string;
+  desc: string;
+  health?: {ok: boolean; error?: string};
+}) {
+  const unhealthy = health && !health.ok;
+  return (
+    <Pressable
+      onPress={() => onSelect(value)}
+      disabled={saving}
+      style={({pressed}) => [
+        styles.card,
+        styles.choiceCard,
+        selected && styles.cardSelected,
+        {opacity: pressed || saving ? 0.75 : 1},
+      ]}>
+      <View style={styles.cardHead}>
+        <View
+          style={[
+            styles.cardIcon,
+            {backgroundColor: (selected ? T.accent : T.text3) + '22'},
+          ]}>
+          <Icon
+            name={icon}
+            size={16}
+            color={selected ? T.accent : T.text3}
+            strokeWidth={2.2}
+          />
+        </View>
+        <View style={{flex: 1}}>
+          <Text style={styles.cardTitle}>{title}</Text>
+          <Text style={styles.cardDesc}>{desc}</Text>
+        </View>
+        {saving ? (
+          <ActivityIndicator size="small" color={T.accent} />
+        ) : (
+          <Icon
+            name={selected ? 'CheckCircle2' : 'Circle'}
+            size={20}
+            color={selected ? T.accent : T.border2}
+            strokeWidth={2.2}
+          />
+        )}
+      </View>
+      {unhealthy && (
+        <View style={styles.statusRow}>
+          <Icon name="XCircle" size={13} color={T.expense} strokeWidth={2.2} />
+          <Text style={[styles.statusText, {color: T.expense}]}>
+            {health?.error ?? 'Connection failed'}
+          </Text>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
 export default function AISettingsScreen({navigation}: any) {
   const [testState, setTestState] = useState<TestState>('idle');
   const [result, setResult] = useState<AiTestResult | null>(null);
   const [testError, setTestError] = useState('');
+  const {provider, setProvider} = useAiProvider();
+  const [saving, setSaving] = useState<AiProvider | null>(null);
+
+  const choose = async (next: AiProvider) => {
+    if (next === provider) {
+      return;
+    }
+    setSaving(next);
+    try {
+      await setProvider(next);
+    } finally {
+      setSaving(null);
+    }
+  };
 
   const runTest = async () => {
     setTestState('testing');
@@ -97,20 +183,37 @@ export default function AISettingsScreen({navigation}: any) {
           separately.
         </Text>
 
-        <SectionTitle>Providers</SectionTitle>
-        <ProviderCard
+        <SectionTitle>AI Provider</SectionTitle>
+        <Text style={styles.pickerHint}>
+          One provider handles both SMS parsing and the Finance Coach. Switching takes
+          effect on the next SMS or chat message — nothing already saved changes.
+        </Text>
+        <ProviderChoice
+          value="anthropic"
+          selected={provider === 'anthropic'}
+          onSelect={choose}
+          saving={saving === 'anthropic'}
           icon="Sparkles"
-          title="SMS Parsing"
-          desc="Gemini 3.5 Flash reads each SMS and extracts amount, merchant, category, and fees."
-          result={result?.gemini}
+          title="Claude"
+          desc="Haiku 4.5 tags your SMS; Sonnet 4.6 answers coach questions."
+          health={result?.anthropic}
         />
-        <View style={{height: 12}} />
-        <ProviderCard
-          icon="MessageSquare"
-          title="Finance Coach"
-          desc="Claude answers questions about your spending and can make changes on request."
-          result={result?.anthropic}
+        <View style={{height: 10}} />
+        <ProviderChoice
+          value="gemini"
+          selected={provider === 'gemini'}
+          onSelect={choose}
+          saving={saving === 'gemini'}
+          icon="Zap"
+          title="Gemini"
+          desc="Gemini 3.5 Flash handles both SMS tagging and coach questions."
+          health={result?.gemini}
         />
+        {provider === null && (
+          <Text style={styles.pickerHint}>
+            Using FinXAI's default until you pick one.
+          </Text>
+        )}
 
         <Pressable
           onPress={runTest}
@@ -139,7 +242,7 @@ export default function AISettingsScreen({navigation}: any) {
             <Icon name="Lock" size={16} color={T.text3} strokeWidth={2} />
             <Text style={styles.privacyText}>
               SMS text and chat messages are sent to FinXAI's own server, which relays them to
-              Gemini/Claude to get a response. They're never sent from your device directly to
+              the provider you picked above. They're never sent from your device directly to
               Google or Anthropic, and the API keys live only on FinXAI's server — never on your
               phone.
             </Text>
@@ -217,6 +320,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: T.border,
     marginBottom: 20,
+  },
+  // Spacing between the choices is an explicit spacer, so the shared card
+  // style's bottom margin has to be dropped here.
+  choiceCard: {marginBottom: 0},
+  cardSelected: {
+    borderColor: T.accent,
+    backgroundColor: T.accentSoft,
+  },
+  pickerHint: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    lineHeight: 18,
+    color: T.text3,
+    marginBottom: 12,
   },
   cardHead: {flexDirection: 'row', gap: 10, alignItems: 'flex-start'},
   cardIcon: {

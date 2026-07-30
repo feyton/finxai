@@ -1,7 +1,10 @@
-// Shared SMS-parsing types + confidence thresholds — used by both the
-// regex extractor and the AI classifier in claudeParser.ts. The actual
-// Gemini call now lives server-side (apps/web's /api/ai/classify-sms,
-// called via src/tools/aiProxyClient.ts) rather than on-device.
+// Shared SMS-parsing types + confidence thresholds — used by both the regex
+// extractor and the AI classifier in ./smsParser.ts.
+//
+// The model call lives server-side (apps/web's /api/ai/classify-sms, reached
+// via ./aiProxyClient.ts), and WHICH provider serves it is the user's own
+// setting — see apps/web/src/lib/aiProvider.ts. Nothing here is
+// provider-specific.
 import {CategoryId} from '../theme';
 
 export interface ParsedSMS {

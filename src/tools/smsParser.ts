@@ -6,10 +6,10 @@
 //     in RW SMS.
 //   • The model does only the FUZZY classification (clean merchant name,
 //     category, payment channel), guided by the user's learned corrections.
-// Classification runs through FinXAI's own server (see ./aiProxyClient —
-// Gemini 3.5 Flash, key held server-side, not on the phone). If the server
-// call is unavailable/fails for any reason, we degrade to regex-only (low
-// confidence) rather than blocking the transaction from being recorded.
+// Classification runs through FinXAI's own server (see ./aiProxyClient); the
+// provider is the user's choice and the key is held server-side, never on the
+// phone. If the server call is unavailable/fails for any reason we degrade to
+// regex-only (low confidence) rather than blocking the transaction.
 
 import {classifySms} from './aiProxyClient';
 import type {MerchantChannel} from './merchantMemory';
@@ -20,7 +20,7 @@ import {
   normalizeMerchant,
   ruleDisplayName,
 } from './merchantNormalize';
-import {MerchantRule, ParsedSMS} from './geminiParser';
+import {MerchantRule, ParsedSMS} from './smsTypes';
 import {pickSmsFormat} from './smsFormats';
 import {CATS as CAT_MAP, CategoryId, resolveCat} from '../theme';
 import categoriesData from './data.json';
@@ -325,7 +325,7 @@ function extractBkV2Date(raw: string): string | null {
 // silently undercounts the fee; summing is safe because a real bank SMS
 // never mentions an unrelated charge/fee amount alongside the transaction's
 // own. Verified against a real BPR statement's balance chain (see
-// __tests__/claudeParser.test.ts) — BK's single "Transaction Charge" still
+// __tests__/smsParser.test.ts) — BK's single "Transaction Charge" still
 // sums to the same one value, no regression.
 function extractFees(raw: string): number {
   const re = /\b(?:(?:[a-z]+\s+)?charges?|fees?)\b\s*(?:was)?\s*[:=]?\s*(?:RWF|FRW)?\s*([\d,]+(?:\.\d+)?)/gi;
@@ -653,10 +653,58 @@ function regexClassify(
   return {merchant, category};
 }
 
+// The reply is schema-enforced server-side (Gemini responseSchema / a forced
+// Claude tool call), so it is normally already a clean JSON object. The brace
+// scrape survives only as a fallback for a provider that ignores the schema —
+// it used to be the PRIMARY path, and being greedy (`\{[\s\S]*\}` spans the
+// first `{` to the LAST `}`) it broke on any prose containing braces, and a
+// parse failure silently became a regex-fallback classification.
 function extractJson(text: string): any {
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) {throw new Error('No JSON in model reply');}
-  return JSON.parse(m[0]);
+  const trimmed = (text ?? '').trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // Non-greedy from the first `{`, and try progressively shorter tails so a
+    // trailing explanation can't swallow the object.
+    const start = trimmed.indexOf('{');
+    if (start >= 0) {
+      for (let end = trimmed.lastIndexOf('}'); end > start; end = trimmed.lastIndexOf('}', end - 1)) {
+        try {
+          return JSON.parse(trimmed.slice(start, end + 1));
+        } catch {
+          // keep shrinking
+        }
+      }
+    }
+    throw new Error('No JSON in model reply');
+  }
+}
+
+// JSON Schema for the classification reply, sent with the request so the
+// provider can enforce it. Enums are generated from the SAME constants the
+// prompt and the UI use, so the model cannot return an off-list category,
+// subcategory, or channel — which is what turns the downstream
+// `validSubcats.some(...)` check from a filter into an assertion.
+export function classificationSchema(): Record<string, unknown> {
+  const allSubcats = Array.from(
+    new Set(Object.values(SUBCATS_BY_CAT).flatMap(v => v ?? [])),
+  );
+  return {
+    type: 'object',
+    properties: {
+      merchant: {
+        type: 'string',
+        description: 'Clean title-case counterparty name, no codes or timestamps.',
+      },
+      category: {type: 'string', enum: Object.keys(CAT_MAP)},
+      // '' means "none fits"; allowed alongside the real values.
+      subcategory: {type: 'string', enum: ['', ...allSubcats]},
+      channel: {type: 'string', enum: CHANNELS.split(', ')},
+      confidence: {type: 'number', description: '0..1, how sure about merchant + category.'},
+    },
+    required: ['merchant', 'category', 'confidence'],
+    additionalProperties: false,
+  };
 }
 
 // Heuristic: is this money moving between the user's OWN accounts?
@@ -864,23 +912,30 @@ export function buildClassification(
   // simply no longer need the model's opinion. `is_transfer` is still read if
   // the model volunteers it, as a last-resort signal when no fact and no rule
   // applies — see resolveTransfer.
-  const system = `You classify a single Rwandan mobile-money / bank SMS. Return ONLY a JSON object, no prose, no markdown.
-Fields:
-{"merchant": "<clean title-case seller/counterparty>", "category": "<one of: ${CATS}>", "subcategory": "<one of that category's subcategories below, or \\"\\">", "channel": "<one of: ${CHANNELS}>", "confidence": <0..1>}
-Rules:
-- merchant is the shop or person, cleaned (e.g. "SAWA CITI LTD" → "Sawa Citi").
-- category is your best fit from the list. Boundary guidance:
+  // The reply shape is enforced by the provider from classificationSchema(), so
+  // this prompt no longer spends tokens restating it. Removed as redundant:
+  // "Return ONLY a JSON object, no prose, no markdown", the inline field
+  // listing, and "subcategory must be copied EXACTLY ... Never invent one" —
+  // the enum makes an off-list value impossible rather than discouraged.
+  //
+  // Also gone: "if a learned rule matches, set confidence >= 0.95". Rules are
+  // applied in code below, so that instruction only ever taught the model to
+  // emit 0.95, which is what made THRESHOLD_AUTO_SAVE nearly a no-op.
+  const system = `You classify a single Rwandan mobile-money / bank SMS.
+- merchant: the shop or person, cleaned (e.g. "SAWA CITI LTD" → "Sawa Citi Ltd").
+  Never include reference numbers, subscriber codes, or timestamps.
+- category: best fit. Boundary guidance for the ambiguous cases:
 ${CATEGORY_HINTS}
-- subcategory must be copied EXACTLY (spelling, punctuation) from the list below for
-  whichever category you picked, only when one clearly fits; otherwise "". Never invent one.
-Subcategories per category:
+- subcategory: only when one clearly fits the category you picked, else "".
+  Valid options per category:
 ${SUBCATS_PROMPT_BLOCK}
-- channel is the payment rail.
+- channel: the payment rail used.
+- confidence: how sure you are of merchant + category. Be honest — a low number
+  sends the record to the user for review, which is the right outcome for a
+  genuinely ambiguous message.
+
 Format notes for THIS message (${format.label}):
-${format.guidance}
-- confidence reflects how sure you are of merchant + category. Be honest: a low
-  number sends the record to the user for review, which is the correct outcome
-  when the message is genuinely ambiguous.`;
+${format.guidance}`;
 
   // No counterpartyIsUsersOwnAccount line here: that case returned above
   // without calling the model at all.
@@ -1039,7 +1094,12 @@ export async function parseSmsWithAI(
     return planned.shortCircuit;
   }
   try {
-    const reply = await classifySms(planned.system, planned.user, authToken);
+    const reply = await classifySms(
+      planned.system,
+      planned.user,
+      authToken,
+      classificationSchema(),
+    );
     return applyClassification(reply, planned, raw, rules, ctx);
   } catch (e: any) {
     // Keep degrading rather than dropping the transaction — but record WHY, so
