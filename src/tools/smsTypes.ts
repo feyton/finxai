@@ -44,20 +44,10 @@ export interface ParsedSMS {
   fallbackReason?: string;
 }
 
-export interface MerchantRule {
-  // Normalized lookup key (see normalizeMerchant in ./merchantMemory) — NOT
-  // the display text. Stable across messages so a rule can match more than
-  // once.
-  pattern: string;
-  category: string;
-  // Subcategory the user picked for this counterparty, '' when none.
-  subcategory?: string | null;
-  // Name the user chose for this counterparty; applied to future SMS so a
-  // badly-extracted name gets corrected everywhere, not just once.
-  display_name?: string | null;
-  correction_count: number;
-  confirmation_count: number;
-}
+// MerchantRule moved to ../../shared/merchantNormalize — normalizeMerchant needs it,
+// and a shared module must not import back into the mobile app. Re-exported so
+// existing `from './smsTypes'` imports keep working.
+export type {MerchantRule} from '../../shared/merchantNormalize';
 
 // ── Confidence thresholds ──────────────────────────────────────
 export const THRESHOLD_AUTO_SAVE = 0.92; // silent auto-save

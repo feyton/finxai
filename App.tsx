@@ -22,7 +22,6 @@ import AISettingsScreen from './src/screens/AISettingsScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 import SMSReviewScreen from './src/screens/SMSReviewScreen';
 import CategoryManagementScreen from './src/screens/CategoryManagementScreen';
-import ConfirmTransactionsScreen from './src/screens/ConfirmTransactions';
 import CreateAccountScreen from './src/screens/CreateAccount';
 import CreateBudgetScreen from './src/screens/CreateBudget';
 import AddPlannedPaymentScreen from './src/screens/AddPlannedPayment';
@@ -221,7 +220,6 @@ function App(): React.JSX.Element {
                 <Stack.Screen name="CategoryTransactions" component={CategoryTransactions} />
                 <Stack.Screen name="SpendingPlaces" component={SpendingPlaces} />
                 <Stack.Screen name="CreateAccount" component={CreateAccountScreen} />
-                <Stack.Screen name="Confirm" component={ConfirmTransactionsScreen} />
                 <Stack.Screen name="CreateBudget" component={CreateBudgetScreen} />
                 <Stack.Screen name="BudgetDetails" component={BudgetDetails} />
                 <Stack.Screen name="ManageCategories" component={CategoryManagementScreen} />

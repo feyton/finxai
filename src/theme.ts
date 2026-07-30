@@ -34,75 +34,54 @@ export const R = {
   iconBtn: 12,
 };
 
-export type CategoryId =
-  | 'food' | 'groceries' | 'transport' | 'utilities' | 'airtime' | 'rent'
-  | 'health' | 'shopping' | 'salary' | 'family' | 'fun' | 'savings' | 'education'
-  | 'personal_care' | 'housing' | 'technology' | 'debt' | 'gifts' | 'misc'
-  | 'freelance';
+// The taxonomy and resolveCat now live in ../shared/categories, shared with the web
+// app. Re-exported here so the ~50 existing `from '../theme'` imports keep working.
+export type {CategoryId} from '../shared/categories';
+export {resolveCat, CATEGORY_IDS} from '../shared/categories';
 
-export const CATS: Record<CategoryId, {id: CategoryId; label: string; icon: string; color: string}> = {
-  food:      {id: 'food',      label: 'Food & Dining',      icon: 'UtensilsCrossed', color: '#F59E0B'},
-  groceries: {id: 'groceries', label: 'Groceries',          icon: 'ShoppingCart',    color: '#22C55E'},
-  transport: {id: 'transport', label: 'Transport',          icon: 'Car',             color: '#60A5FA'},
-  utilities: {id: 'utilities', label: 'Utilities',          icon: 'Zap',             color: '#FBBF24'},
-  airtime:   {id: 'airtime',   label: 'Airtime & Data',     icon: 'Phone',           color: '#A78BFA'},
-  rent:      {id: 'rent',      label: 'Rent',               icon: 'Home',            color: '#F472B6'},
-  health:    {id: 'health',    label: 'Health',             icon: 'Heart',           color: '#FB7185'},
-  shopping:  {id: 'shopping',  label: 'Shopping',           icon: 'ShoppingBag',     color: '#34D399'},
-  salary:    {id: 'salary',    label: 'Salary',             icon: 'Coins',           color: '#22C55E'},
-  family:    {id: 'family',    label: 'Family & Transfers', icon: 'Users',           color: '#38BDF8'},
-  fun:       {id: 'fun',       label: 'Entertainment',      icon: 'Flame',           color: '#FB923C'},
-  savings:   {id: 'savings',   label: 'Savings',            icon: 'Target',          color: '#2DD4BF'},
-  education: {id: 'education', label: 'Education',          icon: 'Star',            color: '#818CF8'},
-  // Present in data.json but previously missing here — every one of these
-  // silently collapsed into 'shopping' via resolveCat's default, so they
-  // could never be picked in any CATS-driven picker (Fix sheet, budgets,
-  // Edit transaction, Manage categories).
-  personal_care: {id: 'personal_care', label: 'Personal Care',        icon: 'Scissors',   color: '#F0ABFC'},
-  housing:       {id: 'housing',       label: 'Housing',              icon: 'Building2',  color: '#C084FC'},
-  technology:    {id: 'technology',    label: 'Technology',           icon: 'Laptop',     color: '#22D3EE'},
-  debt:          {id: 'debt',          label: 'Debt Payments',        icon: 'CreditCard', color: '#EF4444'},
-  gifts:         {id: 'gifts',         label: 'Gifts & Donations',    icon: 'Gift',       color: '#FDA4AF'},
-  misc:          {id: 'misc',          label: 'Miscellaneous',        icon: 'Tag',        color: '#94A3B8'},
-  freelance:     {id: 'freelance',     label: 'Freelance/Side Hustle', icon: 'Handshake', color: '#4ADE80'},
+import {
+  CATEGORY_META,
+  type CategoryId as SharedCategoryId,
+} from '../shared/categories';
+
+// Lucide icon per category. This is the ONE part that cannot be shared: the web app
+// renders emoji instead, and these names must exist in Components/ui/Icon's whitelist
+// (it returns null for anything unregistered).
+const CAT_ICON: Record<SharedCategoryId, string> = {
+  food: 'UtensilsCrossed',
+  groceries: 'ShoppingCart',
+  transport: 'Car',
+  utilities: 'Zap',
+  airtime: 'Phone',
+  rent: 'Home',
+  health: 'Heart',
+  shopping: 'ShoppingBag',
+  salary: 'Coins',
+  family: 'Users',
+  fun: 'Flame',
+  savings: 'Target',
+  education: 'Star',
+  personal_care: 'Scissors',
+  housing: 'Building2',
+  technology: 'Laptop',
+  debt: 'CreditCard',
+  gifts: 'Gift',
+  misc: 'Tag',
+  freelance: 'Handshake',
 };
 
-// Maps legacy category strings from existing data to the new CategoryId.
-// Order matters — earlier branches win, so the narrower checks added below
-// sit ahead of the broader ones they would otherwise be swallowed by.
-export function resolveCat(raw: string): CategoryId {
-  const s = (raw ?? '').toLowerCase();
-  if (s.includes('food') || s.includes('dining') || s.includes('restaurant') || s.includes('cafe')) return 'food';
-  if (s.includes('grocer') || s.includes('supermarket') || s.includes('market')) return 'groceries';
-  if (s.includes('transport') || s.includes('travel') || s.includes('fuel') || s.includes('moto') || s.includes('cab')) return 'transport';
-  if (s.includes('utilit') || s.includes('electric') || s.includes('water') || s.includes('power') || s.includes('wasac') || s.includes('reg')) return 'utilities';
-  if (s.includes('airtime') || s.includes('data') || s.includes('bundle')) return 'airtime';
-  // Before 'rent': "Housing" does NOT contain "house", so it used to fall all
-  // the way through to the default rather than landing on rent.
-  if (s.includes('housing') || s.includes('mortgage')) return 'housing';
-  if (s.includes('rent') || s.includes('house') || s.includes('apartment')) return 'rent';
-  // Before 'health': "Personal Care" shares no token with health, but keep it
-  // early so 'beauty'/'salon' can never be claimed by a later broad branch.
-  if (s.includes('personal care') || s.includes('personal_care') || s.includes('grooming') || s.includes('salon') || s.includes('barber') || s.includes('beauty')) return 'personal_care';
-  if (s.includes('health') || s.includes('medical') || s.includes('pharmacy') || s.includes('hospital')) return 'health';
-  if (s.includes('tech') || s.includes('software') || s.includes('gadget') || s.includes('electronics')) return 'technology';
-  if (s.includes('debt') || s.includes('loan') || s.includes('credit card') || s.includes('repayment')) return 'debt';
-  if (s.includes('gift') || s.includes('donat') || s.includes('charity')) return 'gifts';
-  // Before 'salary': "Freelance/Side Hustle" shares no token with salary
-  // today, but this keeps side-income out of the salary bucket if either
-  // list gains a wording like "freelance income".
-  if (s.includes('freelance') || s.includes('side hustle') || s.includes('gig') || s.includes('consult')) return 'freelance';
-  if (s.includes('shopping') || s.includes('clothes') || s.includes('clothing') || s.includes('fashion')) return 'shopping';
-  if (s.includes('salary') || s.includes('wage') || s.includes('payroll') || s.includes('income')) return 'salary';
-  if (s.includes('family') || s.includes('transfer') || s.includes('send') || s.includes('from ') || s.includes('to ')) return 'family';
-  if (s.includes('entertainment') || s.includes('fun') || s.includes('leisure') || s.includes('canal') || s.includes('movie')) return 'fun';
-  if (s.includes('saving') || s.includes('invest')) return 'savings';
-  if (s.includes('education') || s.includes('school') || s.includes('tuition') || s.includes('uni')) return 'education';
-  // Deliberately matches only 'misc', never a bare 'other' — "Other Income"
-  // must keep resolving to salary, as it does today.
-  if (s.includes('misc')) return 'misc';
-  return 'shopping';
-}
+// Built from the shared metadata, so adding a category in one place reaches both apps.
+// Typed exactly as before so every consumer is unaffected.
+export const CATS: Record<
+  SharedCategoryId,
+  {id: SharedCategoryId; label: string; icon: string; color: string}
+> = Object.fromEntries(
+  (Object.keys(CATEGORY_META) as SharedCategoryId[]).map(id => [
+    id,
+    {...CATEGORY_META[id], icon: CAT_ICON[id]},
+  ]),
+) as Record<SharedCategoryId, {id: SharedCategoryId; label: string; icon: string; color: string}>;
+
 
 // Account brand helpers
 export function accountTint(name: string): string {

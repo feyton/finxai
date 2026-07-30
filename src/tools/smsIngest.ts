@@ -344,3 +344,103 @@ export async function ingestLiveSms(
   }
   return outcome;
 }
+
+/**
+ * Promote a reviewed `auto_records` row into `transactions`.
+ *
+ * WHY THIS EXISTS: the confirm and fix paths in SMSReviewScreen each hand-wrote their
+ * own `INSERT INTO transactions`, alongside the two in persistParsedSms above — four
+ * copies of one column list. Predictably, a column added to some was missed by others:
+ * confirming or fixing a record silently dropped lat/lon/accuracy_m/location_at, so a
+ * position captured live was stored on the auto_record and then thrown away at the
+ * moment the record became real. Only high-confidence transactions appeared to keep a
+ * location, because they are the only ones that never pass through review.
+ *
+ * One function, one column list. A column added here reaches every promotion path.
+ *
+ * `overrides` carries what the Fix sheet changes; confirm passes none and the record's
+ * own values are used. The id is deliberately the auto_record's — it is already the
+ * deterministic transaction id (see ./txnId), so confirming the same record on two
+ * devices converges on one row instead of two.
+ */
+export async function promoteAutoRecord(
+  db: any,
+  args: {
+    record: any;
+    ownerId: string;
+    /** Direction from the raw SMS, used only to set transfer_direction. */
+    direction: 'debit' | 'credit';
+    /** Bank-reported balance parsed from the SMS, or null. */
+    balanceAfter: number | null;
+    overrides?: {
+      category?: string;
+      subcategory?: string;
+      merchant?: string;
+      accountId?: string;
+      type?: 'expense' | 'income' | 'transfer';
+      note?: string | null;
+    };
+  },
+): Promise<{txType: string; accountId: string}> {
+  const {record, ownerId, direction, balanceAfter} = args;
+  const o = args.overrides ?? {};
+  const now = new Date().toISOString();
+
+  const txType =
+    o.type ??
+    (record.transaction_type === 'income'
+      ? 'income'
+      : record.transaction_type === 'transfer'
+      ? 'transfer'
+      : 'expense');
+  const accountId = o.accountId || record.account_id;
+  const isTransfer = txType === 'transfer';
+
+  await db.execute(
+    `INSERT INTO transactions
+       (id, amount, account_id, category, subcategory, date_time, sms, sender,
+        payee, merchant, transaction_type, fees, currency,
+        confirmed, source, confidence,
+        transfer_account_id, transfer_direction, balance_after, txn_ref,
+        parse_source, note, lat, lon, accuracy_m, location_at, owner_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      record.id,
+      record.amount,
+      accountId,
+      // A transfer keeps whatever category it had: the Fix sheet hides the category
+      // picker for transfers, so an override would be a stale value from before the
+      // type was switched.
+      isTransfer ? record.category : o.category ?? record.category,
+      isTransfer ? '' : o.subcategory ?? record.subcategory ?? '',
+      record.date_time,
+      record.sms,
+      record.sender,
+      record.payee,
+      o.merchant || record.merchant,
+      txType,
+      record.fees ?? 0,
+      record.confidence ?? 0,
+      isTransfer ? record.transfer_account_id ?? null : null,
+      isTransfer ? (direction === 'credit' ? 'in' : 'out') : null,
+      balanceAfter,
+      record.txn_ref ?? null,
+      record.parse_source ?? null,
+      // NULL rather than '' when blank, so "has a note" is a simple IS NOT NULL check
+      // everywhere downstream.
+      (o.note ?? record.note) || null,
+      // The four columns whose omission was the whole bug. Carried even when the type
+      // changes: a fix can alter how a payment is filed, never where it happened, and
+      // the money-out gate already ran at ingest.
+      record.lat ?? null,
+      record.lon ?? null,
+      record.accuracy_m ?? null,
+      record.location_at ?? null,
+      ownerId,
+      now,
+    ],
+  );
+
+  await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
+  return {txType, accountId};
+}

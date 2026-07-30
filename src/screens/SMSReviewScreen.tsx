@@ -29,6 +29,7 @@ import {extractBalance, parseSmsWithAI, regexExtract} from '../tools/smsParser';
 import {supabase} from '../tools/supabase';
 import {syncAccountBalance} from '../tools/balance';
 import {ignoredSmsId} from '../tools/txnId';
+import {promoteAutoRecord} from '../tools/smsIngest';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -532,70 +533,20 @@ export default function SMSReviewScreen({navigation}: any) {
 
   const handleConfirm = async (record: any) => {
     try {
-      const txType =
-        record.transaction_type === 'income'
-          ? 'income'
-          : record.transaction_type === 'transfer'
-          ? 'transfer'
-          : 'expense';
-      const now = new Date().toISOString();
-      const dir = regexExtract(record.sms ?? '').direction;
-      const bal = extractBalance(record.sms ?? '');
-      await db.execute(
-        `INSERT INTO transactions
-           (id, amount, account_id, category, subcategory, date_time, sms, sender,
-            payee, merchant, transaction_type, fees, currency,
-            confirmed, source, confidence,
-            transfer_account_id, transfer_direction, balance_after, txn_ref,
-            parse_source, lat, lon, accuracy_m, location_at, owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          // The auto_record id IS the deterministic transaction id (see
-          // tools/txnId.ts) — reuse it so confirming the same record on two
-          // devices converges on one transactions row instead of two.
-          record.id,
-          record.amount,
-          record.account_id,
-          record.category,
-          record.subcategory ?? '',
-          record.date_time,
-          record.sms,
-          record.sender,
-          record.payee,
-          record.merchant,
-          txType,
-          record.fees ?? 0,
-          record.confidence ?? 0,
-          txType === 'transfer' ? record.transfer_account_id ?? null : null,
-          txType === 'transfer' ? (dir === 'credit' ? 'in' : 'out') : null,
-          bal,
-          record.txn_ref ?? null,
-          record.parse_source ?? null,
-          // Carry the location through.
-          //
-          // persistParsedSms already writes lat/lon onto the auto_records row when a
-          // money-out SMS is captured live, but confirming that row built a fresh
-          // transactions INSERT that simply omitted these four columns — so the
-          // position was captured, stored, and then thrown away at the exact moment
-          // the record became real. The visible effect was that only high-confidence
-          // transactions (which skip auto_records entirely) ever kept a location,
-          // making it look as though low-confidence parses never got one.
-          record.lat ?? null,
-          record.lon ?? null,
-          record.accuracy_m ?? null,
-          record.location_at ?? null,
-          userId,
-          now,
-        ],
-      );
+      // One shared promotion path (tools/smsIngest) rather than a hand-written INSERT
+      // here — four copies of this column list is what silently dropped the location.
+      const {txType} = await promoteAutoRecord(db, {
+        record,
+        ownerId: userId!,
+        direction: regexExtract(record.sms ?? '').direction,
+        balanceAfter: extractBalance(record.sms ?? ''),
+      });
 
       // Recompute from the full history (anchor + replay) rather than
       // trusting this one SMS's balance in isolation — pending records can
       // be confirmed in any order, and blindly writing "whatever this SMS
       // says" leaves a stale balance if an older one is confirmed last.
       await syncAccountBalance(db, record.account_id);
-
-      await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
 
       // Confirming a transfer reinforces the transfer rule for that
       // counterparty; otherwise the category rule as before.
@@ -695,62 +646,28 @@ export default function SMSReviewScreen({navigation}: any) {
       // The USER's chosen type wins — this is where "set as transfer" during
       // review happens (and trains the AI below).
       const txType = fix.type;
-      const now = new Date().toISOString();
       const merchant = fix.merchant || record.merchant || record.payee || '';
-      const accountId = fix.accountId || record.account_id;
-      const fixDir = regexExtract(record.sms ?? '').direction;
-      const bal = extractBalance(record.sms ?? '');
-      await db.execute(
-        `INSERT INTO transactions
-           (id, amount, account_id, category, subcategory, date_time, sms, sender,
-            payee, merchant, transaction_type, fees, currency,
-            confirmed, source, confidence,
-            transfer_account_id, transfer_direction, balance_after, txn_ref,
-            parse_source, note, lat, lon, accuracy_m, location_at, owner_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          // The auto_record id IS the deterministic transaction id (see
-          // tools/txnId.ts) — reuse it so confirming the same record on two
-          // devices converges on one transactions row instead of two.
-          record.id,
-          record.amount,
-          accountId,
-          txType === 'transfer' ? record.category : fix.category,
-          txType === 'transfer' ? '' : fix.subcategory ?? '',
-          record.date_time,
-          record.sms,
-          record.sender,
-          record.payee,
+      // Same shared promotion path as handleConfirm; the Fix sheet's changes go in as
+      // overrides so there is still only one column list in the codebase.
+      const {accountId} = await promoteAutoRecord(db, {
+        record,
+        ownerId: userId!,
+        direction: regexExtract(record.sms ?? '').direction,
+        balanceAfter: extractBalance(record.sms ?? ''),
+        overrides: {
+          category: fix.category,
+          subcategory: fix.subcategory,
           merchant,
-          txType,
-          record.fees ?? 0,
-          record.confidence ?? 0,
-          txType === 'transfer' ? record.transfer_account_id ?? null : null,
-          txType === 'transfer' ? (fixDir === 'credit' ? 'in' : 'out') : null,
-          bal,
-          record.txn_ref ?? null,
-          record.parse_source ?? null,
-          // NULL rather than '' when blank, so "has a note" is a simple IS NOT
-          // NULL check everywhere downstream.
-          fix.note || null,
-          // Same carry-through as handleConfirm — fixing a record must not cost it
-          // its location either. Kept even when the user changes the type: the fix
-          // sheet cannot change WHERE the payment happened, only how it is filed, and
-          // the money-out check that gated capture already ran at ingest.
-          record.lat ?? null,
-          record.lon ?? null,
-          record.accuracy_m ?? null,
-          record.location_at ?? null,
-          userId,
-          now,
-        ],
-      );
+          accountId: fix.accountId,
+          type: txType,
+          note: fix.note,
+        },
+      });
 
       // Recompute from the full history for whichever account actually
       // received this transaction (anchor + replay — see handleConfirm).
       await syncAccountBalance(db, accountId);
 
-      await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
 
       // Train the AI: 'transfer' is a learned outcome just like a category —
       // this counterparty will auto-classify as a transfer next time (and a

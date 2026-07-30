@@ -18,6 +18,7 @@ import {
   findAccountForSms,
   locationForParsed,
   persistParsedSms,
+  promoteAutoRecord,
   AccountLike,
   SmsLocation,
 } from '../src/tools/smsIngest';
@@ -416,5 +417,136 @@ describe('persistParsedSms', () => {
     const db = fakeDb();
     await persistParsedSms(db, args({confidence: 0.97, parseSource: 'ai'}));
     expect(insertInto(db, 'transactions')!.params).toContain('ai');
+  });
+});
+
+// ── Promotion: review row -> transaction ───────────────────────
+//
+// These are the tests the bug needed and could not have: the confirm and fix paths
+// each hand-wrote their own INSERT inside a screen component, so nothing could assert
+// what columns they carried. Both now go through promoteAutoRecord.
+describe('promoteAutoRecord', () => {
+  const record = {
+    id: 'auto-1',
+    amount: 3000,
+    account_id: ACCT,
+    category: 'food',
+    subcategory: 'Restaurants',
+    date_time: '2026-07-30T14:08:46.000Z',
+    sms: 'Your payment of 3,000 RWF to Damascene',
+    sender: 'M-Money',
+    payee: 'Damascene',
+    merchant: 'Damascene',
+    transaction_type: 'expense',
+    fees: 0,
+    confidence: 0.7,
+    txn_ref: 'REF-1',
+    parse_source: 'ai',
+    note: null,
+    lat: -1.95805,
+    lon: 30.11515,
+    accuracy_m: 100,
+    location_at: '2026-07-30T14:08:36.000Z',
+  };
+
+  function fakeDb() {
+    const calls: {sql: string; params: any[]}[] = [];
+    return {
+      calls,
+      execute: jest.fn(async (sql: string, params: any[] = []) => {
+        calls.push({sql, params});
+        return {rows: {_array: []}};
+      }),
+    };
+  }
+  const insert = (db: ReturnType<typeof fakeDb>) =>
+    db.calls.find(c => c.sql.includes('INSERT INTO transactions'))!;
+
+  it('carries the location through on confirm', async () => {
+    const db = fakeDb();
+    await promoteAutoRecord(db, {
+      record,
+      ownerId: OWNER,
+      direction: 'debit',
+      balanceAfter: 1680,
+    });
+    const p = insert(db).params;
+    expect(p).toContain(record.lat);
+    expect(p).toContain(record.lon);
+    expect(p).toContain(record.accuracy_m);
+    expect(p).toContain(record.location_at);
+  });
+
+  it('carries the location through on fix, even when the type changes', async () => {
+    // A fix can change how a payment is filed, never where it happened.
+    const db = fakeDb();
+    await promoteAutoRecord(db, {
+      record,
+      ownerId: OWNER,
+      direction: 'debit',
+      balanceAfter: 1680,
+      overrides: {type: 'transfer', category: 'savings', merchant: 'Mokash'},
+    });
+    const p = insert(db).params;
+    expect(p).toContain(record.lat);
+    expect(p).toContain(record.lon);
+  });
+
+  it('reuses the auto_record id so two devices converge on one row', async () => {
+    const db = fakeDb();
+    await promoteAutoRecord(db, {record, ownerId: OWNER, direction: 'debit', balanceAfter: null});
+    expect(insert(db).params[0]).toBe('auto-1');
+  });
+
+  it('applies fix overrides over the record values', async () => {
+    const db = fakeDb();
+    await promoteAutoRecord(db, {
+      record,
+      ownerId: OWNER,
+      direction: 'debit',
+      balanceAfter: null,
+      overrides: {category: 'transport', subcategory: 'Fuel', merchant: 'Olam Oil', note: 'work trip'},
+    });
+    const p = insert(db).params;
+    expect(p).toContain('transport');
+    expect(p).toContain('Fuel');
+    expect(p).toContain('Olam Oil');
+    expect(p).toContain('work trip');
+  });
+
+  it('keeps the original category when the type is switched to transfer', async () => {
+    // The Fix sheet hides the category picker for transfers, so an override would be a
+    // stale value from before the switch.
+    const db = fakeDb();
+    await promoteAutoRecord(db, {
+      record,
+      ownerId: OWNER,
+      direction: 'debit',
+      balanceAfter: null,
+      overrides: {type: 'transfer', category: 'groceries'},
+    });
+    const p = insert(db).params;
+    expect(p).toContain('food');
+    expect(p).not.toContain('groceries');
+  });
+
+  it('deletes the review row so it cannot be promoted twice', async () => {
+    const db = fakeDb();
+    await promoteAutoRecord(db, {record, ownerId: OWNER, direction: 'debit', balanceAfter: null});
+    const del = db.calls.find(c => c.sql.includes('DELETE FROM auto_records'));
+    expect(del).toBeTruthy();
+    expect(del!.params).toEqual(['auto-1']);
+  });
+
+  it('stores a blank note as NULL', async () => {
+    const db = fakeDb();
+    await promoteAutoRecord(db, {
+      record,
+      ownerId: OWNER,
+      direction: 'debit',
+      balanceAfter: null,
+      overrides: {note: ''},
+    });
+    expect(insert(db).params).not.toContain('');
   });
 });
