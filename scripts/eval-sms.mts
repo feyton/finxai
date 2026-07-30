@@ -43,6 +43,7 @@ import {
   parseWithRegex,
   regexExtract,
 } from '../src/tools/smsParser';
+import {classificationSchema} from '../src/tools/smsParser';
 import {resolveCat} from '../src/theme';
 
 // ── Env loading ────────────────────────────────────────────────────────────
@@ -109,7 +110,27 @@ limit 500;`;
 
 // ── Providers ──────────────────────────────────────────────────────────────
 // Each returns {reply, inputTokens, outputTokens}.
-const PROVIDERS: Record<string, (p: {system: string; user: string}) => Promise<any>> = {
+function toGeminiSchema(node: any): any {
+  if (!node || typeof node !== 'object') {return node;}
+  if (Array.isArray(node)) {return node.map(toGeminiSchema);}
+  const out: any = {};
+  if (node.type) {out.type = String(node.type).toUpperCase();}
+  if (node.description) {out.description = node.description;}
+  if (node.enum) {out.enum = node.enum;}
+  if (node.properties) {
+    out.properties = Object.fromEntries(
+      Object.entries(node.properties).map(([k, v]) => [k, toGeminiSchema(v)]),
+    );
+  }
+  if (node.required) {out.required = node.required;}
+  if (node.items) {out.items = toGeminiSchema(node.items);}
+  return out;
+}
+
+const PROVIDERS: Record<
+  string,
+  (p: {system: string; user: string; schema?: any}) => Promise<any>
+> = {
   // Keyless baseline: answer as the on-device regex fallback would, so the
   // deterministic fields (amount / fee / balance) and the fallback's merchant
   // quality can be measured on real data with no API key and no cost. Those
@@ -119,7 +140,7 @@ const PROVIDERS: Record<string, (p: {system: string; user: string}) => Promise<a
     return {reply: '__REGEX_BASELINE__', inputTokens: 0, outputTokens: 0, model: 'regex'};
   },
 
-  async gemini({system, user}: {system: string; user: string}) {
+  async gemini({system, user, schema}: {system: string; user: string; schema?: any}) {
     const key = env.GEMINI_API_KEY;
     if (!key) {throw new Error('GEMINI_API_KEY not set');}
     const model = env.GEMINI_MODEL ?? 'gemini-3.5-flash';
@@ -132,16 +153,23 @@ const PROVIDERS: Record<string, (p: {system: string; user: string}) => Promise<a
           contents: [{parts: [{text: `${system}\n\n${user}`}]}],
           generationConfig: {
             responseMimeType: 'application/json',
+            ...(schema ? {responseSchema: toGeminiSchema(schema)} : {}),
             temperature: 0,
-            maxOutputTokens: 300,
+            // Gemini 3.5 Flash spends ~620 tokens thinking before ~50 tokens of
+            // JSON, and thinking counts against this cap. At 300 it truncated
+            // mid-preamble — see the note in apps/web/.../classify-sms/route.ts.
+            maxOutputTokens: 1200,
           },
         }),
       },
     );
     if (!res.ok) {throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 200)}`);}
     const body = await res.json();
+    // All parts, not just [0] — Gemini can split the reply, and has been seen
+    // emitting a prose part before the JSON.
+    const parts: any[] = body?.candidates?.[0]?.content?.parts ?? [];
     return {
-      reply: body?.candidates?.[0]?.content?.parts?.[0]?.text ?? '',
+      reply: parts.map(p => p?.text ?? '').join('').trim(),
       inputTokens: body?.usageMetadata?.promptTokenCount ?? 0,
       outputTokens: body?.usageMetadata?.candidatesTokenCount ?? 0,
       model,
@@ -365,7 +393,10 @@ async function run() {
         process.stdout.write('·');
         return {parsed: planned.shortCircuit, skipped: true, inputTokens: 0, outputTokens: 0};
       }
-      const {reply, inputTokens, outputTokens, model} = await provider(planned as any);
+      const {reply, inputTokens, outputTokens, model} = await provider({
+        ...(planned as any),
+        schema: classificationSchema(),
+      });
       const parsed =
         reply === '__REGEX_BASELINE__'
           ? parseWithRegex(c.sms, ctx, facts)

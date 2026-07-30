@@ -25,9 +25,23 @@ import {MODELS, apiKeyFor, providerForUser} from '@/lib/aiProvider';
 
 export const dynamic = 'force-dynamic';
 
-// Small ceiling on purpose: the reply is a handful of short JSON fields, output
-// is the expensive side, and a low cap bounds the damage from a runaway reply.
-const MAX_OUTPUT_TOKENS = 300;
+// Per-provider output ceilings. The reply itself is ~50 tokens of JSON either
+// way; the difference is thinking overhead.
+//
+// Claude Haiku 4.5 has no thinking enabled here, so 300 is ample.
+//
+// Gemini 3.5 Flash thinks before answering and those tokens count against this
+// cap — measured at ~620 thinking tokens for ~50 tokens of output. At 300 it hit
+// finishReason MAX_TOKENS having emitted only the preamble "Here is the JSON
+// requested:", which the client then could not parse, so every Gemini
+// classification silently fell back to regex.
+//
+// Worth revisiting: `thinkingConfig: {thinkingBudget: 0}` should remove that
+// overhead (~$0.006/SMS at Gemini's output rate, several times Claude's total
+// cost) but could not be verified — the API returned 503 "high demand" on every
+// attempt. Do not add it unverified; a bad generationConfig field is a 400,
+// which is another silent fallback.
+const MAX_OUTPUT_TOKENS = {anthropic: 300, gemini: 1200} as const;
 
 export async function POST(request: Request) {
   const {user, supabase} = await authedUser(request);
@@ -92,7 +106,7 @@ export async function POST(request: Request) {
 
       const msg = await client.messages.create({
         model,
-        max_tokens: MAX_OUTPUT_TOKENS,
+        max_tokens: MAX_OUTPUT_TOKENS.anthropic,
         // Deterministic: the same SMS should classify the same way every time,
         // otherwise the learned-rule keys shift under us between runs.
         temperature: 0,
@@ -125,7 +139,7 @@ export async function POST(request: Request) {
               responseMimeType: 'application/json',
               ...(schema ? {responseSchema: toGeminiSchema(schema)} : {}),
               temperature: 0,
-              maxOutputTokens: MAX_OUTPUT_TOKENS,
+              maxOutputTokens: MAX_OUTPUT_TOKENS.gemini,
             },
           }),
         },
@@ -135,7 +149,16 @@ export async function POST(request: Request) {
         return fail(`Gemini error ${res.status}: ${errText.slice(0, 200)}`, 502);
       }
       const data = await res.json();
-      reply = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      // Concatenate ALL text parts. Gemini can split a reply across parts (and
+      // has been observed prefixing a prose part before the JSON), so reading
+      // parts[0] alone loses the payload and looks like an empty response.
+      const parts: any[] = data?.candidates?.[0]?.content?.parts ?? [];
+      reply = parts.map(pt => pt?.text ?? '').join('').trim();
+      // Surface truncation explicitly rather than returning a half-JSON string
+      // the client would fail to parse and silently downgrade over.
+      if (!reply && data?.candidates?.[0]?.finishReason === 'MAX_TOKENS') {
+        return fail('Gemini hit the output limit before returning JSON', 502);
+      }
       inputTokens = data?.usageMetadata?.promptTokenCount ?? 0;
       outputTokens = data?.usageMetadata?.candidatesTokenCount ?? 0;
     }

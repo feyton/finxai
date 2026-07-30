@@ -706,8 +706,13 @@ export function classificationSchema(): Record<string, unknown> {
         description: 'Clean title-case counterparty name, no codes or timestamps.',
       },
       category: {type: 'string', enum: Object.keys(CAT_MAP)},
-      // '' means "none fits"; allowed alongside the real values.
-      subcategory: {type: 'string', enum: ['', ...allSubcats]},
+      // "None fits" is expressed by OMITTING this field, not by an empty-string
+      // enum member. Gemini rejects an empty enum value outright —
+      // `response_schema.properties[subcategory].enum[0]: cannot be empty` — so
+      // including '' here 400'd every Gemini classification and silently pushed
+      // it onto the regex fallback. `subcategory` is absent from `required`
+      // below, which is what makes omission legal on both providers.
+      subcategory: {type: 'string', enum: allSubcats},
       channel: {type: 'string', enum: CHANNELS.split(', ')},
       confidence: {type: 'number', description: '0..1, how sure about merchant + category.'},
     },
@@ -935,7 +940,8 @@ export function buildClassification(
   Never include reference numbers, subscriber codes, or timestamps.
 - category: best fit. Boundary guidance for the ambiguous cases:
 ${CATEGORY_HINTS}
-- subcategory: only when one clearly fits the category you picked, else "".
+- subcategory: only when one clearly fits the category you picked. If none does,
+  OMIT the field entirely rather than sending an empty value.
   Valid options per category:
 ${SUBCATS_PROMPT_BLOCK}
 - channel: the payment rail used.
