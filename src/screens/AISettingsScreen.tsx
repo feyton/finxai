@@ -1,6 +1,7 @@
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,6 +14,11 @@ import {Icon} from '../Components/ui';
 import {AiTestResult, testAiConnection} from '../tools/aiProxyClient';
 import {supabase} from '../tools/supabase';
 import {AiProvider, useAiProvider} from '../hooks/useAiProvider';
+import {
+  LocationState,
+  getLocationState,
+  requestLocationAlways,
+} from '../tools/locationPermission';
 
 type TestState = 'idle' | 'testing' | 'done' | 'error';
 
@@ -135,6 +141,21 @@ export default function AISettingsScreen({navigation}: any) {
   const [testError, setTestError] = useState('');
   const {provider, setProvider} = useAiProvider();
   const [saving, setSaving] = useState<AiProvider | null>(null);
+  const [locState, setLocState] = useState<LocationState>('denied');
+
+  useEffect(() => {
+    getLocationState().then(setLocState);
+  }, []);
+
+  const handleLocationPress = async () => {
+    const next = await requestLocationAlways();
+    setLocState(next);
+    if (next === 'foreground') {
+      // Android 11+ shows no dialog for background location — it sends the user
+      // to app settings — so re-check rather than reporting failure.
+      Linking.openSettings().catch(() => {});
+    }
+  };
 
   const choose = async (next: AiProvider) => {
     if (next === provider) {
@@ -234,6 +255,57 @@ export default function AISettingsScreen({navigation}: any) {
         {testState === 'error' && (
           <Text style={styles.testErrorText}>{testError}</Text>
         )}
+
+        {/* Transaction location — money-out only, opt-in */}
+        <SectionTitle>Transaction Location</SectionTitle>
+        <Text style={styles.pickerHint}>
+          Tag spending with where it happened, so you can see where your money actually
+          goes. Only on money out — income and transfers between your own accounts are
+          never tagged. FinXAI reads the location Android has already cached and never
+          switches on GPS, so this costs no extra battery.
+        </Text>
+        <Pressable
+          onPress={handleLocationPress}
+          disabled={locState === 'always'}
+          style={({pressed}) => [
+            styles.card,
+            styles.choiceCard,
+            locState === 'always' && styles.cardSelected,
+            {opacity: pressed ? 0.75 : 1},
+          ]}>
+          <View style={styles.cardHead}>
+            <View
+              style={[
+                styles.cardIcon,
+                {backgroundColor: (locState === 'always' ? T.accent : T.text3) + '22'},
+              ]}>
+              <Icon
+                name="Globe"
+                size={16}
+                color={locState === 'always' ? T.accent : T.text3}
+                strokeWidth={2.2}
+              />
+            </View>
+            <View style={{flex: 1}}>
+              <Text style={styles.cardTitle}>
+                {locState === 'always' ? 'Location tagging on' : 'Tag spending with location'}
+              </Text>
+              <Text style={styles.cardDesc}>
+                {locState === 'always'
+                  ? 'Money-out transactions captured live will record where you were.'
+                  : locState === 'foreground'
+                  ? 'Needs "Allow all the time" — transaction alerts arrive while FinXAI is closed. Tap to open settings.'
+                  : 'Tap to allow. You can turn this off in system settings at any time.'}
+              </Text>
+            </View>
+            <Icon
+              name={locState === 'always' ? 'CheckCircle2' : 'Circle'}
+              size={20}
+              color={locState === 'always' ? T.accent : T.border2}
+              strokeWidth={2.2}
+            />
+          </View>
+        </Pressable>
 
         {/* Privacy note */}
         <SectionTitle>Privacy</SectionTitle>

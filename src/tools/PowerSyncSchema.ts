@@ -42,6 +42,13 @@ const transactions = new Table({
   balance_after: column.real,       // bank-reported balance after this txn (audit)
   txn_ref: column.text,             // bank's Ref/Event # — de-dupes multi-sender alerts
   parse_source: column.text,        // 'ai' | 'regex' — which path classified this
+  // Money-out only, live-captured only, from Android's cached last-known fix.
+  // Null for income, transfers, and anything polled from history — see
+  // supabase_migration_v11.sql for why.
+  lat: column.real,
+  lon: column.real,
+  accuracy_m: column.real,          // metres; a cached fix can be km-wide
+  location_at: column.text,         // when the FIX was taken, not the txn
   owner_id: column.text,
   created_at: column.text,
 });
@@ -75,6 +82,10 @@ const auto_records = new Table({
   balance_after: column.real,  // bank-reported balance after this txn
   txn_ref: column.text,        // bank's Ref/Event # — de-dupes multi-sender alerts
   parse_source: column.text,   // 'ai' | 'regex' — which path classified this
+  lat: column.real,            // see transactions above
+  lon: column.real,
+  accuracy_m: column.real,
+  location_at: column.text,
   owner_id: column.text,
   created_at: column.text,
 });

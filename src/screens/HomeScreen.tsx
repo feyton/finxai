@@ -1,10 +1,11 @@
 import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
-import {useQuery} from '@powersync/react-native';
-import React, {useEffect, useMemo, useState} from 'react';
+import {usePowerSync, useQuery} from '@powersync/react-native';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   FlatList,
   Linking,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,6 +20,8 @@ import {appAlert} from '../Components/AppDialog';
 import {checkForUpdate, UpdateInfo} from '../tools/updateChecker';
 import {downloadAndInstall} from '../tools/updateInstaller';
 import {format} from 'date-fns';
+import {reconnect} from '../tools/database';
+import {syncAccountBalance} from '../tools/balance';
 
 function monthStart() {
   const d = new Date();
@@ -70,6 +73,34 @@ function TxnRow({txn, onPress, divider}: {txn: any; onPress: () => void; divider
 
 export default function HomeScreen({navigation}: any) {
   const {userId, firstName, picture} = useCurrentUser();
+  const db = usePowerSync();
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Pull-to-refresh: force a sync reconnect AND recompute every account's
+  // balance. Both are needed for different reasons — reconnect() makes PowerSync
+  // re-evaluate parameterised bucket subscriptions (a newly shared account only
+  // appears after one), while syncAccountBalance re-anchors each balance on the
+  // newest bank-reported figure and replays movements after it, which is what
+  // corrects a balance left stale by out-of-order confirmations.
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await reconnect();
+      const {rows} = await db.execute(
+        'SELECT id FROM accounts WHERE owner_id = ?',
+        [userId ?? ''],
+      );
+      for (const a of (rows?._array ?? []) as {id: string}[]) {
+        await syncAccountBalance(db, a.id);
+      }
+    } catch (e) {
+      // Offline is the common case here and not worth interrupting the user for
+      // — the local data on screen is still valid.
+      console.warn('[Home] refresh failed:', e);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [db, userId]);
   const ms = useMemo(() => monthStart(), []);
 
   const {data: accounts} = useQuery(
@@ -158,6 +189,15 @@ export default function HomeScreen({navigation}: any) {
       <SMSRetriever />
       <ScrollView
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={T.accent}
+            colors={[T.accent]}
+            progressBackgroundColor={T.surface}
+          />
+        }
         contentContainerStyle={[styles.scroll, {paddingBottom: tabBarHeight + 28}]}>
 
         {/* Top bar */}

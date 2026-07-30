@@ -53,7 +53,13 @@ function App(): React.JSX.Element {
 
   const requestSmsPermission = async () => {
     try {
-      await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
+      // READ_SMS covers the inbox poll; RECEIVE_SMS is what delivers the
+      // broadcast as a message arrives, which is what makes capture real-time.
+      // Requested together because refusing one makes the other half-useless.
+      await PermissionsAndroid.requestMultiple([
+        PermissionsAndroid.PERMISSIONS.READ_SMS,
+        PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
+      ]);
     } catch (err) {
       console.log(err);
     }
@@ -66,17 +72,23 @@ function App(): React.JSX.Element {
     // previously silent — the UI just stayed empty with no diagnostic
     // trail anywhere. Logging status changes means a PowerSync-side issue
     // shows up in logcat instead of looking like a client bug.
+    // Log only on an actual CHANGE. This fires many times a second during
+    // normal sync, and an unconditional log buried every other diagnostic in
+    // logcat — which is exactly where SMS-ingest and headless-task problems have
+    // to be read from.
+    let lastStatus = '';
     const unsubStatus = db.registerListener({
       statusChanged: status => {
-        console.log(
-          '[PowerSync status]',
-          JSON.stringify({
-            connected: status.connected,
-            connecting: status.connecting,
-            downloadError: status.dataFlowStatus?.downloadError?.message,
-            uploadError: status.dataFlowStatus?.uploadError?.message,
-          }),
-        );
+        const snapshot = JSON.stringify({
+          connected: status.connected,
+          connecting: status.connecting,
+          downloadError: status.dataFlowStatus?.downloadError?.message,
+          uploadError: status.dataFlowStatus?.uploadError?.message,
+        });
+        if (snapshot !== lastStatus) {
+          lastStatus = snapshot;
+          console.log('[PowerSync status]', snapshot);
+        }
       },
     });
 

@@ -27,14 +27,12 @@ import {
   ParseContext,
   candidateNames,
   dateKeyFromIso,
-  extractAccountRef,
   extractTransferHint,
   isTransferStatusOnly,
   maskedSuffixMatches,
   normalizeAccountNumber,
   parseSmsWithAI,
   regexExtract,
-  trailingDigits,
 } from '../tools/smsParser';
 import {
   getChannelRules,
@@ -44,7 +42,8 @@ import {
   recordMerchantChannel,
 } from '../tools/merchantMemory';
 import {syncAccountBalance} from '../tools/balance';
-import {ignoredSmsId, rowExists, smsTransactionId} from '../tools/txnId';
+import {ignoredSmsId} from '../tools/txnId';
+import {findAccountForSms, persistParsedSms} from '../tools/smsIngest';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -61,62 +60,6 @@ function getMonthStartEpoch(): number {
 // Cap on one inbox fetch. The native module truncates at this many messages
 // with no signal, so the caller warns when a run comes back exactly this size.
 const INBOX_MAX = 1500;
-
-// 'M-Money' → 'mmoney', 'MoKash' → 'mokash' — sender matching must survive
-// case and punctuation differences between what the user configured and what
-// Android reports.
-function normalizeSender(s: string | null | undefined): string {
-  return (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function senderMatches(smsAddress: string, accountAddress: string): boolean {
-  const a = normalizeSender(smsAddress);
-  const b = normalizeSender(accountAddress);
-  if (!a || !b) {
-    return false;
-  }
-  return a === b || a.includes(b) || b.includes(a);
-}
-
-// Which of the user's accounts does this SMS belong to? Sender address is
-// the primary signal, but a bank can add or change sender IDs at any time
-// (Bank of Kigali now also sends alerts from a second sender, "BK BANK",
-// with no relation by name to the account's configured address) — when no
-// sender matches, fall back to the account NUMBER the alert itself names
-// ("your account ********5558 has been..."), which never changes.
-// `channelRules` is the sender→account map the user implicitly builds every
-// time they pick a payment account in the Fix sheet. It used to be written and
-// never read (recordChannel had no consumer), so that choice was discarded;
-// it is now the last-resort route when neither the sender address nor the
-// account number the alert names identifies an account.
-function findAccountForSms(
-  sms: {body: string; address: string},
-  accounts: {address?: string | null; number?: string | null}[],
-  channelRules: Record<string, string> = {},
-): any {
-  const bySender = (accounts as any[]).find(a =>
-    senderMatches(sms.address, a.address),
-  );
-  if (bySender) {
-    return bySender;
-  }
-  const ref = extractAccountRef(sms.body);
-  const refSuffix = ref ? trailingDigits(ref) : '';
-  if (refSuffix) {
-    const byNumber = (accounts as any[]).find(a => {
-      const num = normalizeAccountNumber(a.number);
-      return num && maskedSuffixMatches(refSuffix, num);
-    });
-    if (byNumber) {
-      return byNumber;
-    }
-  }
-  // Learned from a past Fix: "SMS from this sender belongs to that account."
-  const learntId = channelRules[sms.address];
-  return learntId
-    ? (accounts as any[]).find(a => a.id === learntId)
-    : undefined;
-}
 
 const SMSRetriever: React.FC = () => {
   const db = usePowerSync();
@@ -475,107 +418,24 @@ const SMSRetriever: React.FC = () => {
             }
           }
 
-          const txType = parsed.isTransfer
-            ? 'transfer'
-            : parsed.direction === 'credit'
-            ? 'income'
-            : 'expense';
-          const transferAccountId = parsed.isTransfer
-            ? parsed.transferAccountId ?? null
-            : null;
-          const transferDirection = parsed.isTransfer
-            ? parsed.direction === 'credit'
-              ? 'in'
-              : 'out'
-            : null;
-
-          // Deterministic id from (owner, account, bank ref | body+date): a
-          // repeat of the same real-world transaction targets the same row
-          // instead of creating a second one. Covers a run interrupted before
-          // log_date advanced, and — via the server-side upsert on this same
-          // primary key — two devices processing one SMS before either syncs.
-          const txnId = smsTransactionId({
+          // Dedupe + write goes through the SHARED path so the poller and the
+          // live-broadcast path can never disagree on column lists, dedupe keys,
+          // or location gating. Batch-only concerns (transfer hints above, the
+          // log_date cursor below) stay here.
+          //
+          // No location on this path by design: a polled message can be days
+          // old, and stamping it with the device's current position would be
+          // confidently wrong. Only live capture carries a position.
+          const outcome = await persistParsedSms(db, {
+            parsed,
+            account,
             ownerId: userId!,
-            accountId: account.id,
-            txnRef: parsed.txn_ref,
-            sms: sms.body,
-            sender: account.name,
+            body: sms.body,
             smsDate,
+            occurredAt,
           });
-          if (
-            (await rowExists(db, 'transactions', txnId)) ||
-            (await rowExists(db, 'auto_records', txnId))
-          ) {
-            existingSmsSet.add(sms.body);
-            noteProcessed(account.id, smsDate);
-            continue;
-          }
-
-          if (parsed.confidence >= THRESHOLD_AUTO_SAVE) {
-            // Auto-save directly to transactions — high confidence
-            await db.execute(
-              `INSERT INTO transactions
-                 (id, amount, account_id, category, subcategory, date_time, sms, sender,
-                  payee, merchant, transaction_type, fees, currency,
-                  confirmed, source, confidence,
-                  transfer_account_id, transfer_direction, balance_after, txn_ref,
-                  parse_source, owner_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                txnId,
-                parsed.amount,
-                account.id,
-                parsed.category,
-                parsed.subcategory ?? '',
-                occurredAt,
-                sms.body,
-                account.name,
-                parsed.merchant,
-                parsed.merchant,
-                txType,
-                parsed.fee,
-                parsed.confidence,
-                transferAccountId,
-                transferDirection,
-                parsed.balance_after,
-                parsed.txn_ref,
-                parsed.parseSource ?? 'regex',
-                userId,
-                now,
-              ],
-            );
+          if (outcome === 'saved') {
             touchedAccounts.add(account.id);
-          } else {
-            // Needs review — goes to auto_records
-            await db.execute(
-              `INSERT INTO auto_records
-                 (id, amount, account_id, category, subcategory, date_time, sms, sender,
-                  payee, merchant, transaction_type, fees, currency,
-                  confirmed, source, confidence, transfer_account_id,
-                  balance_after, txn_ref, parse_source, owner_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                txnId,
-                parsed.amount,
-                account.id,
-                parsed.category,
-                parsed.subcategory ?? '',
-                occurredAt,
-                sms.body,
-                account.name,
-                parsed.merchant,
-                parsed.merchant,
-                txType,
-                parsed.fee,
-                parsed.confidence,
-                transferAccountId,
-                parsed.balance_after,
-                parsed.txn_ref,
-                parsed.parseSource ?? 'regex',
-                userId,
-                now,
-              ],
-            );
           }
           existingSmsSet.add(sms.body);
           if (txnRefKey) {

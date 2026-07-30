@@ -13,9 +13,18 @@ export type AiProvider = 'anthropic' | 'gemini';
 
 const VALID: AiProvider[] = ['anthropic', 'gemini'];
 
+/**
+ * Claude is the default, measured rather than assumed.
+ *
+ * Gemini's free tier caps at 20 requests per model per day
+ * (generate_content_free_tier_requests). Evaluating 263 real messages, 237
+ * returned HTTP 429 — which is what had been silently pushing every SMS onto
+ * the regex fallback. Gemini stays fully supported for anyone with a paid
+ * Google key, but it cannot be the default at this app's message volume.
+ */
 export function defaultProvider(): AiProvider {
   const env = (process.env.AI_PROVIDER_DEFAULT ?? '').toLowerCase();
-  return (VALID as string[]).includes(env) ? (env as AiProvider) : 'gemini';
+  return (VALID as string[]).includes(env) ? (env as AiProvider) : 'anthropic';
 }
 
 /**

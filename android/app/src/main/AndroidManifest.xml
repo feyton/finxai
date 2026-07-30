@@ -3,8 +3,24 @@
     <uses-permission android:name="android.permission.INTERNET" />
       <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
        <uses-permission android:name="android.permission.READ_SMS" />
+       <!-- Real-time capture. READ_SMS alone only allows reading the inbox on
+            demand; RECEIVE_SMS is what delivers the broadcast as a message
+            arrives, so a transaction is recorded without opening the app.
+            This is the ordinary observe broadcast, NOT the default-SMS-app-only
+            SMS_DELIVER — FinXAI never becomes the device's SMS handler. -->
+       <uses-permission android:name="android.permission.RECEIVE_SMS" />
        <!-- Let the app install its own downloaded update APK (in-app updater) -->
        <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+       <!-- Location is attached to MONEY-OUT transactions only, and only from
+            Android's cached last-known fix — the app never requests a fresh GPS
+            fix, so no radio is woken on account of an SMS. BACKGROUND_LOCATION
+            is required because the SMS broadcast is delivered while the app is
+            not in the foreground; without it a live-captured expense would
+            never get a position. All three are optional at runtime: denied
+            permission simply means transactions carry no location. -->
+       <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+       <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+       <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
     <application
       android:name=".MainApplication"
@@ -26,6 +42,21 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+
+      <!-- Real-time SMS capture: receiver hands the message to a headless JS
+           task, which runs the same ingest path the in-app poller uses. -->
+      <receiver
+        android:name=".sms.SmsReceiver"
+        android:exported="true"
+        android:permission="android.permission.BROADCAST_SMS">
+        <intent-filter android:priority="500">
+            <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+        </intent-filter>
+      </receiver>
+
+      <service
+        android:name=".sms.SmsHeadlessTaskService"
+        android:exported="false" />
 
       <!-- Home-screen balance widget (react-native-android-widget) -->
       <service
