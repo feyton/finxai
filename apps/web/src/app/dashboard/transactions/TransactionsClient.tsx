@@ -704,6 +704,7 @@ function TxnDrawer({
   setErr: (e: string | null) => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const [merchant, setMerchant] = useState(txn.merchant || txn.payee || '');
   const [catId, setCatId] = useState<CategoryId>(resolveCat(txn.category ?? ''));
   const [subcategory, setSubcategory] = useState(txn.subcategory ?? '');
   const [txType, setTxType] = useState(txn.transaction_type ?? 'expense');
@@ -756,6 +757,7 @@ function TxnDrawer({
           .eq('id', accId);
       }
 
+      const cleanMerchant = merchant.trim();
       const patch: Partial<Transaction> = {
         amount: numericAmount,
         account_id: accountId || txn.account_id,
@@ -764,6 +766,13 @@ function TxnDrawer({
         transaction_type: txType,
         transfer_direction: txType === 'transfer' ? txn.transfer_direction ?? (sign > 0 ? 'in' : 'out') : null,
         note: note || null,
+        // `payee` is written alongside `merchant` because the two are kept in step
+        // everywhere else — the mobile ingest sets both from the same value, and
+        // several lists fall back to `payee` when `merchant` is empty. Updating only
+        // one would make a row render its old name in some places and the new one in
+        // others. Empty input clears both rather than storing "".
+        merchant: cleanMerchant || null,
+        payee: cleanMerchant || null,
       };
       const {error} = await supabase.from('transactions').update(patch).eq('id', txn.id);
       if (error) throw error;
@@ -879,6 +888,27 @@ function TxnDrawer({
               <Money amount={numericAmount} type={txType} size={28} />
             </div>
           </div>
+
+          {/* First field, because the name is what you are looking at when you decide
+              a row is wrong. Roughly 10% of SMS rows still carry a parser artefact
+              here — "Unknown", "sender:", or a whole "…was completed at…" clause — and
+              until now there was no way to correct one from the web at all. */}
+          <FieldRow label="Merchant">
+            <input
+              className="input w-full"
+              value={merchant}
+              onChange={e => setMerchant(e.target.value)}
+              placeholder="Who this was with"
+              // Enter saves, matching the drawer's primary action, so a name fix is
+              // type-and-go rather than type-then-reach-for-the-mouse.
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !busy) {
+                  e.preventDefault();
+                  save();
+                }
+              }}
+            />
+          </FieldRow>
 
           <FieldRow label="Type">
             <div className="flex gap-1.5">
