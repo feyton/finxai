@@ -96,13 +96,20 @@ export default function HomeScreen({navigation}: any) {
     setRepairing(true);
     try {
       const res = await repairSync();
-      console.log('[Home] sync repair re-queued', res.touched, res.perTable);
-      // Give the upload a moment before re-measuring, otherwise the banner
-      // reports the gap it had a second ago and looks like the fix did nothing.
-      await new Promise(r => setTimeout(r, 2500));
+      console.log('[Home] sync repair uploaded', res.touched, res.perTable);
+      // No artificial wait: the repair writes to Supabase directly, so by the time
+      // it returns the server already has the rows and the re-count is accurate.
       await checkSyncGap();
+      if (res.touched === 0) {
+        // Say so rather than leaving the banner sitting there looking ignored.
+        appAlert(
+          'Nothing to upload',
+          'The server already has these records, or they were rejected. Pull down to refresh — if the banner stays, the logs will show why.',
+        );
+      }
     } catch (e) {
       console.warn('[Home] sync repair failed:', e);
+      appAlert('Could not upload', 'Check your connection and try again.');
     } finally {
       setRepairing(false);
     }
