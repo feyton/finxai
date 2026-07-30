@@ -54,10 +54,15 @@ export async function loadDatasets(monthsBack = 6): Promise<Datasets> {
     ]);
 
   const tx = (txRes.data ?? []) as Transaction[];
+  // The AGE OF THE NEWEST RECORD — not a sync status, which is what the old
+  // "Synced from mobile · 2 hours ago" wording implied. A quiet afternoon made an
+  // up-to-date dashboard look two hours behind, and during a genuine sync incident
+  // it blamed the wrong side: the web was current and the phone was stale. The
+  // caller now renders this as "Latest record 2 hours ago".
   const latest = tx[0]?.created_at ?? tx[0]?.date_time;
   const syncLabel = latest
-    ? `Synced from mobile · ${formatDistanceToNowStrict(new Date(latest), {addSuffix: true})}`
-    : 'Synced from mobile';
+    ? formatDistanceToNowStrict(new Date(latest), {addSuffix: true})
+    : '';
 
   return {
     uid: user?.id ?? '',

@@ -3,6 +3,7 @@
 import type {CSSProperties, ReactNode} from 'react';
 import {CATS, type CategoryId, fmtAmount, resolveCat} from '@/lib/theme';
 import {Icon} from './Icon';
+import {SyncPill} from './SyncPill';
 
 export function Card({
   children,
@@ -276,34 +277,9 @@ export function Topbar({
         {sub && <div className="mt-0.5 text-[12.5px] text-ink2">{sub}</div>}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2.5">
-        {syncLabel && (
-          <span
-            className="pill"
-            style={{
-              background: 'var(--accent-soft)',
-              color: 'var(--accent-700)',
-              border: '1px solid rgba(22,163,74,0.22)',
-              padding: '7px 12px',
-              fontSize: 12,
-            }}>
-            <Icon name="refresh" size={13} sw={2.2} />
-            {syncLabel}
-            {reviewCount > 0 && (
-              <span
-                className="tabnum"
-                style={{
-                  background: 'var(--warn)',
-                  color: '#3a2400',
-                  borderRadius: 99,
-                  padding: '1px 6px',
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                }}>
-                {reviewCount} to review
-              </span>
-            )}
-          </span>
-        )}
+        {/* Interactive: this is now the refresh control as well as the freshness
+            readout. See components/SyncPill for why the old wording had to go. */}
+        <SyncPill newestLabel={syncLabel ?? ''} reviewCount={reviewCount} />
         {right}
       </div>
     </div>
