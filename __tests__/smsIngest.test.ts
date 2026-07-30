@@ -343,6 +343,27 @@ describe('persistParsedSms', () => {
     expect(await persistParsedSms(db, args({txn_ref: 'REF-PENDING'}))).toBe('duplicate');
   });
 
+  it('skips a message whose BODY already exists, even under a different id', async () => {
+    // The id falls back to including smsDate when there is no bank reference, and the
+    // live receiver (PDU service-centre timestamp) and the poller (inbox received-at)
+    // disagree about it — so one real SMS produced two ids and the id check missed.
+    // Three already-confirmed MTN transfers came back for review that way.
+    const db = {
+      calls: [] as {sql: string; params: any[]}[],
+      execute: jest.fn(async (sql: string, params: any[] = []) => {
+        db.calls.push({sql, params});
+        // No id matches, but the body IS already recorded.
+        if (/^SELECT 1 FROM transactions WHERE owner_id/.test(sql.trim())) {
+          return {rows: {_array: [{1: 1}]}};
+        }
+        return {rows: {_array: []}};
+      }),
+    };
+    const out = await persistParsedSms(db, args({confidence: 0.5}));
+    expect(out).toBe('duplicate');
+    expect(db.calls.find(c => c.sql.includes('INSERT INTO auto_records'))).toBeUndefined();
+  });
+
   it('writes the same id the dedupe check looked for', async () => {
     // Guards against the id being computed differently at check and at write —
     // which would make dedupe silently never match.

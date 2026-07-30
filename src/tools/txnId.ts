@@ -106,6 +106,48 @@ export function ignoredSmsId(args: {
  * explicit. That only covers the local case; two devices racing still both
  * insert, and converge server-side because the upsert targets one primary key.
  */
+/**
+ * Has this exact SMS body already been recorded for this account?
+ *
+ * A SECOND dedupe key, because the id-based one cannot be trusted across ingest paths.
+ * The id falls back to `body:<sender>|<smsDate>|<sms>` when a message carries no bank
+ * reference, and the two paths disagree about smsDate: the live receiver passes the
+ * PDU's service-centre timestamp (`timestampMillis`) while the poller passes the Android
+ * inbox's received-at (`sms.date`). Those routinely differ by seconds, so one real SMS
+ * produced two different ids and `rowExists` missed.
+ *
+ * Observed on 2026-07-30: three MTN transfers already confirmed as transactions were
+ * re-offered for review. Their bodies were byte-identical and their txn_ref was null.
+ *
+ * Body identity is a safe key for these providers because MoMo and BK embed the
+ * transaction timestamp in the message, so two genuine purchases never produce the same
+ * bytes. Scoped to owner + account so an identical alert on a different account is still
+ * its own record.
+ */
+export async function smsAlreadyRecorded(
+  db: any,
+  ownerId: string,
+  accountId: string,
+  sms: string,
+): Promise<boolean> {
+  if (!sms || !ownerId) {
+    return false;
+  }
+  try {
+    const {rows} = await db.execute(
+      `SELECT 1 FROM transactions WHERE owner_id = ? AND account_id = ? AND sms = ?
+       UNION ALL
+       SELECT 1 FROM auto_records WHERE owner_id = ? AND account_id = ? AND sms = ?
+       LIMIT 1`,
+      [ownerId, accountId, sms, ownerId, accountId, sms],
+    );
+    return (rows?._array?.length ?? 0) > 0;
+  } catch {
+    // A failed check must not block ingest — the id check still applies.
+    return false;
+  }
+}
+
 export async function rowExists(
   db: any,
   table: 'transactions' | 'auto_records' | 'ignored_sms',

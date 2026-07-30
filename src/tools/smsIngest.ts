@@ -23,7 +23,7 @@ import {
 } from './smsParser';
 import {ParsedSMS} from './smsTypes';
 import {getChannelRules, getMerchantChannels, getMerchantRules} from './merchantMemory';
-import {ignoredSmsId, rowExists, smsTransactionId} from './txnId';
+import {ignoredSmsId, rowExists, smsAlreadyRecorded, smsTransactionId} from './txnId';
 import {syncAccountBalance} from './balance';
 
 export interface AccountLike {
@@ -165,7 +165,13 @@ export async function persistParsedSms(
   });
   if (
     (await rowExists(db, 'transactions', txnId)) ||
-    (await rowExists(db, 'auto_records', txnId))
+    (await rowExists(db, 'auto_records', txnId)) ||
+    // Second key, by body. The id alone is not enough across ingest paths: without a
+    // bank reference it includes smsDate, and the live receiver (PDU service-centre
+    // timestamp) and the poller (inbox received-at) disagree about that, so one real
+    // SMS yielded two ids. That is how three already-confirmed MTN transfers came back
+    // for review on 2026-07-30.
+    (await smsAlreadyRecorded(db, ownerId, account.id, body))
   ) {
     return 'duplicate';
   }

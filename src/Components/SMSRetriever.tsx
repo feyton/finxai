@@ -74,21 +74,11 @@ const SMSRetriever: React.FC = () => {
     [userId ?? ''],
   );
 
-  // Deduplicate: get already-stored + ignored SMS bodies to avoid reprocessing
-  const {data: existingRecords} = useQuery(
-    'SELECT sms FROM auto_records WHERE owner_id = ? UNION SELECT sms FROM transactions WHERE owner_id = ? UNION SELECT sms FROM ignored_sms WHERE owner_id = ?',
-    [userId ?? '', userId ?? '', userId ?? ''],
-  );
-
-  // Bank of Kigali now sends TWO alerts per transaction from two different
-  // senders/formats, sharing the same Ref/Event #. This dedupes by
-  // (account, txn_ref) across BOTH tables so the second alert never
-  // creates a second record for the same real-world transaction.
-  const {data: existingTxnRefs} = useQuery(
-    'SELECT account_id, txn_ref FROM auto_records WHERE owner_id = ? AND txn_ref IS NOT NULL UNION SELECT account_id, txn_ref FROM transactions WHERE owner_id = ? AND txn_ref IS NOT NULL',
-    [userId ?? '', userId ?? ''],
-  );
-
+  // NOTE: the dedupe data is deliberately NOT a useQuery here. Two reactive
+  // subscriptions over every transaction, auto_record and ignored_sms row re-rendered
+  // this component on every write for values only ever read inside processSms — and
+  // when they were effect dependencies they formed half of the feedback loop that
+  // queued 11,245 upload operations. loadDedupeSets reads them per run instead.
   const autoAccounts = (accounts as any[]).filter(a => a.auto === 1 && a.address);
 
   // A signature of ONLY the account fields that change how SMS are matched.
@@ -120,33 +110,48 @@ const SMSRetriever: React.FC = () => {
     [accounts],
   );
 
-  // Readiness, not a change signal. The dedupe queries must have RESOLVED before a
-  // run starts, but they also change on every insert this effect makes — depending
-  // on their contents would reintroduce the same loop by a different route.
-  const dedupeReady = existingRecords !== undefined && existingTxnRefs !== undefined;
-
   useEffect(() => {
     if (!userId || autoAccounts.length === 0 || processing.current) {return;}
-    // Wait for the dedupe queries too. These are three INDEPENDENT PowerSync
-    // queries: gating only on `accounts` left a window where accounts had
-    // arrived but existingRecords hadn't, so both dedupe sets were empty
-    // (`?? []`) and already-processed messages looked new. The log_date floor
-    // hides most of it, but a run interrupted before log_date advanced — or a
-    // second device processing the same SMS before it syncs — re-inserts.
-    if (!dedupeReady) {return;}
     processSms();
     // accounts.length alone missed edits to an account's number/sender address,
     // so a corrected account only took effect after a restart — hence the
     // signature above rather than the length.
-  }, [userId, accountsSignature, dedupeReady]);
+  }, [userId, accountsSignature]);
 
-  const existingSmsSet = new Set(
-    (existingRecords ?? []).map((r: any) => r.sms).filter(Boolean),
-  );
-
-  const existingTxnRefSet = new Set(
-    (existingTxnRefs ?? []).map((r: any) => `${r.account_id}:${r.txn_ref}`),
-  );
+  /**
+   * Read the dedupe sets at RUN TIME, not from a render closure.
+   *
+   * These used to be built from the `existingRecords` / `existingTxnRefs` useQuery
+   * results. When those were effect dependencies the sets were always current, but that
+   * dependency was also half of the feedback loop that queued 11,245 operations. Removing
+   * it fixed the loop and introduced a race: PowerSync's useQuery resolves to `[]` before
+   * the rows arrive, so an "is it defined yet" gate could pass with EMPTY sets and every
+   * already-processed message looked new.
+   *
+   * That is how three already-confirmed MTN transfers were re-offered for review on
+   * 2026-07-30. Querying here removes the race instead of trading one for another: the
+   * data is read once per run, immediately before it is used, and cannot be stale.
+   */
+  const loadDedupeSets = async (owner: string) => {
+    const [recs, refs] = await Promise.all([
+      db.execute(
+        'SELECT sms FROM auto_records WHERE owner_id = ? UNION SELECT sms FROM transactions WHERE owner_id = ? UNION SELECT sms FROM ignored_sms WHERE owner_id = ?',
+        [owner, owner, owner],
+      ),
+      db.execute(
+        'SELECT account_id, txn_ref FROM auto_records WHERE owner_id = ? AND txn_ref IS NOT NULL UNION SELECT account_id, txn_ref FROM transactions WHERE owner_id = ? AND txn_ref IS NOT NULL',
+        [owner, owner],
+      ),
+    ]);
+    return {
+      smsSet: new Set(
+        ((recs?.rows?._array ?? []) as any[]).map(r => r.sms).filter(Boolean),
+      ),
+      refSet: new Set(
+        ((refs?.rows?._array ?? []) as any[]).map(r => `${r.account_id}:${r.txn_ref}`),
+      ),
+    };
+  };
 
   const fetchInbox = (
     minDate: number,
@@ -180,6 +185,12 @@ const SMSRetriever: React.FC = () => {
       // (timestamps baked into the key, plus the poisonous 'unknown' rule).
       // Idempotent — a no-op once it has run.
       await migrateMerchantRuleKeys(db, userId!);
+
+      // Fresh dedupe sets for THIS run — see loadDedupeSets for why they are not read
+      // from a render closure.
+      const {smsSet: existingSmsSet, refSet: existingTxnRefSet} = await loadDedupeSets(
+        userId!,
+      );
 
       // Learned rules feed the classifier — a counterparty the user corrected
       // to 'transfer' (or to a category) is honored on every future SMS. This
