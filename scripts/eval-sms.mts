@@ -43,6 +43,7 @@ import {
   parseWithRegex,
   regexExtract,
 } from '../src/tools/smsParser';
+import {resolveCat} from '../src/theme';
 
 // ── Env loading ────────────────────────────────────────────────────────────
 // Read .env files ourselves rather than requiring the caller to export things:
@@ -220,12 +221,29 @@ function balanceFromSms(sms: string): number | null {
   return m ? Math.round(parseFloat(m[1].replace(/,/g, ''))) : null;
 }
 
+// Some stored labels were written BEFORE the extraction fixes and carry the old
+// bug's residue — e.g. "INSTAPLUS SERVICES Ltd 55411 was completed at
+// 2026-07-27 20:23:29". Scoring against those marks a correct answer wrong, so
+// they are excluded from the merchant metric and counted separately instead.
+function labelIsPolluted(label: unknown): boolean {
+  const s = String(label ?? '');
+  return /\d{4}-\d{2}-\d{2}/.test(s) || /(?:was|has been)\s+completed/i.test(s);
+}
+
 function scoreOne(parsed: any, expected: any) {
   const wantTransfer = expected.transaction_type === 'transfer';
   const smsBalance = balanceFromSms(expected.sms ?? '');
   return {
-    merchant: merchantMatches(parsed.merchant, expected.merchant),
-    category: wantTransfer ? null : norm(parsed.category) === norm(expected.category),
+    merchant: labelIsPolluted(expected.merchant)
+      ? null
+      : merchantMatches(parsed.merchant, expected.merchant),
+    // Legacy rows store a display name ("Family & Transfers", "Entertainment")
+    // rather than a CategoryId, so both sides go through the same resolver the
+    // app uses instead of being compared as raw strings.
+    category: wantTransfer
+      ? null
+      : resolveCat(String(parsed.category ?? '')) ===
+        resolveCat(String(expected.category ?? '')),
     isTransfer: !!parsed.isTransfer === wantTransfer,
     amount: Number(parsed.amount) === Number(expected.amount ?? 0),
     fee: Number(parsed.fee) === Number(expected.fees ?? 0),
@@ -285,7 +303,28 @@ async function run() {
     }
   }
 
+  // Learned rules, if supplied. These matter enormously for a fair number:
+  // a large share of the golden set is person-to-person MoMo, where the
+  // category is NOT inferable from the message text ("payment to Lambert
+  // 005868") and only a rule the user taught can supply it. Measuring with no
+  // rules therefore measures an unwinnable task and understates production
+  // accuracy; measuring with them shows what the user actually experiences.
+  let rules: any[] = [];
+  const rulesPath = flag('rules', 'eval/rules.local.json');
+  if (!argv.includes('--no-rules') && existsSync(rulesPath)) {
+    try {
+      rules = JSON.parse(readFileSync(rulesPath, 'utf8'));
+    } catch {
+      /* leave empty */
+    }
+  }
+
   console.log(`Golden set: ${cases.length} messages from ${setPath}`);
+  console.log(
+    rules.length
+      ? `Rules: ${rules.length} learned (production-like). --no-rules to measure the model alone.`
+      : 'Rules: none — measures the model alone, which understates person-to-person categories.',
+  );
   console.log(
     accounts.length
       ? `Accounts: ${accounts.length} (own-account transfer detection active)`
@@ -312,6 +351,7 @@ async function run() {
         sender: c.sender ?? '',
         userName: c.userName ?? accountHolder,
         accounts,
+        rules,
         // The account this message arrived for, matched by sender name — needed
         // so regexExtract can tell which side of a "Credited/Debited account"
         // alert is the user's.
@@ -320,7 +360,7 @@ async function run() {
         )?.id,
       };
       const facts = regexExtract(c.sms, ctx);
-      const planned = buildClassification(c.sms, [], {}, ctx, facts);
+      const planned = buildClassification(c.sms, rules, {}, ctx, facts);
       if (planned.shortCircuit) {
         process.stdout.write('·');
         return {parsed: planned.shortCircuit, skipped: true, inputTokens: 0, outputTokens: 0};
@@ -329,7 +369,7 @@ async function run() {
       const parsed =
         reply === '__REGEX_BASELINE__'
           ? parseWithRegex(c.sms, ctx, facts)
-          : applyClassification(reply, planned, c.sms, [], ctx);
+          : applyClassification(reply, planned, c.sms, rules, ctx);
       process.stdout.write('.');
       return {parsed, inputTokens, outputTokens, model};
     });
@@ -340,6 +380,7 @@ async function run() {
       fields.map(f => [f, {ok: 0, n: 0}]),
     );
     const failures: any[] = [];
+    const errorReasons = new Map<string, number>();
     let errors = 0;
     let skipped = 0;
     let inTok = 0;
@@ -348,7 +389,14 @@ async function run() {
     const confidences: number[] = [];
 
     results.forEach((r: any, i: number) => {
-      if (!r || r.error) {errors++; return;}
+      if (!r || r.error) {
+        errors++;
+        // Collapse to the distinctive part so a quota wall or a bad model name
+        // is obvious rather than hiding behind a count.
+        const key = String(r?.error ?? 'unknown').split(/\r?\n/)[0].slice(0, 110);
+        errorReasons.set(key, (errorReasons.get(key) ?? 0) + 1);
+        return;
+      }
       if (r.skipped) {skipped++;}
       model = r.model ?? model;
       inTok += r.inputTokens ?? 0;
@@ -375,6 +423,9 @@ async function run() {
 
     console.log(`\n  model        ${model || '(n/a)'}`);
     console.log(`  wall clock   ${elapsed}s   errors ${errors}   short-circuited ${skipped}`);
+    for (const [reason, n] of [...errorReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)) {
+      console.log(`  ! ${n}x ${reason}`);
+    }
     console.log('  -- accuracy vs human labels (what the user confirmed/fixed) --');
     for (const f of HUMAN_FIELDS) {
       console.log(`  ${f.padEnd(14)} ${String(pct(f)).padStart(5)}%  (${tally[f].ok}/${tally[f].n})`);

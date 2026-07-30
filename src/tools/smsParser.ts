@@ -38,7 +38,16 @@ const CHANNELS =
 // food, or a service depending on who the counterparty is.
 const CATEGORY_HINTS = [
   '  • food vs groceries: a prepared meal/restaurant/cafe is food; supermarket or market shopping to cook later is groceries.',
-  '  • family vs savings: money to/from another PERSON (not a shop, not the user themselves) is family. savings is only the user moving money into their own savings pocket.',
+  // Measured against 263 real labelled messages: the previous version of this
+  // line said "money to/from a PERSON is family", and the model obeyed it —
+  // which produced the single largest error cluster, because the user
+  // categorises person-to-person payments by PURPOSE (paying an individual for
+  // a meal is food, for a ride is transport, being paid by one is salary), not
+  // by who the counterparty is.
+  '  • paying an individual is NOT automatically family. Rwandan MoMo is used to pay people for ordinary goods and services, so judge by purpose when the message hints at one. Use family only for genuine support/remittance between relatives.',
+  '  • a person paying the USER is usually salary or a repayment, not family.',
+  '  • IMPORTANT: for a payment to a bare personal name with no clue to the purpose ("payment of 6,300 RWF to Lambert 005868"), the category is genuinely not knowable from the message. Give your best guess but set confidence LOW (≤ 0.5) so the user is asked — their answer is then remembered for that counterparty.',
+  '  • savings is only the user moving money into their own savings pocket (e.g. Mokash), never a payment to another person.',
   '  • airtime vs utilities: phone credit and data bundles are airtime; electricity (Cash Power), water (WASAC) and similar household services are utilities.',
   '  • housing vs rent: a monthly rent payment is rent; purchases for the home itself (furniture, repairs, fittings) are housing.',
   '  • personal_care vs health: salon, barber, beauty and grooming are personal_care; clinic, pharmacy and hospital are health.',

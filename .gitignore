@@ -84,4 +84,3 @@ eval/report.json
 eval/*.local.json
 eval/*.log
 eval/*.mts
-eval/accounts.local.json
