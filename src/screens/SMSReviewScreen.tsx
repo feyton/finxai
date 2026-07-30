@@ -28,6 +28,7 @@ import {
 import {extractBalance, parseSmsWithAI, regexExtract} from '../tools/smsParser';
 import {supabase} from '../tools/supabase';
 import {syncAccountBalance} from '../tools/balance';
+import {ignoredSmsId} from '../tools/txnId';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -455,7 +456,14 @@ export default function SMSReviewScreen({navigation}: any) {
     try {
       await db.execute(
         'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [uuid(), record.sms ?? '', record.sender ?? '', 'user', userId, new Date().toISOString()],
+        [
+          ignoredSmsId({ownerId: userId!, sms: record.sms ?? '', sender: record.sender ?? ''}),
+          record.sms ?? '',
+          record.sender ?? '',
+          'user',
+          userId,
+          new Date().toISOString(),
+        ],
       );
       await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
     } catch (e) {
@@ -483,7 +491,10 @@ export default function SMSReviewScreen({navigation}: any) {
             parse_source, owner_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          uuid(),
+          // The auto_record id IS the deterministic transaction id (see
+          // tools/txnId.ts) — reuse it so confirming the same record on two
+          // devices converges on one transactions row instead of two.
+          record.id,
           record.amount,
           record.account_id,
           record.category,
@@ -626,7 +637,10 @@ export default function SMSReviewScreen({navigation}: any) {
             parse_source, owner_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          uuid(),
+          // The auto_record id IS the deterministic transaction id (see
+          // tools/txnId.ts) — reuse it so confirming the same record on two
+          // devices converges on one transactions row instead of two.
+          record.id,
           record.amount,
           accountId,
           txType === 'transfer' ? record.category : fix.category,

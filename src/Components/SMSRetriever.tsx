@@ -44,6 +44,7 @@ import {
   recordMerchantChannel,
 } from '../tools/merchantMemory';
 import {syncAccountBalance} from '../tools/balance';
+import {ignoredSmsId, rowExists, smsTransactionId} from '../tools/txnId';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -321,7 +322,7 @@ const SMSRetriever: React.FC = () => {
         if (isTransferStatusOnly(sms.body)) {
           await db.execute(
             'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-            [uuid(), sms.body, account.name, 'status', userId, new Date().toISOString()],
+            [ignoredSmsId({ownerId: userId!, sms: sms.body, sender: account.name}), sms.body, account.name, 'status', userId, new Date().toISOString()],
           );
           existingSmsSet.add(sms.body);
           noteProcessed(account.id, smsDate);
@@ -350,7 +351,7 @@ const SMSRetriever: React.FC = () => {
           if (richer && richer !== sms.body) {
             await db.execute(
               'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-              [uuid(), sms.body, account.name, 'duplicate', userId, new Date().toISOString()],
+              [ignoredSmsId({ownerId: userId!, sms: sms.body, sender: account.name}), sms.body, account.name, 'duplicate', userId, new Date().toISOString()],
             );
             existingSmsSet.add(sms.body);
             noteProcessed(account.id, smsDate);
@@ -384,7 +385,7 @@ const SMSRetriever: React.FC = () => {
           if (parsed.status === 'failed') {
             await db.execute(
               'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-              [uuid(), sms.body, account.name, 'failed', userId, now],
+              [ignoredSmsId({ownerId: userId!, sms: sms.body, sender: account.name}), sms.body, account.name, 'failed', userId, now],
             );
             existingSmsSet.add(sms.body);
             noteProcessed(account.id, smsDate);
@@ -397,7 +398,7 @@ const SMSRetriever: React.FC = () => {
           if (txnRefKey && existingTxnRefSet.has(txnRefKey)) {
             await db.execute(
               'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-              [uuid(), sms.body, account.name, 'duplicate', userId, now],
+              [ignoredSmsId({ownerId: userId!, sms: sms.body, sender: account.name}), sms.body, account.name, 'duplicate', userId, now],
             );
             existingSmsSet.add(sms.body);
             noteProcessed(account.id, smsDate);
@@ -488,6 +489,28 @@ const SMSRetriever: React.FC = () => {
               : 'out'
             : null;
 
+          // Deterministic id from (owner, account, bank ref | body+date): a
+          // repeat of the same real-world transaction targets the same row
+          // instead of creating a second one. Covers a run interrupted before
+          // log_date advanced, and — via the server-side upsert on this same
+          // primary key — two devices processing one SMS before either syncs.
+          const txnId = smsTransactionId({
+            ownerId: userId!,
+            accountId: account.id,
+            txnRef: parsed.txn_ref,
+            sms: sms.body,
+            sender: account.name,
+            smsDate,
+          });
+          if (
+            (await rowExists(db, 'transactions', txnId)) ||
+            (await rowExists(db, 'auto_records', txnId))
+          ) {
+            existingSmsSet.add(sms.body);
+            noteProcessed(account.id, smsDate);
+            continue;
+          }
+
           if (parsed.confidence >= THRESHOLD_AUTO_SAVE) {
             // Auto-save directly to transactions — high confidence
             await db.execute(
@@ -499,7 +522,7 @@ const SMSRetriever: React.FC = () => {
                   parse_source, owner_id, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
-                uuid(),
+                txnId,
                 parsed.amount,
                 account.id,
                 parsed.category,
@@ -532,7 +555,7 @@ const SMSRetriever: React.FC = () => {
                   balance_after, txn_ref, parse_source, owner_id, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?, ?, ?)`,
               [
-                uuid(),
+                txnId,
                 parsed.amount,
                 account.id,
                 parsed.category,
