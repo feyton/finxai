@@ -2,6 +2,7 @@ import {createClient} from '@/lib/supabase/server';
 import {loadDatasets} from '@/lib/insights';
 import {Topbar} from '@/components/ui';
 import {DebtsClient} from './DebtsClient';
+import {NewDebt} from './NewDebt';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,7 @@ export default async function DebtsPage() {
         sub="Repayment schedules, amortization and payoff projections"
         syncLabel={d.syncLabel}
         reviewCount={d.reviewCount}
+        right={<NewDebt ownerId={d.uid} accounts={d.accounts} />}
       />
       <DebtsClient debts={d.debts} schedules={schedules ?? []} />
     </>

@@ -1,6 +1,7 @@
 import {loadDatasets} from '@/lib/insights';
 import {Topbar} from '@/components/ui';
 import {BudgetsClient} from './BudgetsClient';
+import {NewBudget} from './NewBudget';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +14,7 @@ export default async function BudgetsPage() {
         sub="Named plans with items — claim spending and contributions against them"
         syncLabel={d.syncLabel}
         reviewCount={d.reviewCount}
+        right={<NewBudget ownerId={d.uid} />}
       />
       <BudgetsClient
         budgets={d.budgets}

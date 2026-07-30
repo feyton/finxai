@@ -139,7 +139,11 @@ export function BudgetsClient({
 
       {computed.length === 0 && (
         <Card>
-          <WEmpty icon="pie" title="No budgets yet" sub="Create budgets on the phone — manage and analyze them here." />
+          <WEmpty
+            icon="pie"
+            title="No budgets yet"
+            sub="Use New budget to set a limit per category. FinXAI matches your spending against it as the SMS arrive, so you don't have to log anything."
+          />
         </Card>
       )}
 

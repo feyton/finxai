@@ -53,7 +53,11 @@ export function DebtsClient({debts, schedules}: {debts: Debt[]; schedules: any[]
 
       {debts.length === 0 && (
         <Card>
-          <WEmpty icon="coins" title="No debts tracked" sub="Add debts from the mobile app — they sync here." />
+          <WEmpty
+            icon="coins"
+            title="No debts tracked"
+            sub="Use New debt for anything you owe or are owed. Give it a rate and a term and FinXAI works out the repayment and the payoff date."
+          />
         </Card>
       )}
 

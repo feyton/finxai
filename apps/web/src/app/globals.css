@@ -23,6 +23,14 @@
   --color-neg: #dc2626;
   --color-warn: #d97706;
   --color-info: #2563eb;
+
+  /* Provider colours, taken from the same palette the Android app assigns in
+     accountTint() — so a Bank of Kigali row is the same blue in both halves of
+     the product. `momo` doubles as the "raw, not yet parsed" accent: these
+     messages mostly arrive from MTN, and yellow reading as machine-text against
+     green reading as trusted-data is the whole pipeline in two colours. */
+  --color-momo: #ffcc00;
+  --color-bk: #1e73be;
 }
 
 :root {
@@ -44,6 +52,13 @@
   --expense: #dc2626;
   --warn: #d97706;
   --info: #2563eb;
+  /* Deep forest ink — carries green rather than being neutral black, so the dark
+     surfaces belong to the same palette as the accent instead of sitting under
+     it. Slightly lifted from --sidebar-bg so the login field and the sidebar
+     read as related but distinct planes. */
+  --ink: #0b1410;
+  --momo: #ffcc00;
+  --bk: #1e73be;
   --sidebar-bg: #0b0f0d;
   --sidebar-text: #c7cfc7;
   --sidebar-text-2: #7c8981;
@@ -59,6 +74,16 @@
   }
   body {
     @apply bg-bg text-ink antialiased;
+    /* The font is supplied as a CSS variable rather than a class on <html>, so
+       it has to be applied here — the display and mono faces are opt-in per
+       element. */
+    font-family: var(--font-body), system-ui, sans-serif;
+  }
+  /* Money should line up in a column. */
+  .tabnum,
+  th,
+  td {
+    font-variant-numeric: tabular-nums;
   }
   a {
     color: inherit;
@@ -138,6 +163,89 @@
     @apply mb-3 rounded-lg border border-neg/25 bg-neg/10 px-3 py-2 text-[12px] text-neg;
   }
 
+  /* ── Modal (native <dialog>) ─────────────────────────────────────────── */
+  .modal {
+    /* The element itself is the backdrop-catching surface, so it fills the
+       viewport and centres its panel. Padding keeps the panel off the edges on a
+       phone. */
+    @apply m-0 h-full max-h-none w-full max-w-none border-0 bg-transparent p-4 sm:p-6;
+    display: none;
+  }
+  .modal[open] {
+    @apply flex items-start justify-center sm:items-center;
+  }
+  .modal::backdrop {
+    background: rgb(11 20 16 / 0.55);
+    backdrop-filter: blur(2px);
+  }
+  .modal-panel {
+    @apply flex w-full flex-col overflow-hidden rounded-[16px] border border-line bg-surface;
+    max-height: calc(100vh - 2rem);
+    box-shadow: var(--shadow-lg);
+    animation: modal-in 0.16s ease-out both;
+  }
+  @keyframes modal-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.99);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .modal-head {
+    @apply flex shrink-0 items-start gap-3 border-b border-line px-5 py-4;
+  }
+  .modal-title {
+    font-family: var(--font-display), system-ui, sans-serif;
+    @apply text-[17px] font-bold tracking-[-0.01em] text-ink;
+  }
+  .modal-sub {
+    @apply mt-0.5 text-[12px] leading-[1.55] text-ink2;
+  }
+  .modal-x {
+    @apply ml-auto flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center
+           rounded-lg text-ink3 transition-colors hover:bg-surface2 hover:text-ink;
+  }
+  .modal-body {
+    @apply min-h-0 flex-1 overflow-y-auto px-5 py-4;
+  }
+  .modal-foot {
+    @apply flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-line
+           bg-surface2/50 px-5 py-3.5;
+  }
+  /* The running total is the first child and pushes the buttons right with
+     mr-auto. On a narrow screen there isn't room for all three, and wrapping
+     split the two buttons across rows — Cancel above Create. Giving the total a
+     full row of its own keeps the pair together. */
+  .modal-foot > :first-child {
+    @apply basis-full sm:basis-auto;
+  }
+
+  /* Form rows used by the create dialogs. */
+  .lbl {
+    @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.03em] text-ink3;
+  }
+  .inp {
+    @apply w-full rounded-[9px] border border-line bg-surface px-3 py-2 text-[13px]
+           text-ink placeholder:text-ink3;
+  }
+  .inp-num {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    @apply text-right;
+  }
+  .seg {
+    @apply inline-flex rounded-[9px] border border-line bg-surface2 p-0.5;
+  }
+  .seg > button {
+    @apply cursor-pointer rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold text-ink2 transition-colors;
+  }
+  .seg > button[aria-pressed='true'] {
+    @apply bg-surface text-ink;
+    box-shadow: var(--shadow);
+  }
+
   .section-title {
     @apply mb-2 text-[15px] font-semibold text-ink;
   }
@@ -164,30 +272,177 @@
     @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[15px] font-bold;
   }
 
-  /* login (unchanged flow, redesigned skin) */
-  .login-wrap {
-    @apply flex min-h-screen items-center justify-center bg-bg p-6;
+  /* ── Login ──────────────────────────────────────────────────────────────
+     Two fields: ink carrying the thesis, paper carrying the single action.
+     Stacks to one column below lg, ink first. */
+  .login-shell {
+    @apply grid min-h-screen grid-cols-1 lg:grid-cols-[1.15fr_0.85fr];
+  }
+  .login-field {
+    background: var(--ink);
+    @apply flex min-w-0 flex-col justify-center gap-6 px-7 py-14 sm:px-12 lg:px-14;
+  }
+  .login-brand {
+    @apply mb-1 inline-flex items-center gap-2.5 text-[14px] font-semibold tracking-[0.14em] text-white/90;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    text-transform: uppercase;
+  }
+  .login-logo {
+    @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-white;
+    background: var(--accent);
+  }
+  .login-h1 {
+    font-family: var(--font-display), system-ui, sans-serif;
+    @apply text-[34px] font-extrabold leading-[1.06] tracking-[-0.02em] text-white sm:text-[42px] lg:text-[46px];
+  }
+  .login-lede {
+    @apply max-w-[46ch] text-[13.5px] leading-[1.65] text-white/60;
+  }
+
+  /* The signature: raw message → filed record.
+     min-w-0 is load-bearing: the <pre> below keeps the message on one line per
+     line, which gives it an intrinsic width. A flex child defaults to
+     min-width:auto, so without this the message pushes the whole page wider than
+     the viewport and the sign-in card gets clipped off-screen on a phone
+     instead of the message scrolling inside its own box. */
+  .parse {
+    @apply mt-2 w-full min-w-0 max-w-[520px];
+  }
+  .parse-eyebrow {
+    @apply mb-2 inline-flex items-center gap-2 text-[10.5px] font-semibold tracking-[0.11em];
+    font-family: var(--font-mono), ui-monospace, monospace;
+    text-transform: uppercase;
+  }
+  .parse-eyebrow--raw {
+    color: var(--momo);
+  }
+  .parse-eyebrow--done {
+    @apply mt-3;
+    color: var(--accent);
+  }
+  .parse-dot {
+    @apply h-[6px] w-[6px] rounded-full;
+    background: currentColor;
+  }
+  .parse-sms {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    @apply overflow-x-auto rounded-[10px] px-3.5 py-3 text-[11px] leading-[1.75];
+    color: rgb(255 204 0 / 0.92);
+    background: rgb(255 204 0 / 0.06);
+    border: 1px solid rgb(255 204 0 / 0.22);
+    /* The message is one artifact — let it scroll rather than reflow into
+       something that never looked like that on a phone. */
+    white-space: pre;
+  }
+  .parse-arrow {
+    @apply mt-2.5 flex justify-center;
+    color: rgb(255 255 255 / 0.28);
+  }
+  .parse-record {
+    @apply flex items-center gap-3 rounded-[10px] px-3.5 py-3;
+    background: rgb(22 163 74 / 0.09);
+    border: 1px solid rgb(22 163 74 / 0.26);
+  }
+  .parse-icon {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px];
+    /* CATS.transport.color — the same blue this category gets everywhere else in
+       FinXAI, so the example record is tinted the way a real one would be. */
+    color: #60a5fa;
+    background: rgb(96 165 250 / 0.14);
+  }
+  .parse-rec-main {
+    @apply flex min-w-0 flex-1 flex-col;
+  }
+  .parse-rec-name {
+    @apply truncate text-[13px] font-semibold text-white;
+  }
+  .parse-rec-meta {
+    @apply truncate text-[11px] text-white/45;
+  }
+  .parse-rec-amt {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    @apply shrink-0 text-[13px] font-semibold;
+    color: #fca5a5;
+  }
+
+  /* Reveal: runs once, then done. */
+  .parse-sms,
+  .parse-arrow,
+  .parse-record,
+  .parse-eyebrow {
+    animation: parse-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .parse-eyebrow--raw {
+    animation-delay: 0.05s;
+  }
+  .parse-sms {
+    animation-delay: 0.12s;
+  }
+  .parse-arrow {
+    animation-delay: 0.5s;
+  }
+  .parse-eyebrow--done {
+    animation-delay: 0.62s;
+  }
+  .parse-record {
+    animation-delay: 0.7s;
+  }
+  @keyframes parse-in {
+    from {
+      opacity: 0;
+      transform: translateY(7px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .login-gate {
+    @apply flex min-w-0 flex-col items-center justify-center gap-5 bg-bg px-6 py-14 sm:px-10;
   }
   .login-card {
-    @apply w-full max-w-[360px] rounded-2xl border border-line bg-surface p-8 text-center;
+    @apply w-full max-w-[380px] rounded-[16px] border border-line bg-surface p-7;
     box-shadow: var(--shadow-lg);
   }
-  .login-mark {
-    @apply mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl
-           bg-accent text-[20px] font-bold text-white;
+  .login-card-h {
+    font-family: var(--font-display), system-ui, sans-serif;
+    @apply text-[24px] font-extrabold tracking-[-0.015em] text-ink;
   }
-  .login-title {
-    @apply text-[17px] font-bold text-ink;
-  }
-  .login-sub {
-    @apply mb-6 mt-1 text-[12px] text-ink3;
+  .login-card-sub {
+    @apply mb-5 mt-1.5 text-[12.5px] leading-[1.6] text-ink2;
   }
   .btn-google {
-    @apply w-full cursor-pointer rounded-lg bg-accent px-4 py-2.5 text-[13px]
-           font-semibold text-white transition-colors hover:bg-accent-600
-           disabled:opacity-60;
+    @apply flex w-full cursor-pointer items-center justify-center gap-2.5 rounded-[10px]
+           border border-line2 bg-surface px-4 py-3 text-[13px] font-semibold text-ink
+           transition-colors hover:bg-surface2 disabled:cursor-default disabled:opacity-60;
   }
   .login-err {
     @apply mt-3 rounded-lg border border-neg/25 bg-neg/10 px-3 py-2 text-[12px] text-neg;
   }
+  .login-fine {
+    @apply mt-4 border-t border-line pt-4 text-[11.5px] leading-[1.6] text-ink3;
+  }
+  .login-foot {
+    @apply max-w-[380px] text-center text-[11px] leading-[1.6] text-ink3;
+  }
+}
+
+/* Quality floor: honour a reduced-motion preference everywhere, including the
+   login reveal and the .press affordance. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Visible keyboard focus on everything interactive, not just form fields. */
+:where(a, button, [role='button'], summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
 }
