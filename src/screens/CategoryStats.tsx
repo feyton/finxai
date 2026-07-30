@@ -10,6 +10,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {CatChip, Icon, Progress} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {CATS, CategoryId, FONTS, R, T, fmtAmount, resolveCat} from '../theme';
+import {NO_SUB} from './CategoryTransactions';
 
 type Flow = 'expense' | 'income';
 
@@ -70,7 +71,7 @@ export default function CategoryStats({navigation}: any) {
       const entry = byCat.get(cat) ?? {cat, amount: 0, count: 0, subs: []};
       entry.amount += amount;
       entry.count += 1;
-      const subName = (r.subcategory ?? '').trim() || 'No subcategory';
+      const subName = (r.subcategory ?? '').trim() || NO_SUB;
       const sub = entry.subs.find(s => s.name === subName);
       if (sub) {
         sub.amount += amount;
@@ -87,6 +88,18 @@ export default function CategoryStats({navigation}: any) {
     const max = list[0]?.amount ?? 0;
     return {list, total, max};
   }, [rows]);
+
+  // The month bounds and flow travel with the navigation so the drill-down
+  // reproduces exactly this view's slice — not "the category, all time".
+  const openTransactions = (category: CategoryId, subcategory: string | null) =>
+    navigation.navigate('CategoryTransactions', {
+      category,
+      subcategory,
+      flow,
+      start,
+      end,
+      monthLabel: label,
+    });
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -196,19 +209,29 @@ export default function CategoryStats({navigation}: any) {
                   <Progress value={c.amount} max={Math.max(stats.max, 1)} color={meta.color} />
                 </Pressable>
 
-                {/* Subcategory breakdown */}
+                {/* Subcategory breakdown. Each line drills into the transactions
+                    behind it, and the footer drills into the whole category —
+                    the number on a bar always raises "which ones?", and that
+                    used to mean leaving for Records and rebuilding the filter by
+                    hand, with no way to narrow to the month or subcategory. */}
                 {isOpen && (
                   <View style={styles.subWrap}>
                     {c.subs.map(s => {
                       const subPct = c.amount > 0 ? Math.round((s.amount / c.amount) * 100) : 0;
                       return (
-                        <View key={s.name} style={styles.subRow}>
+                        <Pressable
+                          key={s.name}
+                          onPress={() => openTransactions(c.cat, s.name)}
+                          style={({pressed}) => [
+                            styles.subRow,
+                            {opacity: pressed ? 0.6 : 1},
+                          ]}>
                           <View
                             style={[
                               styles.subDot,
                               {
                                 backgroundColor:
-                                  s.name === 'No subcategory' ? T.text3 : meta.color,
+                                  s.name === NO_SUB ? T.text3 : meta.color,
                               },
                             ]}
                           />
@@ -217,9 +240,28 @@ export default function CategoryStats({navigation}: any) {
                           </Text>
                           <Text style={styles.subPct}>{subPct}%</Text>
                           <Text style={styles.subAmt}>{fmtAmount(s.amount)}</Text>
-                        </View>
+                          <Icon
+                            name="ChevronRight"
+                            size={13}
+                            color={T.text3}
+                            strokeWidth={2}
+                          />
+                        </Pressable>
                       );
                     })}
+
+                    <Pressable
+                      onPress={() => openTransactions(c.cat, null)}
+                      style={({pressed}) => [
+                        styles.seeAll,
+                        {opacity: pressed ? 0.6 : 1},
+                      ]}>
+                      <Icon name="Receipt" size={13} color={meta.color} strokeWidth={2.2} />
+                      <Text style={[styles.seeAllText, {color: meta.color}]}>
+                        View all {c.count} transaction{c.count === 1 ? '' : 's'}
+                      </Text>
+                      <Icon name="ChevronRight" size={13} color={meta.color} strokeWidth={2.2} />
+                    </Pressable>
                   </View>
                 )}
               </View>
@@ -314,7 +356,18 @@ const styles = StyleSheet.create({
     paddingTop: 9,
     gap: 8,
   },
-  subRow: {flexDirection: 'row', alignItems: 'center', gap: 9},
+  subRow: {flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 3},
+  seeAll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 4,
+    paddingTop: 9,
+    borderTopWidth: 1,
+    borderTopColor: T.border,
+  },
+  seeAllText: {fontFamily: FONTS.semibold, fontSize: 12, lineHeight: 17},
   subDot: {width: 8, height: 8, borderRadius: 4, flexShrink: 0},
   subName: {flex: 1, fontFamily: FONTS.medium, fontSize: 12.5, color: T.text2},
   subPct: {fontFamily: FONTS.regular, fontSize: 11, color: T.text3, width: 38, textAlign: 'right'},
