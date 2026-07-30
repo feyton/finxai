@@ -315,3 +315,75 @@ export async function forceResync(
   );
   return {pushed: touched, cleared, queueAfter};
 }
+
+/**
+ * What is actually IN the upload queue.
+ *
+ * Added because the queue kept refilling after being cleared (11,245 -> 0 -> 777
+ * and climbing) and no amount of reasoning about which code path writes locally
+ * identified the source. Reading `ps_crud` answers that directly instead, and also
+ * surfaces the other failure this could be: a poisoned head row. PowerSync
+ * processes the queue in order, so one entry it cannot deserialize stalls
+ * everything behind it forever — which would look exactly like the dead upload
+ * worker we are seeing.
+ *
+ * `ps_crud.data` is a JSON string shaped like {op, type, id, data}, where `type` is
+ * the table. Parsed defensively: this is an internal table and a schema change must
+ * degrade to "no diagnostics", never to a crash.
+ */
+export async function describeQueue(limit = 400): Promise<void> {
+  try {
+    const {rows} = await db.execute(
+      'SELECT id, tx_id, data FROM ps_crud ORDER BY id ASC LIMIT ?',
+      [limit],
+    );
+    const entries = (rows?._array ?? []) as {id: number; tx_id: number; data: string}[];
+    if (entries.length === 0) {
+      console.log('[queue] empty');
+      return;
+    }
+
+    const byKey = new Map<string, number>();
+    let biggest = 0;
+    let unparseable = 0;
+    for (const e of entries) {
+      biggest = Math.max(biggest, (e.data ?? '').length);
+      try {
+        const p = JSON.parse(e.data);
+        const key = `${p.type}:${p.op}`;
+        byKey.set(key, (byKey.get(key) ?? 0) + 1);
+      } catch {
+        unparseable++;
+      }
+    }
+
+    const head = entries[0];
+    console.log(
+      `[queue] head id=${head.id} tx=${head.tx_id} bytes=${(head.data ?? '').length} ` +
+        `sample=${(head.data ?? '').slice(0, 220)}`,
+    );
+    console.log(
+      `[queue] sampled ${entries.length}: ` +
+        [...byKey.entries()].map(([k, n]) => `${k}=${n}`).join(' ') +
+        ` | largestPayload=${biggest}B unparseable=${unparseable}`,
+    );
+  } catch (e) {
+    console.warn('[queue] could not read ps_crud:', e);
+  }
+}
+
+/**
+ * Keep the local SQLite WAL from growing without bound.
+ *
+ * With thousands of queued writes the write-ahead log gets large, which slows every
+ * read of `ps_crud` — plausibly enough to trip an internal timeout in the upload
+ * worker, turning a big queue into a permanently stuck one. PASSIVE never blocks
+ * other readers or writers, so this is safe to call on a live database.
+ */
+export async function checkpointWal(): Promise<void> {
+  try {
+    await db.execute('PRAGMA wal_checkpoint(PASSIVE)');
+  } catch (e) {
+    console.warn('[sync] wal_checkpoint failed:', e);
+  }
+}

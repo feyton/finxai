@@ -45,6 +45,7 @@ import {db} from './src/tools/database';
 import {connector} from './src/tools/SupabaseConnector';
 import {supabase} from './src/tools/supabase';
 import {refreshBalanceWidget} from './src/widgets/refreshWidget';
+import {startSyncWatchdog} from './src/tools/syncWatchdog';
 
 const Stack = createNativeStackNavigator();
 
@@ -162,9 +163,15 @@ function App(): React.JSX.Element {
       }
     });
 
+    // Watches for a connected-but-not-draining upload queue and rebuilds the sync
+    // connection. PowerSync reports no error in that state, so without this the app
+    // simply stops syncing — in both directions — until someone notices.
+    const stopWatchdog = startSyncWatchdog();
+
     return () => {
       subscription.unsubscribe();
       unsubStatus();
+      stopWatchdog();
     };
   }, []);
 
