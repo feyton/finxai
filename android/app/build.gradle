@@ -79,8 +79,8 @@ android {
         applicationId "com.feyton.finxai"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 35
-        versionName "1.21.2"
+        versionCode 36
+        versionName "1.21.3"
     }
     signingConfigs {
         release {
