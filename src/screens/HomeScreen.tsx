@@ -76,11 +76,12 @@ export default function HomeScreen({navigation}: any) {
   const {userId, firstName, picture} = useCurrentUser();
   const db = usePowerSync();
   const [refreshing, setRefreshing] = useState(false);
-  const [syncGap, setSyncGap] = useState(0);
+  const [syncGap, setSyncGap] = useState({rows: 0, balancesDiffer: false});
   const [repairing, setRepairing] = useState(false);
 
-  // Check for rows the server hasn't got. Cheap (two COUNTs, no row data) and
-  // silent on failure, so being offline never looks like a data problem.
+  // Check what the server is missing. Counts and balances only — no row data
+  // crosses the wire — and silent on failure, so being offline never reads as a
+  // data problem.
   const checkSyncGap = useCallback(async () => {
     if (!userId) {
       return;
@@ -88,14 +89,16 @@ export default function HomeScreen({navigation}: any) {
     setSyncGap(await pendingUploadGap(userId));
   }, [userId]);
 
+  const outOfSync = syncGap.rows > 0 || syncGap.balancesDiffer;
+
   useEffect(() => {
     checkSyncGap();
-  }, [checkSyncGap]);
+  }, [checkSyncGap, userId]);
 
   const runRepair = useCallback(async () => {
     setRepairing(true);
     try {
-      const res = await repairSync();
+      const res = await repairSync(userId ?? '');
       console.log('[Home] sync repair uploaded', res.touched, res.perTable);
       // No artificial wait: the repair writes to Supabase directly, so by the time
       // it returns the server already has the rows and the re-count is accurate.
@@ -113,7 +116,7 @@ export default function HomeScreen({navigation}: any) {
     } finally {
       setRepairing(false);
     }
-  }, [checkSyncGap]);
+  }, [checkSyncGap, userId]);
 
   // Pull-to-refresh: force a sync reconnect AND recompute every account's
   // balance. Both are needed for different reasons — reconnect() makes PowerSync
@@ -270,19 +273,23 @@ export default function HomeScreen({navigation}: any) {
               concerned the work was done — so the only way to notice is to ask the
               server what it actually has. Tapping repairs it by re-queueing the
               rows (see tools/syncRepair). */}
-          {syncGap > 0 && (
+          {outOfSync && (
             <View style={styles.syncBanner}>
               <View style={styles.syncIcon}>
                 <Icon name="RefreshCcw" size={17} color={T.warn} strokeWidth={2.4} />
               </View>
               <View style={{flex: 1}}>
                 <Text style={styles.syncTitle}>
-                  {syncGap} record{syncGap === 1 ? '' : 's'} not backed up
+                  {syncGap.rows > 0
+                    ? `${syncGap.rows} record${syncGap.rows === 1 ? '' : 's'} not backed up`
+                    : 'Balances not backed up'}
                 </Text>
                 <Text style={styles.syncSub}>
                   {repairing
                     ? 'Uploading…'
-                    : 'On this phone but not on the server yet. Other devices and the web won’t show them.'}
+                    : syncGap.rows > 0
+                    ? 'On this phone but not on the server yet. Other devices and the web won’t show them.'
+                    : 'Your balances here are newer than the server’s, so the web shows different totals.'}
                 </Text>
               </View>
               <Pressable

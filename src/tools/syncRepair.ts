@@ -60,29 +60,69 @@ export async function syncHealth(): Promise<SyncHealth> {
  * Returns 0 when offline or on any error — a failed check must never present
  * itself as a problem with the data.
  */
-export async function pendingUploadGap(ownerId: string): Promise<number> {
+export interface SyncGap {
+  /** Local transactions the server has no row for. */
+  rows: number;
+  /** True when any account's balance differs between phone and server. */
+  balancesDiffer: boolean;
+}
+
+export async function pendingUploadGap(ownerId: string): Promise<SyncGap> {
+  const none: SyncGap = {rows: 0, balancesDiffer: false};
   if (!ownerId) {
-    return 0;
+    return none;
   }
   try {
     const {rows} = await db.execute(
       'SELECT COUNT(*) AS n FROM transactions WHERE owner_id = ?',
       [ownerId],
     );
-    const local: number = rows?._array?.[0]?.n ?? 0;
+    const localCount: number = rows?._array?.[0]?.n ?? 0;
 
     const {count, error} = await supabase
       .from('transactions')
       .select('id', {count: 'exact', head: true})
       .eq('owner_id', ownerId);
     if (error || count == null) {
-      return 0;
+      return none;
     }
     // Only a local surplus matters. The reverse (server ahead) is just sync
     // still catching up on download, which resolves itself.
-    return Math.max(0, local - count);
+    const missing = Math.max(0, localCount - count);
+
+    // Balances are checked separately because they drift WITHOUT any row being
+    // missing: available_balance is updated in place, so a failed upload leaves
+    // the row count identical and only the number wrong. That is precisely the
+    // case a row-count check misses, and it is the one users notice first —
+    // the total on the web not matching the total on the phone.
+    let balancesDiffer = false;
+    const {rows: acctRows} = await db.execute(
+      'SELECT id, available_balance FROM accounts WHERE owner_id = ?',
+      [ownerId],
+    );
+    const localAccts = (acctRows?._array ?? []) as {id: string; available_balance: number}[];
+    if (localAccts.length) {
+      const {data: remote, error: rErr} = await supabase
+        .from('accounts')
+        .select('id, available_balance')
+        .eq('owner_id', ownerId);
+      if (!rErr && remote) {
+        const byId = new Map(remote.map((a: any) => [a.id, a.available_balance]));
+        balancesDiffer = localAccts.some(a => {
+          const server = byId.get(a.id);
+          // A missing account counts as a difference; rounding to whole francs
+          // because RWF has no practical subunit and float noise is not a drift.
+          return (
+            server == null ||
+            Math.round(server ?? 0) !== Math.round(a.available_balance ?? 0)
+          );
+        });
+      }
+    }
+
+    return {rows: missing, balancesDiffer};
   } catch {
-    return 0;
+    return none;
   }
 }
 
@@ -111,16 +151,27 @@ export interface RepairResult {
  *
  * Upserting on the primary key means re-running this is harmless.
  */
-export async function repairSync(sinceDays = 30): Promise<RepairResult> {
+export async function repairSync(ownerId: string, sinceDays = 30): Promise<RepairResult> {
   const cutoff = new Date(Date.now() - sinceDays * 86400_000).toISOString();
   const perTable: Record<string, number> = {};
   let touched = 0;
 
+  if (!ownerId) {
+    return {touched: 0, perTable};
+  }
+
   for (const table of ['transactions', 'auto_records'] as const) {
     try {
+      // owner_id filter is REQUIRED, not tidiness. The local database also holds
+      // rows from accounts shared TO this user, which they do not own — RLS
+      // rightly refuses those on upsert, and because a chunk is one statement, a
+      // single foreign row takes the user's own rows down with it. That is exactly
+      // how the accounts leg of this repair failed: "new row violates row-level
+      // security policy for table accounts", with none of the user's own three
+      // accounts updated either.
       const {rows} = await db.execute(
-        `SELECT * FROM ${table} WHERE created_at >= ?`,
-        [cutoff],
+        `SELECT * FROM ${table} WHERE owner_id = ? AND created_at >= ?`,
+        [ownerId, cutoff],
       );
       const local = (rows?._array ?? []) as any[];
       if (local.length === 0) {
@@ -180,16 +231,26 @@ export async function repairSync(sinceDays = 30): Promise<RepairResult> {
   // Balances always go up: there are only a handful of accounts and a drifted
   // balance is the most visible symptom of a missed upload.
   try {
-    const {rows} = await db.execute('SELECT * FROM accounts');
+    const {rows} = await db.execute('SELECT * FROM accounts WHERE owner_id = ?', [
+      ownerId,
+    ]);
     const accts = (rows?._array ?? []) as any[];
     if (accts.length) {
-      const {error} = await supabase.from('accounts').upsert(accts);
-      if (error) {
-        console.warn('[syncRepair] accounts rejected:', error.message);
-      } else {
-        perTable.accounts = accts.length;
-        touched += accts.length;
+      // One at a time. There are only a handful of accounts, and doing them
+      // individually means one problem row cannot block the rest — which is the
+      // whole lesson from the batch that RLS rejected.
+      let sent = 0;
+      for (const a of accts) {
+        const {error} = await supabase.from('accounts').upsert(a);
+        if (error) {
+          console.warn(`[syncRepair] account ${a.name} rejected: ${error.message}`);
+          continue;
+        }
+        sent++;
       }
+      perTable.accounts = sent;
+      touched += sent;
+      console.log(`[syncRepair] accounts: ${sent}/${accts.length} pushed`);
     }
   } catch (e) {
     console.warn('[syncRepair] accounts repair failed:', e);
