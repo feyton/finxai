@@ -23,9 +23,12 @@ import {isUsablePattern, normalizeMerchant} from '../src/tools/merchantNormalize
 import {pickSmsFormat} from '../src/tools/smsFormats';
 import {THRESHOLD_AUTO_SAVE} from '../src/tools/smsTypes';
 
-jest.mock('@react-native-async-storage/async-storage', () =>
-  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
-);
+// No jest.mock for AsyncStorage here. This file imports only pure modules
+// (merchantNormalize, not merchantMemory) so nothing reaches it — and the
+// factory that used to sit here pointed at
+// '@react-native-async-storage/async-storage/jest/async-storage-mock', a path
+// the package stopped shipping in v3. It never threw only because the factory
+// was never invoked. See __mocks__/ for the replacement.
 
 const CTX: ParseContext = {
   userName: 'FABRICE HAFASHIMANA',

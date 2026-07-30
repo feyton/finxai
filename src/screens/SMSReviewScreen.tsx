@@ -315,8 +315,22 @@ function SmsCard({
           </Text>
           {/* Which path classified this. 'Offline' means the AI classifier was
               unreachable and this is a regex-only guess — previously invisible,
-              which is how a fully dark AI pipeline went unnoticed. */}
-          {record.parse_source === 'regex' ? (
+              which is how a fully dark AI pipeline went unnoticed.
+
+              Anything that is NOT a confirmed 'ai' parse offers Retry. That
+              deliberately includes rows whose parse_source is NULL because they
+              predate migration v8: those are the oldest, worst parses (merchant
+              "sender:", trailing "was completed at …" tails, "Unknown"), so
+              they are exactly the rows a re-run helps most. Gating on
+              `parse_source === 'regex'` hid the button on 29 of 31 pending rows
+              — every one of which carried 0.45 or 0.9, regexClassify's two
+              hardcoded confidences, proving none had ever reached the AI. */}
+          {record.parse_source === 'ai' ? (
+            <View style={styles.srcBadgeAi}>
+              <Icon name="Sparkles" size={10} color={T.accent} strokeWidth={2.4} />
+              <Text style={styles.srcBadgeAiText}>AI</Text>
+            </View>
+          ) : (
             <Pressable
               onPress={handleRetry}
               disabled={retrying}
@@ -332,15 +346,16 @@ function SmsCard({
                 strokeWidth={2.4}
               />
               <Text style={styles.srcBadgeOfflineText}>
-                {retrying ? 'Retrying…' : 'Offline · Retry'}
+                {retrying
+                  ? 'Retrying…'
+                  : record.parse_source === 'regex'
+                  ? 'Offline · Retry'
+                  : // Provenance unknown (pre-v8 row) — don't claim it was
+                    // offline, just offer the re-run.
+                    'Retry'}
               </Text>
             </Pressable>
-          ) : record.parse_source === 'ai' ? (
-            <View style={styles.srcBadgeAi}>
-              <Icon name="Sparkles" size={10} color={T.accent} strokeWidth={2.4} />
-              <Text style={styles.srcBadgeAiText}>AI</Text>
-            </View>
-          ) : null}
+          )}
         </View>
         <Text style={styles.smsBody}>{record.sms ?? '—'}</Text>
       </View>
