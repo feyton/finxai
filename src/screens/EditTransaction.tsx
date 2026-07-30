@@ -60,7 +60,7 @@ const TYPE_CHOICES = [
   {id: 'transfer', label: 'Transfer'},
 ];
 
-function EditForm({tx, splits, accounts, navigation}: any) {
+function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) {
   const db = usePowerSync();
   const {userId} = useCurrentUser();
   const insets = useSafeAreaInsets();
@@ -108,6 +108,16 @@ function EditForm({tx, splits, accounts, navigation}: any) {
       setError('Enter an amount');
       return;
     }
+    // Belt-and-braces: the inputs are already locked, but this is the check that
+    // actually protects the sync queue, so it does not rely on the UI holding.
+    if (
+      !canMoveMoney &&
+      (numericAmount !== Math.round(tx.amount ?? 0) ||
+        (accountId || tx.account_id) !== tx.account_id)
+    ) {
+      setError('Only the account owner can change the amount or account.');
+      return;
+    }
     if (parts.length > 0 && remaining !== 0) {
       setError(
         remaining > 0
@@ -119,20 +129,30 @@ function EditForm({tx, splits, accounts, navigation}: any) {
     setBusy(true);
     try {
       const sign = movementSign(tx.transaction_type ?? 'expense', tx.transfer_direction);
-      // revert the original effect from the original account
-      if (tx.account_id) {
-        await db.execute(
-          'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
-          [sign * (tx.amount ?? 0), tx.account_id],
-        );
-      }
-      // apply the (possibly new) amount to the (possibly new) account
       const newAccountId = accountId || tx.account_id;
-      if (newAccountId) {
-        await db.execute(
-          'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-          [sign * numericAmount, newAccountId],
-        );
+      // Only touch balances when the money actually moved. Reclassifying a
+      // transaction (category, subcategory, merchant, note, splits) leaves every
+      // balance exactly where it was, so the revert/re-apply pair below is a
+      // no-op that still costs two `accounts` UPDATEs — and for a shared editor
+      // those UPDATEs are refused by RLS, upload-fail, and get retried forever,
+      // blocking every write queued behind them.
+      const movedMoney =
+        numericAmount !== Math.round(tx.amount ?? 0) || newAccountId !== tx.account_id;
+      if (movedMoney) {
+        // revert the original effect from the original account
+        if (tx.account_id) {
+          await db.execute(
+            'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
+            [sign * (tx.amount ?? 0), tx.account_id],
+          );
+        }
+        // apply the (possibly new) amount to the (possibly new) account
+        if (newAccountId) {
+          await db.execute(
+            'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
+            [sign * numericAmount, newAccountId],
+          );
+        }
       }
       const transferDirection =
         txType === 'transfer'
@@ -207,9 +227,17 @@ function EditForm({tx, splits, accounts, navigation}: any) {
             setError('');
           }}
           keyboardType="numeric"
-          style={styles.input}
+          editable={canMoveMoney}
+          style={[styles.input, !canMoveMoney && styles.inputLocked]}
           placeholderTextColor={T.text3}
         />
+        {!canMoveMoney && (
+          <Text style={styles.hint}>
+            This account is shared with you — you can recategorise, rename, note
+            and split this transaction, but only its owner can change the amount
+            or move it to another account.
+          </Text>
+        )}
 
         <Text style={styles.label}>Merchant / payee</Text>
         <TextInput
@@ -273,8 +301,10 @@ function EditForm({tx, splits, accounts, navigation}: any) {
           </>
         )}
 
-        {/* Account */}
-        {accounts.length > 0 && (
+        {/* Account — hidden entirely for a shared editor. The list only holds
+            accounts this user OWNS, so every option would move the transaction
+            out of the shared account and into their own books. */}
+        {accounts.length > 0 && canMoveMoney && (
           <>
             <Text style={styles.label}>Account</Text>
             <View style={styles.wrapRow}>
@@ -420,10 +450,11 @@ export default function EditTransaction({route, navigation}: any) {
   const {txId} = route.params;
   const {userId} = useCurrentUser();
 
-  const {data: txRows} = useQuery(
-    'SELECT * FROM transactions WHERE id = ? AND owner_id = ?',
-    [txId, userId ?? ''],
-  );
+  // No owner_id filter: a transaction on an account shared TO this user has the
+  // sharer's owner_id, so scoping by it made the row invisible and this screen
+  // render its empty state. The local DB only ever holds rows the user is
+  // allowed to see (same reasoning as the accounts query in AccountDetails).
+  const {data: txRows} = useQuery('SELECT * FROM transactions WHERE id = ?', [txId]);
   const {data: splits} = useQuery(
     'SELECT * FROM split_details WHERE transaction_id = ?',
     [txId],
@@ -434,6 +465,12 @@ export default function EditTransaction({route, navigation}: any) {
   );
 
   const tx = (txRows as any[])?.[0];
+  // A shared editor may reclassify, but may not move money: RLS grants UPDATE
+  // on transactions only — not on accounts — so changing the amount or the
+  // account would write a balance this user cannot push upstream, and PowerSync
+  // would retry that rejected write forever, blocking everything queued behind
+  // it. Locking those two fields keeps the edit inside what the grant allows.
+  const ownsTransaction = !!tx && tx.owner_id === userId;
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -452,6 +489,7 @@ export default function EditTransaction({route, navigation}: any) {
           splits={splits ?? []}
           accounts={accounts as any[]}
           navigation={navigation}
+          canMoveMoney={ownsTransaction}
         />
       ) : (
         <View style={styles.center}>
@@ -501,6 +539,13 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.medium,
     fontSize: 14,
     color: T.text,
+  },
+  // Reads as deliberately unavailable rather than broken — the hint underneath
+  // says who can change it.
+  inputLocked: {
+    color: T.text3,
+    backgroundColor: T.bg,
+    borderColor: T.border,
   },
   typeRow: {flexDirection: 'row', gap: 8},
   typeChoice: {

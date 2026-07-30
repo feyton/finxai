@@ -222,13 +222,25 @@ export default function AccountDetails({route, navigation}: any) {
 
   const account = (accounts as any[])[0];
   const isOwner = account?.owner_id === userId;
-  // NOTE: "Can view & edit" sharing only grants RLS write access on
-  // transactions, not on accounts.available_balance — editing/deleting a
-  // transaction also moves the balance, which a shared editor cannot push
-  // upstream today. Scoping Edit/Delete to the owner until that RLS grant
-  // (and the accompanying "no touching the amount/account" UI guard for
-  // shared editors) lands as its own change.
-  const canEdit = isOwner;
+
+  // Does this user hold an active 'edit' grant on this account?
+  const {data: myShares} = useQuery(
+    "SELECT access FROM account_shares WHERE account_id = ? AND shared_with_id = ? AND status = 'active'",
+    [accountId, userId ?? ''],
+  );
+  const hasEditShare = (myShares as any[]).some(s => s.access === 'edit');
+
+  // Edit is allowed for the owner AND for a shared editor — the RLS policy
+  // "Shared editors update transactions" (migration v4) already grants exactly
+  // that, so the UI was the stricter of the two and a "Can view & edit" invite
+  // silently behaved as view-only.
+  //
+  // Delete is NOT: v4 grants UPDATE only, deliberately ("they can never insert
+  // into or delete from someone else's account"). Showing Delete to a shared
+  // editor would let the row vanish locally and then fail upload forever, so
+  // the two capabilities have to be separate flags rather than one canEdit.
+  const canEdit = isOwner || hasEditShare;
+  const canDelete = isOwner;
 
   const [syncing, setSyncing] = useState(false);
 
@@ -468,6 +480,7 @@ export default function AccountDetails({route, navigation}: any) {
         navigation={navigation}
         flatList={flatList}
         canEdit={canEdit}
+        canDelete={canDelete}
       />
 
       {isOwner && (

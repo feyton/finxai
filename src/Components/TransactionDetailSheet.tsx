@@ -49,12 +49,16 @@ interface Props {
   // Ordered rows the parent screen is currently showing (post-filter/search)
   // — powers the prev/next swipe + arrows and the "n of N" position.
   flatList: any[];
-  // false hides Edit/Delete — used for accounts shared to you as view-only.
+  // false hides Edit / Split — used for accounts shared to you as view-only.
   canEdit?: boolean;
+  // Separate from canEdit because the RLS grant is: a shared editor may UPDATE
+  // a transaction but never DELETE it (migration v4). Defaults to canEdit so
+  // callers that only own their own data keep working unchanged.
+  canDelete?: boolean;
 }
 
 function TransactionDetailSheet(
-  {navigation, flatList, canEdit = true}: Props,
+  {navigation, flatList, canEdit = true, canDelete = canEdit}: Props,
   ref: React.Ref<TransactionDetailSheetHandle>,
 ) {
   const db = usePowerSync();
@@ -290,22 +294,26 @@ function TransactionDetailSheet(
                 </View>
               )}
 
-              {canEdit && (
+              {(canEdit || canDelete) && (
                 <View style={styles.detailBtns}>
-                  <Pressable
-                    onPress={editSelected}
-                    style={({pressed}) => [styles.editBtn, {opacity: pressed ? 0.8 : 1}]}>
-                    <Icon name="Pencil" size={15} color={T.accent} strokeWidth={2.2} />
-                    <Text style={styles.editBtnText}>
-                      {isTransfer ? 'Edit' : 'Edit / Split'}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={deleteSelected}
-                    style={({pressed}) => [styles.deleteBtn, {opacity: pressed ? 0.7 : 1}]}>
-                    <Icon name="Trash2" size={16} color={T.expense} strokeWidth={2} />
-                    <Text style={styles.deleteBtnText}>Delete</Text>
-                  </Pressable>
+                  {canEdit && (
+                    <Pressable
+                      onPress={editSelected}
+                      style={({pressed}) => [styles.editBtn, {opacity: pressed ? 0.8 : 1}]}>
+                      <Icon name="Pencil" size={15} color={T.accent} strokeWidth={2.2} />
+                      <Text style={styles.editBtnText}>
+                        {isTransfer ? 'Edit' : 'Edit / Split'}
+                      </Text>
+                    </Pressable>
+                  )}
+                  {canDelete && (
+                    <Pressable
+                      onPress={deleteSelected}
+                      style={({pressed}) => [styles.deleteBtn, {opacity: pressed ? 0.7 : 1}]}>
+                      <Icon name="Trash2" size={16} color={T.expense} strokeWidth={2} />
+                      <Text style={styles.deleteBtnText}>Delete</Text>
+                    </Pressable>
+                  )}
                 </View>
               )}
             </View>
