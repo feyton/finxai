@@ -203,6 +203,13 @@ export default function RecordsPage({navigation, route}: any) {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        // A ScrollView defaults to flexShrink: 1. As a direct child of this
+        // column it was competing with the SectionList's flex: 1 for vertical
+        // space and losing, so it was squeezed below the height of its own chips
+        // and clipped their bottom edge — the pills rendered with their rounded
+        // base and the descenders of "Spending" cut off. Pinning both flex
+        // factors makes it size to its content and stay there.
+        style={styles.filterScroll}
         contentContainerStyle={styles.filterRow}>
         {FILTERS.map(f => (
           <Pressable
@@ -321,8 +328,10 @@ const styles = StyleSheet.create({
     color: T.text,
     paddingVertical: 0,
   },
+  filterScroll: {flexGrow: 0, flexShrink: 0},
   filterRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
     paddingHorizontal: 16,
     paddingBottom: 4,
@@ -337,7 +346,9 @@ const styles = StyleSheet.create({
     borderColor: T.border,
   },
   chipActive: {backgroundColor: T.accentSoft, borderColor: T.accent},
-  chipText: {fontFamily: FONTS.medium, fontSize: 12.5, color: T.text2},
+  // Explicit lineHeight: Poppins' ascenders/descenders overflow a box derived
+  // from fontSize alone on Android, which clips glyphs inside a tight pill.
+  chipText: {fontFamily: FONTS.medium, fontSize: 12.5, lineHeight: 17, color: T.text2},
   chipTextActive: {color: T.accent},
   list: {paddingBottom: 100},
   sectionHeader: {

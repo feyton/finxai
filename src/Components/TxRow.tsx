@@ -28,6 +28,15 @@ function TxRowImpl({tx, onPress}: TxRowProps) {
     ? format(new Date(tx.date_time), 'HH:mm')
     : '';
 
+  // Category is shown as text, not just as the icon's colour — the icon alone
+  // needs the palette memorised, and it cannot express the subcategory at all.
+  // Skipped for transfers, where the stored category is meaningless (money
+  // between your own accounts is neither spend nor income).
+  const catLabel = isTransfer ? '' : cat?.label ?? tx.category ?? '';
+  const rest = [tx.subcategory, tx.account_name, timeStr]
+    .filter(Boolean)
+    .join('  ·  ');
+
   return (
     <Pressable
       onPress={onPress}
@@ -38,7 +47,14 @@ function TxRowImpl({tx, onPress}: TxRowProps) {
       <View style={styles.mid}>
         <Text style={styles.label} numberOfLines={1}>{label}</Text>
         <Text style={styles.sub} numberOfLines={1}>
-          {[tx.account_name, timeStr].filter(Boolean).join('  ·  ')}
+          {/* Category tinted to match the icon so the two reinforce each other;
+              subcategory, account and time stay muted so the row still scans
+              top-to-bottom by merchant rather than becoming a wall of colour. */}
+          {catLabel ? (
+            <Text style={{color: cat.color}}>{catLabel}</Text>
+          ) : null}
+          {catLabel && rest ? '  ·  ' : ''}
+          {rest}
         </Text>
       </View>
       <Text style={[styles.amount, {color: amountColor}]}>
