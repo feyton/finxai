@@ -7,6 +7,7 @@
 import {
   buildPlan,
   buildSchedule,
+  buildScheduleWithOverrides,
   flatToReducingRatePct,
   isMonthEnd,
   nthDue,
@@ -217,5 +218,56 @@ describe('flatToReducingRatePct', () => {
 
   it('returns zero for an interest-free flat loan', () => {
     expect(flatToReducingRatePct({...LOAN, method: 'flat', annualRatePct: 0})).toBe(0);
+  });
+});
+
+describe('hand-edited schedules', () => {
+  it('returns the untouched schedule when nothing is overridden', () => {
+    expect(buildScheduleWithOverrides(LOAN, {})).toEqual(buildSchedule(LOAN));
+  });
+
+  it('honours the edited amount on the row it was set on', () => {
+    const rows = buildScheduleWithOverrides(LOAN, {3: 200_000});
+    expect(rows[2].amount).toBe(200_000);
+  });
+
+  it('re-walks the balances below an edit instead of patching one row', () => {
+    // The whole reason this function exists: paying 200,000 in month 3 must leave less
+    // owed for the rest of the loan, not just change one cell.
+    const edited = buildScheduleWithOverrides(LOAN, {3: 200_000});
+    const plain = buildSchedule(LOAN);
+    expect(edited[3].remaining).toBeLessThan(plain[3].remaining);
+    expect(edited[6].remaining).toBeLessThan(plain[6].remaining);
+  });
+
+  it('charges less interest afterwards, because less is owed', () => {
+    const edited = buildScheduleWithOverrides(LOAN, {2: 300_000});
+    const plain = buildSchedule(LOAN);
+    expect(edited[5].interest).toBeLessThan(plain[5].interest);
+  });
+
+  it('reports the shortfall when the edits do not clear the loan', () => {
+    // Underpaying every month should leave a balance standing, not be silently forced
+    // to zero — the residual is the useful part of the answer.
+    const rows = buildScheduleWithOverrides(
+      LOAN,
+      Object.fromEntries(Array.from({length: 12}, (_, i) => [i + 1, 50_000])),
+    );
+    expect(rows[11].remaining).toBeGreaterThan(0);
+  });
+
+  it('leaves a flat loan flat: early payment does not cut fixed interest', () => {
+    // Flat interest is set at signing and does not respond to the balance. If editing a
+    // row reduced it, the schedule would stop describing the loan the borrower signed.
+    const flat = {...LOAN, method: 'flat' as const};
+    const edited = buildScheduleWithOverrides(flat, {2: 300_000});
+    expect(edited[5].interest).toBe(buildSchedule(flat)[5].interest);
+  });
+
+  it('keeps the fee on its row and out of the principal', () => {
+    const withFee = {...LOAN, managementFeeFlat: 30_000};
+    const rows = buildScheduleWithOverrides(withFee, {1: 120_000});
+    expect(rows[0].fee).toBe(30_000);
+    expect(rows[0].principal + rows[0].interest + rows[0].fee).toBe(rows[0].amount);
   });
 });

@@ -317,6 +317,67 @@ export function buildScheduleWithPayment(input: AmortInput, payment: number): Am
 }
 
 /**
+ * Schedule where individual instalments have been overridden by hand.
+ *
+ * Real repayment plans are not always uniform: a lender may front-load, a borrower may
+ * agree a smaller payment in a lean month, or the paper schedule may simply disagree with
+ * the arithmetic. Editing one row changes the interest on every row below it, so the
+ * schedule has to be re-walked rather than patched — replacing a single amount in place
+ * would leave every balance beneath it wrong.
+ *
+ * `overrides` is indexed by instalment number (1-based). Rows without an override use the
+ * solved payment, and the final row still balances unless it was itself overridden. If
+ * the edited payments do not clear the loan, the last row's `remaining` says so instead
+ * of being quietly forced to zero — that residual is the useful part of the answer.
+ */
+export function buildScheduleWithOverrides(
+  input: AmortInput,
+  overrides: Record<number, number>,
+): AmortRow[] {
+  const base = buildSchedule(input);
+  if (base.length === 0 || Object.keys(overrides).length === 0) {
+    return base;
+  }
+  const {principal, annualRatePct, term, cadence, firstDue} = input;
+  const start = input.startDate ?? nthDue(firstDue, cadence, -1);
+  const dailyRate = annualRatePct / 100 / 365;
+  const flat = (input.method ?? 'reducing') === 'flat';
+  let bal = principal;
+  let prev = start;
+  const rows: AmortRow[] = [];
+  for (let n = 1; n <= term; n++) {
+    const due = nthDue(firstDue, cadence, n - 1);
+    // A flat loan's interest is fixed at signing and does not respond to the balance, so
+    // paying more early does not reduce it. Keeping the original interest here is what
+    // makes the edited schedule still describe a flat loan.
+    const interest = flat
+      ? base[n - 1].interest
+      : bal * dailyRate * daysBetween(prev, due);
+    const fee = base[n - 1].fee;
+    const override = overrides[n];
+    const isLast = n === term;
+    const gross =
+      override !== undefined ? override : isLast ? bal + interest + fee : base[n - 1].amount;
+    // The fee rides on top of the instalment; only the rest services the loan.
+    const principalPart = Math.max(0, Math.min(gross - interest - fee, bal));
+    bal = Math.max(0, bal - principalPart);
+    const interestR = Math.round(interest);
+    const principalR = Math.round(principalPart);
+    rows.push({
+      n,
+      due,
+      amount: principalR + interestR + fee,
+      interest: interestR,
+      principal: principalR,
+      fee,
+      remaining: Math.round(bal),
+    });
+    prev = due;
+  }
+  return rows;
+}
+
+/**
  * Schedule plus the totals a borrower actually wants to know before signing.
  *
  * Totals are summed from the ROWS rather than computed independently, so the figures in
