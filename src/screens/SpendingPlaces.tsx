@@ -88,6 +88,13 @@ const DOT_PAINT = {
 // of the screen.
 const LABEL_LAYOUT = {
   'text-field': ['get', 'label'],
+  // MUST be a font the style's glyph server actually hosts. Omitting it is not neutral:
+  // MapLibre falls back to "Open Sans Regular,Arial Unicode MS Regular", which
+  // OpenFreeMap does not serve, so every glyph request 404s. That failure is not
+  // confined to the labels — all three layers here share the `places` source, and a
+  // symbol layout failure errors that source's tile, so the circles and the heatmap
+  // disappeared along with the text. Liberty ships Noto Sans.
+  'text-font': ['Noto Sans Regular'],
   'text-size': 11,
   'text-offset': [0, 1.6],
   'text-anchor': 'top',
