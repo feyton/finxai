@@ -5,8 +5,11 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
+import DatePicker from 'react-native-date-picker';
+import {format, isToday} from 'date-fns';
 import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {CatChip, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
@@ -78,6 +81,16 @@ export default function CreateRecord({navigation}: any) {
   const [toAccountId, setToAccountId] = useState<string>('');
   const [category, setCategory] = useState<string>('');
   const [subcategory, setSubcategory] = useState<string>('');
+  // When it actually happened. Manual entries were always stamped with the moment you
+  // pressed Save, so logging yesterday's cash expense filed it under today — wrong in
+  // every report, and impossible to correct without opening Edit afterwards.
+  const [when, setWhen] = useState<Date>(new Date());
+  const [showDate, setShowDate] = useState(false);
+  // Who it was with, and why. An entry with neither is unidentifiable a week later —
+  // every SMS-sourced row has a merchant, so a manual one without looks broken next to
+  // them in the list.
+  const [merchant, setMerchant] = useState('');
+  const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -131,7 +144,7 @@ export default function CreateRecord({navigation}: any) {
       // history shows the movement; both sides are net-zero in reports).
       await db.execute(
         'INSERT INTO transfers (id, from_account_id, to_account_id, amount, date_time, note, currency, fees, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [generateUUID(), from.id, to.id, numericAmount, now, '', 'RWF', 0, userId ?? '', now],
+        [generateUUID(), from.id, to.id, numericAmount, when.toISOString(), note.trim(), 'RWF', 0, userId ?? '', now],
       );
       await db.execute(
         `INSERT INTO transactions
@@ -140,7 +153,7 @@ export default function CreateRecord({navigation}: any) {
             source, confidence, transfer_account_id, transfer_direction,
             owner_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?, 1, 'RWF', ?, ?, 'transfer', '', 0, NULL, 'manual', 1, ?, 'out', ?, ?)`,
-        [generateUUID(), numericAmount, from.id, '', '', now, to.name, `To ${to.name}`, to.id, userId ?? '', now],
+        [generateUUID(), numericAmount, from.id, '', '', when.toISOString(), to.name, `To ${to.name}`, to.id, userId ?? '', now],
       );
       await db.execute(
         `INSERT INTO transactions
@@ -149,7 +162,7 @@ export default function CreateRecord({navigation}: any) {
             source, confidence, transfer_account_id, transfer_direction,
             owner_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?, 1, 'RWF', ?, ?, 'transfer', '', 0, NULL, 'manual', 1, ?, 'in', ?, ?)`,
-        [generateUUID(), numericAmount, to.id, '', '', now, from.name, `From ${from.name}`, from.id, userId ?? '', now],
+        [generateUUID(), numericAmount, to.id, '', '', when.toISOString(), from.name, `From ${from.name}`, from.id, userId ?? '', now],
       );
       await db.execute(
         'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
@@ -194,13 +207,14 @@ export default function CreateRecord({navigation}: any) {
           activeAccount,
           category || '',
           subcategory || '',
-          now,
+          // The chosen moment, not the moment Save was pressed.
+          when.toISOString(),
           1,
           'RWF',
-          '',
-          '',
+          merchant.trim(),
+          merchant.trim(),
           type,
-          '',
+          note.trim(),
           0,
           null,
           'manual',
@@ -335,6 +349,62 @@ export default function CreateRecord({navigation}: any) {
                 />
               </>
             )}
+
+            {/* When — before Category, because a wrong date is the one thing you
+                cannot notice from the list afterwards. */}
+            <Text style={styles.sectionLabel}>When</Text>
+            <Pressable
+              onPress={() => setShowDate(true)}
+              style={({pressed}) => [styles.whenBtn, {opacity: pressed ? 0.75 : 1}]}>
+              <Icon name="Calendar" size={15} color={T.accent} strokeWidth={2.2} />
+              <Text style={styles.whenText}>
+                {format(when, 'EEE d MMM yyyy · HH:mm')}
+              </Text>
+              {!isToday(when) && (
+                <Pressable onPress={() => setWhen(new Date())} hitSlop={8}>
+                  <Text style={styles.whenReset}>now</Text>
+                </Pressable>
+              )}
+            </Pressable>
+            <DatePicker
+              modal
+              mode="datetime"
+              open={showDate}
+              date={when}
+              // Nobody records a payment that has not happened yet, and an accidental
+              // future date silently drops the row out of every current-month total.
+              maximumDate={new Date()}
+              onConfirm={d => {
+                setShowDate(false);
+                setWhen(d);
+              }}
+              onCancel={() => setShowDate(false)}
+            />
+
+            {/* Who it was with. Optional, but an entry without it is unidentifiable
+                a week later. */}
+            <Text style={styles.sectionLabel}>
+              {type === 'income' ? 'From' : 'Paid to'}
+            </Text>
+            <TextInput
+              value={merchant}
+              onChangeText={setMerchant}
+              placeholder={type === 'income' ? 'Who paid you' : 'Shop, person or service'}
+              placeholderTextColor={T.text3}
+              style={styles.textField}
+            />
+
+            <Text style={styles.sectionLabel}>Note (optional)</Text>
+            <TextInput
+              value={note}
+              onChangeText={setNote}
+              placeholder="Anything worth remembering"
+              placeholderTextColor={T.text3}
+              multiline
+              numberOfLines={2}
+              textAlignVertical="top"
+              style={[styles.textField, styles.noteField]}
+            />
 
             {/* Categories */}
             <Text style={styles.sectionLabel}>Category</Text>
@@ -477,6 +547,37 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 8,
   },
+  whenBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    marginHorizontal: 16,
+    marginBottom: 14,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+    borderRadius: R.small,
+    backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  whenText: {flex: 1, fontFamily: FONTS.medium, fontSize: 13, color: T.text},
+  // Only shown when the date is not today, so there is a one-tap way back from an
+  // accidental change without reopening the picker.
+  whenReset: {fontFamily: FONTS.semibold, fontSize: 11.5, color: T.accent},
+  textField: {
+    marginHorizontal: 16,
+    marginBottom: 14,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    borderRadius: R.small,
+    backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: T.border,
+    fontFamily: FONTS.regular,
+    fontSize: 13,
+    color: T.text,
+  },
+  noteField: {minHeight: 64, paddingTop: 11},
   accountRow: {gap: 8, paddingHorizontal: 16, paddingBottom: 14},
   accountChip: {
     flexDirection: 'row',

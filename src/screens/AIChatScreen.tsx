@@ -450,14 +450,24 @@ Guidelines:
         {/* Input bar */}
         <View style={styles.inputBar}>
           <View style={styles.inputWrap}>
+            {/* Multiline. A single line made anything longer than a sentence scroll
+                sideways out of view — and the questions worth asking here are lists
+                ("add these six items…") or a paragraph of context, not one-liners.
+                Grows to 5 lines then scrolls, so a long message never pushes the send
+                button off screen.
+
+                returnKeyType stays 'default' so Enter inserts a newline instead of
+                sending: with multiline, a send-on-Enter key makes it impossible to type
+                a list at all. Send is the button. */}
             <TextInput
               value={input}
               onChangeText={setInput}
               placeholder="Ask about your money…"
               placeholderTextColor={T.text3}
-              style={styles.input}
-              onSubmitEditing={() => send()}
-              returnKeyType="send"
+              style={[styles.input, styles.inputMulti]}
+              multiline
+              textAlignVertical="top"
+              blurOnSubmit={false}
             />
           </View>
           <Pressable
@@ -588,6 +598,13 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     color: T.text,
     paddingVertical: 6,
+  },
+  // ~5 lines before it scrolls. A cap matters here: without one a pasted list would
+  // grow the composer until the send button left the screen.
+  inputMulti: {
+    maxHeight: 118,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
   sendBtn: {
     width: 44,

@@ -9,6 +9,7 @@ import {
   SectionList,
   StyleSheet,
   Text,
+  KeyboardAvoidingView,
   TextInput,
   View,
 } from 'react-native';
@@ -94,6 +95,12 @@ function ShareSheet({
       animationType="slide"
       statusBarTranslucent
       onRequestClose={onClose}>
+      {/* The email field sits near the bottom of a bottom sheet, so the soft keyboard
+          covered it completely — you could not see what you were typing. Same
+          KeyboardAvoidingView wrapper the SMS Fix sheet uses; 'height' is the behaviour
+          that works for a bottom-anchored sheet on Android, where 'padding' leaves the
+          sheet where it is and just adds space underneath it. */}
+      <KeyboardAvoidingView style={{flex: 1}} behavior="height">
       <Pressable style={styles.sheetOverlay} onPress={onClose} />
       <View style={styles.sheet}>
         <View style={styles.sheetHandle} />
@@ -175,6 +182,7 @@ function ShareSheet({
           <Text style={styles.shareSaveText}>{busy ? 'Sharing…' : 'Share account'}</Text>
         </Pressable>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

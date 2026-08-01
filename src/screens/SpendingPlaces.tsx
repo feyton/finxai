@@ -14,7 +14,7 @@
  * state says so rather than implying the data is missing.
  */
 import {useQuery} from '@powersync/react-native';
-import React, {useMemo, useState} from 'react';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {
   Linking,
   Modal,
@@ -74,12 +74,33 @@ const HEAT_PAINT = {
 
 const DOT_PAINT = {
   // Scaled by spend share, floored so the smallest place is still a visible target
-  // rather than a speck.
-  'circle-radius': ['interpolate', ['linear'], ['get', 'weight'], 0, 5, 1, 11],
+  // rather than a speck. Bumped from 11 to 14 at the top so the amount label sitting
+  // beside it has something to anchor to.
+  'circle-radius': ['interpolate', ['linear'], ['get', 'weight'], 0, 6, 1, 14],
   'circle-color': '#22C55E',
   'circle-opacity': 0.9,
   'circle-stroke-width': 2,
   'circle-stroke-color': '#0A0D10',
+} as const;
+
+// The amount, on the map itself. A heat blob says "money went here" but not how much,
+// and comparing two blobs by colour alone is guesswork — the number is the whole point
+// of the screen.
+const LABEL_LAYOUT = {
+  'text-field': ['get', 'label'],
+  'text-size': 11,
+  'text-offset': [0, 1.6],
+  'text-anchor': 'top',
+  'text-allow-overlap': false,
+  // Where labels would collide, keep the bigger spend visible rather than whichever
+  // MapLibre happened to draw first.
+  'symbol-sort-key': ['-', 0, ['get', 'total']],
+} as const;
+
+const LABEL_PAINT = {
+  'text-color': '#F2F4F5',
+  'text-halo-color': '#0A0D10',
+  'text-halo-width': 1.6,
 } as const;
 
 // ~4 decimal places is roughly 11 m at this latitude, which is tighter than the
@@ -87,6 +108,11 @@ const DOT_PAINT = {
 // 3dp (~110 m) groups repeat visits to the same shop without merging neighbours on
 // the same street.
 const PLACE_PRECISION = 3;
+
+// Map height + total card + margins. Used only to scroll a tapped place into view, so an
+// approximation is fine — being a few pixels out is invisible, and measuring the layout
+// for this would be more machinery than the job needs.
+const MAP_BLOCK_H = 380;
 
 interface Place {
   key: string;
@@ -107,6 +133,7 @@ export default function SpendingPlaces({navigation}: any) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [open, setOpen] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
 
   const {start, end, label, isCurrent} = useMemo(() => {
     const now = new Date();
@@ -184,6 +211,11 @@ export default function SpendingPlaces({navigation}: any) {
         properties: {
           weight: max > 0 ? p.total / max : 0,
           total: p.total,
+          // Pre-formatted here rather than with a MapLibre number-format expression:
+          // fmtAmount is what every other surface uses, so the map reads the same as
+          // the list beneath it.
+          label: fmtAmount(p.total),
+          key: p.key,
         },
         geometry: {type: 'Point' as const, coordinates: [p.lon, p.lat]},
       })),
@@ -220,6 +252,26 @@ export default function SpendingPlaces({navigation}: any) {
     };
   }, [places]);
 
+  // Tapping a marker selects that place: it expands in the list, and the list scrolls
+  // to it. Without this the map was read-only — you could see where the money went but
+  // not get from a dot to the transactions behind it, which is the only reason to look.
+  const onMapPress = useCallback((e: any) => {
+    const key = e?.features?.[0]?.properties?.key;
+    if (!key) {
+      return;
+    }
+    setOpen(prev => (prev === key ? null : key));
+    setFullscreen(false);
+    // Deferred a frame: in fullscreen the list is not mounted yet when the modal closes,
+    // so scrolling immediately targets nothing.
+    requestAnimationFrame(() => {
+      const idx = places.findIndex(p => p.key === key);
+      if (idx >= 0) {
+        scrollRef.current?.scrollTo({y: MAP_BLOCK_H + idx * 92, animated: true});
+      }
+    });
+  }, [places]);
+
   // One definition of the map, rendered inline and again full screen. Built with
   // useMemo so switching to fullscreen does not rebuild the layer tree — and so the
   // GeoJSON and camera props stay referentially stable across unrelated re-renders
@@ -237,13 +289,23 @@ export default function SpendingPlaces({navigation}: any) {
         // licence requires crediting it.
         attribution>
         <Camera {...camera} duration={0} />
-        <GeoJSONSource id="places" data={geojson}>
-          {/* Heat first, circles above it. The heatmap is what answers "where is
-              the money concentrated" once there are dozens of points; the circles
-              keep it legible at one or two, where a heat blob alone reads as a
-              smudge. */}
+        {/* onPress on the SOURCE, so a tap anywhere on a dot or its label reports the
+            feature under the finger. Tapping opens that place's row in the list below —
+            the map and the list are two views of one thing, so selecting in either
+            should select in both. */}
+        <GeoJSONSource id="places" data={geojson} onPress={onMapPress}>
+          {/* Heat first, circles above it, labels on top. The heatmap answers "where is
+              the money concentrated" once there are dozens of points; the circles keep
+              it legible at one or two, where a heat blob alone reads as a smudge; the
+              labels answer "how much", which neither of the other two can. */}
           <Layer id="places-heat" type="heatmap" paint={HEAT_PAINT as any} />
           <Layer id="places-dots" type="circle" paint={DOT_PAINT as any} />
+          <Layer
+            id="places-labels"
+            type="symbol"
+            layout={LABEL_LAYOUT as any}
+            paint={LABEL_PAINT as any}
+          />
         </GeoJSONSource>
       </MapLibreMap>
     ),
@@ -294,6 +356,7 @@ export default function SpendingPlaces({navigation}: any) {
       </View>
 
       <ScrollView
+        ref={scrollRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scroll}>
         {places.length > 0 && (

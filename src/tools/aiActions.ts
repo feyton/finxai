@@ -10,6 +10,11 @@
  */
 
 import {AbstractPowerSyncDatabase} from '@powersync/react-native';
+
+// Newline as a value. Tool results are plain strings handed back to the model, and
+// joining multi-line output through a named constant keeps the escaping out of template
+// literals where it is easy to mangle.
+const NL = String.fromCharCode(10);
 import {CATS, CategoryId, fmtAmount, resolveCat} from '../theme';
 
 function uuid(): string {
@@ -293,6 +298,147 @@ export const AI_ACTIONS: AiAction[] = [
         ],
       );
       return `Scheduled "${input.name}" (RWF ${fmtAmount(input.amount)}, ${input.frequency}).`;
+    },
+  },
+  {
+    name: 'add_shopping_items',
+    description:
+      "Add one or more items to the user's shopping list. Use whenever they dictate things to buy — \"add milk and bread to my shopping list\", or a list of items on separate lines. Item text may be in Kinyarwanda; keep their wording rather than translating it.",
+    kind: 'write',
+    input_schema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          description: 'The items to add, in the order given.',
+          items: {
+            type: 'object',
+            properties: {
+              text: {type: 'string', description: 'Item name, e.g. "Inyanya".'},
+              quantity: {type: 'string', description: 'Optional quantity as written, e.g. "1kg", "3".'},
+              estimated_cost: {type: 'number', description: 'Optional estimated cost in RWF.'},
+            },
+            required: ['text'],
+          },
+        },
+        list_name: {
+          type: 'string',
+          description:
+            'Which list to add to. Omit to use the most recent list, or to create one called "Shopping" if none exists.',
+        },
+      },
+      required: ['items'],
+    },
+    summary: input => {
+      const items = (input.items ?? []) as {text: string; quantity?: string}[];
+      const preview = items
+        .slice(0, 4)
+        .map(i => (i.quantity ? `${i.text} (${i.quantity})` : i.text))
+        .join(', ');
+      const more = items.length > 4 ? ` +${items.length - 4} more` : '';
+      return `Add ${items.length} item${items.length === 1 ? '' : 's'} to ${
+        input.list_name ?? 'your shopping list'
+      }: ${preview}${more}`;
+    },
+    run: async (ctx, input) => {
+      const items = (input.items ?? []) as {
+        text: string;
+        quantity?: string;
+        estimated_cost?: number;
+      }[];
+      if (items.length === 0) {
+        return 'No items were given.';
+      }
+
+      // Reuse a list rather than making a new one per request — dictating items across
+      // two messages should not leave them in two different lists.
+      let listId: string | null = null;
+      let listName = input.list_name?.trim() || '';
+      if (listName) {
+        const {rows} = await ctx.db.execute(
+          'SELECT id, name FROM shopping_lists WHERE owner_id = ? AND lower(name) = lower(?) LIMIT 1',
+          [ctx.userId, listName],
+        );
+        listId = rows?._array?.[0]?.id ?? null;
+      } else {
+        const {rows} = await ctx.db.execute(
+          'SELECT id, name FROM shopping_lists WHERE owner_id = ? ORDER BY created_at DESC LIMIT 1',
+          [ctx.userId],
+        );
+        listId = rows?._array?.[0]?.id ?? null;
+        listName = rows?._array?.[0]?.name ?? '';
+      }
+
+      const now = new Date().toISOString();
+      if (!listId) {
+        listId = uuid();
+        listName = listName || 'Shopping';
+        await ctx.db.execute(
+          'INSERT INTO shopping_lists (id, name, shared, shared_with, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+          [listId, listName, 0, '', ctx.userId, now],
+        );
+      }
+
+      for (const it of items) {
+        const text = String(it.text ?? '').trim();
+        if (!text) {
+          continue;
+        }
+        await ctx.db.execute(
+          'INSERT INTO shopping_items (id, list_id, text, quantity, estimated_cost, done, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [
+            uuid(),
+            listId,
+            text,
+            it.quantity ?? '',
+            typeof it.estimated_cost === 'number' ? it.estimated_cost : 0,
+            0,
+            ctx.userId,
+          ],
+        );
+      }
+      return `Added ${items.length} item${items.length === 1 ? '' : 's'} to "${listName}".`;
+    },
+  },
+
+  {
+    name: 'list_shopping_items',
+    description:
+      "Read back what is on the user's shopping list. Use when they ask what they need to buy.",
+    kind: 'read',
+    input_schema: {
+      type: 'object',
+      properties: {
+        list_name: {type: 'string', description: 'Omit for the most recent list.'},
+      },
+    },
+    run: async (ctx, input) => {
+      const name = input.list_name?.trim();
+      const {rows: listRows} = await ctx.db.execute(
+        name
+          ? 'SELECT id, name FROM shopping_lists WHERE owner_id = ? AND lower(name) = lower(?) LIMIT 1'
+          : 'SELECT id, name FROM shopping_lists WHERE owner_id = ? ORDER BY created_at DESC LIMIT 1',
+        name ? [ctx.userId, name] : [ctx.userId],
+      );
+      const list = listRows?._array?.[0];
+      if (!list) {
+        return 'There is no shopping list yet.';
+      }
+      const {rows} = await ctx.db.execute(
+        'SELECT text, quantity, done, estimated_cost FROM shopping_items WHERE list_id = ? AND owner_id = ?',
+        [list.id, ctx.userId],
+      );
+      const items = (rows?._array ?? []) as any[];
+      if (items.length === 0) {
+        return `"${list.name}" is empty.`;
+      }
+      const lines = items.map(
+        i =>
+          `  ${i.done ? '[x]' : '[ ]'} ${i.text}${i.quantity ? ` (${i.quantity})` : ''}${
+            i.estimated_cost ? ` — est. RWF ${fmtAmount(i.estimated_cost)}` : ''
+          }`,
+      );
+      return [`"${list.name}" (${items.length} items):`, ...lines].join(NL);
     },
   },
 ];
