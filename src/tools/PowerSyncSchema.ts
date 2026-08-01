@@ -209,6 +209,13 @@ const debts = new Table({
   icon: column.text,
   owner_id: column.text,
   created_at: column.text,
+  // How the rate is applied. 'flat' | 'reducing' | 'equal_principal'. NULL on rows
+  // created before v14, read as 'reducing'. Storing the rate without the method loses
+  // the more important half of the fact: 12% flat costs about what 22% reducing costs.
+  method: column.text,
+  management_fee_pct: column.real,
+  management_fee_flat: column.real,
+  fee_timing: column.text,    // 'upfront' | 'spread'
 });
 
 const debt_schedules = new Table({
@@ -218,6 +225,12 @@ const debt_schedules = new Table({
   amount: column.real,
   status: column.text,        // 'paid' | 'due' | 'upcoming'
   owner_id: column.text,
+  // What the payment is made of. Needed once a row can be hand-edited, because then the
+  // split can no longer be recomputed from the debt's terms.
+  principal: column.real,
+  interest: column.real,
+  fee: column.real,
+  edited: column.integer,     // 1 once hand-edited, so regeneration can preserve it
 });
 
 const budget_groups = new Table({

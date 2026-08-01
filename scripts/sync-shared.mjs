@@ -20,7 +20,7 @@ const root = join(import.meta.dirname, '..');
 // order-dependent regex for no benefit.
 const FILES = [
   ['shared/categories.ts', 'apps/web/src/lib/shared/categories.ts'],
-  ['shared/loan.ts', 'apps/web/src/lib/shared/loan.ts'],
+  ['shared/amortize.ts', 'apps/web/src/lib/shared/amortize.ts'],
 ];
 
 let changed = 0;

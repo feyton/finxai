@@ -13,7 +13,7 @@ import DatePicker from 'react-native-date-picker';
 import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
-import {buildSchedule, buildScheduleWithPayment, nthDue} from '../tools/amortize';
+import {buildSchedule, buildScheduleWithPayment, nthDue} from '../../shared/amortize';
 import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
 
 function generateUUID(): string {

@@ -9,7 +9,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {Icon, Progress} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {appAlert} from '../Components/AppDialog';
-import {outstandingAfter} from '../tools/amortize';
+import {outstandingAfter} from '../../shared/amortize';
 import {FONTS, R, T, fmtAmount} from '../theme';
 
 function fmtDay(d?: string | null): string {

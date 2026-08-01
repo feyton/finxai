@@ -21,7 +21,7 @@ import {join} from 'path';
 
 const PAIRS: [string, string][] = [
   ['categories.ts', 'categories.ts'],
-  ['loan.ts', 'loan.ts'],
+  ['amortize.ts', 'amortize.ts'],
 ];
 const sourceOf = (f: string) => join(__dirname, '..', 'shared', f);
 const copyOf = (f: string) =>
