@@ -19,32 +19,28 @@
 import {readFileSync} from 'fs';
 import {join} from 'path';
 
-const SOURCE = join(__dirname, '..', 'shared', 'categories.ts');
-const COPY = join(
-  __dirname,
-  '..',
-  'apps',
-  'web',
-  'src',
-  'lib',
-  'shared',
-  'categories.ts',
-);
+const PAIRS: [string, string][] = [
+  ['categories.ts', 'categories.ts'],
+  ['loan.ts', 'loan.ts'],
+];
+const sourceOf = (f: string) => join(__dirname, '..', 'shared', f);
+const copyOf = (f: string) =>
+  join(__dirname, '..', 'apps', 'web', 'src', 'lib', 'shared', f);
 
 // Line endings are not divergence: git is configured to convert LF to CRLF in the
 // working tree on this machine, so one file can legitimately differ from the other by
 // \r alone.
 const normalise = (s: string) => s.replace(/\r\n/g, '\n').trimEnd();
 
-describe('shared/categories copy in apps/web', () => {
-  it('is byte-identical to the source of truth', () => {
-    const source = normalise(readFileSync(SOURCE, 'utf8'));
-    const copy = normalise(readFileSync(COPY, 'utf8'));
+describe('shared/ copies in apps/web', () => {
+  it.each(PAIRS)('%s is byte-identical to the source of truth', (src, dst) => {
+    const source = normalise(readFileSync(sourceOf(src), 'utf8'));
+    const copy = normalise(readFileSync(copyOf(dst), 'utf8'));
     if (source !== copy) {
       throw new Error(
-        'apps/web/src/lib/shared/categories.ts has drifted from shared/categories.ts.\n' +
-          'Run `npm run sync:shared` to refresh the copy.\n' +
-          'Do NOT edit the copy directly — edit shared/categories.ts.',
+        `apps/web/src/lib/shared/${dst} has drifted from shared/${src}. ` +
+          'Run `npm run sync:shared` to refresh the copy. ' +
+          `Do NOT edit the copy directly — edit shared/${src}.`,
       );
     }
     expect(copy).toBe(source);
@@ -53,7 +49,7 @@ describe('shared/categories copy in apps/web', () => {
   it('the copy still carries the branches whose absence caused the reporting bugs', () => {
     // Belt-and-braces: even if the identity check were somehow bypassed, these are the
     // specific behaviours that were wrong on the web.
-    const copy = readFileSync(COPY, 'utf8');
+    const copy = readFileSync(copyOf('categories.ts'), 'utf8');
     expect(copy).toContain("s.includes('housing')");
     for (const id of [
       'personal_care',

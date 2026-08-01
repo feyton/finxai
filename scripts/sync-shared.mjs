@@ -18,7 +18,10 @@ const root = join(import.meta.dirname, '..');
 // Only what the web actually uses. merchantNormalize is deliberately NOT copied: the
 // web has no need for it yet, and copying it would create a second implementation of
 // order-dependent regex for no benefit.
-const FILES = [['shared/categories.ts', 'apps/web/src/lib/shared/categories.ts']];
+const FILES = [
+  ['shared/categories.ts', 'apps/web/src/lib/shared/categories.ts'],
+  ['shared/loan.ts', 'apps/web/src/lib/shared/loan.ts'],
+];
 
 let changed = 0;
 for (const [from, to] of FILES) {
