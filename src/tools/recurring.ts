@@ -158,3 +158,43 @@ export function detectRecurring(
   // Biggest first — a 23,000 domain renewal matters more than a 500 recurring snack.
   return out.sort((a, b) => b.amount - a.amount);
 }
+
+/**
+ * The k-th occurrence of a schedule on or after `from`.
+ *
+ * Month arithmetic is the only subtle part: naively adding a month to 31 January lands
+ * on 3 March, because JavaScript rolls the overflow forward. Clamping to the target
+ * month's last day is what people actually mean by "the 31st of every month".
+ */
+export function nextOccurrence(from: Date, frequency: string, k: number): Date {
+  const d = new Date(from);
+  switch (frequency) {
+    case 'daily':
+      d.setDate(d.getDate() + k);
+      return d;
+    case 'weekly':
+      d.setDate(d.getDate() + 7 * k);
+      return d;
+    case 'yearly':
+      d.setFullYear(d.getFullYear() + k);
+      return d;
+    case 'monthly': {
+      const target = new Date(from.getFullYear(), from.getMonth() + k, 1);
+      const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+      target.setDate(Math.min(from.getDate(), lastDay));
+      return target;
+    }
+    default:
+      // 'once' and anything unrecognised: there is no next one.
+      return d;
+  }
+}
+
+/** How many times a year a frequency fires. 0 for one-off, which has no annual cost. */
+export const PER_YEAR: Record<string, number> = {
+  daily: 365,
+  weekly: 52,
+  monthly: 12,
+  yearly: 1,
+  once: 0,
+};
