@@ -51,6 +51,8 @@ function movementSign(txType: string, transferDirection?: string | null): number
 
 interface SplitRow {
   category: CategoryId;
+  /** Optional, and empty means "not set" — never inherited from the parent. */
+  subcategory: string;
   amount: number;
 }
 
@@ -80,10 +82,12 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
   const [parts, setParts] = useState<SplitRow[]>(
     (splits as any[]).map(s => ({
       category: resolveCat(s.category ?? ''),
+      subcategory: s.subcategory ?? '',
       amount: s.amount ?? 0,
     })),
   );
   const [partCat, setPartCat] = useState<CategoryId | null>(null);
+  const [partSub, setPartSub] = useState('');
   const [partAmount, setPartAmount] = useState('');
 
   const isTransfer = txType === 'transfer';
@@ -97,8 +101,9 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
     if (!partCat || amt <= 0) {
       return;
     }
-    setParts(prev => [...prev, {category: partCat, amount: amt}]);
+    setParts(prev => [...prev, {category: partCat, subcategory: partSub, amount: amt}]);
     setPartCat(null);
+    setPartSub('');
     setPartAmount('');
     setError('');
   };
@@ -177,7 +182,24 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
       for (const p of parts) {
         await db.execute(
           'INSERT INTO split_details (id, transaction_id, amount, category, subcategory, note, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [uuid(), tx.id, p.amount, CATS[p.category]?.label ?? p.category, '', '', userId ?? ''],
+          [
+            uuid(),
+            tx.id,
+            p.amount,
+            // The ID, not the label. transactions.category stores ids, and every reader
+            // COALESCEs the two columns together, so storing a label here meant the
+            // readers depended on resolveCat's fuzzy substring matching to undo it.
+            // Existing rows still hold labels; __tests__/categoryRoundTrip.test.ts pins
+            // that both spellings resolve to the same id, so no backfill is needed.
+            p.category,
+            // NULL, not ''. Readers do COALESCE(s.subcategory, t.subcategory), and
+            // COALESCE only skips NULL — an empty string is a value and wins, so writing
+            // '' here ERASED the parent's subcategory from reports the moment a
+            // transaction was split.
+            p.subcategory || null,
+            null,
+            userId ?? '',
+          ],
         );
       }
       navigation.goBack();
@@ -371,11 +393,18 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
             </Text>
 
             {parts.map((p, i) => (
-              <View key={`${p.category}-${i}`} style={styles.splitRow}>
+              <View key={`${p.category}-${p.subcategory}-${i}`} style={styles.splitRow}>
                 <CatChip cat={p.category} size={30} />
-                <Text style={styles.splitRowLabel} numberOfLines={1}>
-                  {CATS[p.category].label}
-                </Text>
+                <View style={{flex: 1, minWidth: 0}}>
+                  <Text style={styles.splitRowLabel} numberOfLines={1}>
+                    {CATS[p.category].label}
+                  </Text>
+                  {p.subcategory ? (
+                    <Text style={styles.splitRowSub} numberOfLines={1}>
+                      {p.subcategory}
+                    </Text>
+                  ) : null}
+                </View>
                 <Text style={styles.splitRowAmt}>{fmtAmount(p.amount)}</Text>
                 <Pressable
                   onPress={() => setParts(prev => prev.filter((_, j) => j !== i))}
@@ -391,7 +420,12 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
                 return (
                   <Pressable
                     key={c.id}
-                    onPress={() => setPartCat(on ? null : c.id)}
+                    onPress={() => {
+                      // Changing the part's category invalidates any subcategory already
+                      // picked, since subcategories belong to one category.
+                      setPartCat(on ? null : c.id);
+                      setPartSub('');
+                    }}
                     style={[
                       styles.subChip,
                       on && {borderColor: c.color, backgroundColor: c.color + '14'},
@@ -406,12 +440,46 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
                 );
               })}
             </View>
+            {/* Subcategory for THIS part. Only shown once a category is chosen, because
+                subcategories belong to a category — and only when that category actually
+                has any, so the row never appears empty. */}
+            {partCat && subcatsFor(partCat).length > 0 && (
+              <View style={styles.wrapRow}>
+                {subcatsFor(partCat).map(sc => {
+                  const on = partSub === sc.name;
+                  return (
+                    <Pressable
+                      key={sc.name}
+                      onPress={() => setPartSub(on ? '' : sc.name)}
+                      style={[
+                        styles.subChip,
+                        on && {
+                          borderColor: CATS[partCat].color,
+                          backgroundColor: CATS[partCat].color + '14',
+                        },
+                      ]}>
+                      <Text style={{fontSize: 12}}>{sc.icon}</Text>
+                      <Text
+                        style={[styles.subChipText, on && {color: T.text}]}
+                        numberOfLines={1}>
+                        {sc.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
             <View style={styles.splitAdderRow}>
               <TextInput
                 value={partAmount}
                 onChangeText={setPartAmount}
                 keyboardType="numeric"
-                placeholder={partCat ? `Amount for ${CATS[partCat].label}` : 'Pick a category above'}
+                placeholder={
+                  partCat
+                    ? `Amount for ${partSub || CATS[partCat].label}`
+                    : 'Pick a category above'
+                }
                 placeholderTextColor={T.text3}
                 editable={!!partCat}
                 style={[styles.input, {flex: 1, marginBottom: 0}]}
@@ -605,7 +673,9 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     marginBottom: 7,
   },
-  splitRowLabel: {flex: 1, fontFamily: FONTS.semibold, fontSize: 12.5, color: T.text},
+  // No longer flex:1 — it now sits inside a flexing column beside the subcategory.
+  splitRowLabel: {fontFamily: FONTS.semibold, fontSize: 12.5, color: T.text},
+  splitRowSub: {fontFamily: FONTS.regular, fontSize: 11, color: T.text2, marginTop: 1},
   splitRowAmt: {fontFamily: FONTS.bold, fontSize: 12.5, color: T.text},
   splitAdderRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8},
   splitAddBtn: {

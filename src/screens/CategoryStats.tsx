@@ -51,8 +51,12 @@ export default function CategoryStats({navigation}: any) {
 
   // Effective category rows: split parts replace the parent's category.
   const {data: rows} = useQuery(
+    // A split part's subcategory must NOT fall back to the parent's. COALESCE would do
+    // exactly that when a part has none, tagging a "groceries" part with the parent's
+    // "Restaurant" — a subcategory belongs to its own category, so inheriting one across
+    // a split is always wrong. Keyed off whether a split row joined at all.
     `SELECT COALESCE(s.category, t.category) AS category,
-            COALESCE(s.subcategory, t.subcategory) AS subcategory,
+            CASE WHEN s.id IS NULL THEN t.subcategory ELSE s.subcategory END AS subcategory,
             COALESCE(s.amount, t.amount) AS amount
      FROM transactions t
      LEFT JOIN split_details s ON s.transaction_id = t.id

@@ -76,6 +76,8 @@ function InlineCatSelect({value, onChange}: {value: CategoryId; onChange: (c: Ca
 interface SplitRow {
   id?: string;
   category: CategoryId;
+  /** Empty means "not set" — never inherited from the parent transaction. */
+  subcategory: string;
   amount: number;
 }
 
@@ -712,21 +714,33 @@ function TxnDrawer({
   const [accountId, setAccountId] = useState(txn.account_id ?? '');
   const [note, setNote] = useState(txn.note ?? '');
   const [splitRows, setSplitRows] = useState<SplitRow[]>(
-    parts.map(p => ({id: p.id, category: resolveCat(p.category ?? ''), amount: p.amount ?? 0})),
+    parts.map(p => ({
+      id: p.id,
+      category: resolveCat(p.category ?? ''),
+      subcategory: p.subcategory ?? '',
+      amount: p.amount ?? 0,
+    })),
   );
   const [busy, setBusy] = useState(false);
 
   const acct = accounts.find(a => a.id === txn.account_id);
-  const subcatOptions = useMemo(() => {
-    const list = [...builtinSubcats(catId)];
-    for (const s of customSubcats) {
-      if (resolveCat(s.category ?? '') !== catId) continue;
-      if (!list.some(x => x.name.toLowerCase() === (s.name ?? '').toLowerCase())) {
-        list.push({name: s.name, icon: s.icon || '🏷️'});
+  // Extracted so the split rows can offer subcategories for THEIR category rather than
+  // the parent's. Kept as one function instead of a second copy of the built-in/custom
+  // merge — two copies of this logic is how the pickers would quietly start disagreeing.
+  const optionsFor = useCallback(
+    (cat: CategoryId) => {
+      const list = [...builtinSubcats(cat)];
+      for (const s of customSubcats) {
+        if (resolveCat(s.category ?? '') !== cat) continue;
+        if (!list.some(x => x.name.toLowerCase() === (s.name ?? '').toLowerCase())) {
+          list.push({name: s.name, icon: s.icon || '🏷️'});
+        }
       }
-    }
-    return list;
-  }, [catId, customSubcats]);
+      return list;
+    },
+    [customSubcats],
+  );
+  const subcatOptions = useMemo(() => optionsFor(catId), [optionsFor, catId]);
 
   const splitSum = splitRows.reduce((s, x) => s + x.amount, 0);
   const numericAmount = Math.abs(parseInt(amount, 10) || 0);
@@ -783,9 +797,17 @@ function TxnDrawer({
         id: r.id ?? uuid(),
         transaction_id: txn.id,
         amount: r.amount,
-        category: CATS[r.category].label,
-        subcategory: '',
-        note: '',
+        // The ID, not the label. Every reader COALESCEs this with transactions.category
+        // and runs the result through resolveCat, so storing a label made reporting depend
+        // on fuzzy substring matching to undo it. Rows written earlier still hold labels;
+        // __tests__/categoryRoundTrip.test.ts pins that both spellings resolve to the same
+        // id, so no backfill is needed.
+        category: r.category,
+        // NULL, not ''. Readers do COALESCE(s.subcategory, t.subcategory), and COALESCE
+        // only skips NULL — '' is a value and wins, so writing it erased the parent's
+        // subcategory from reports the moment a transaction was split.
+        subcategory: r.subcategory || null,
+        note: null,
         owner_id: txn.owner_id,
       }));
       if (newRows.length > 0) {
@@ -1004,8 +1026,8 @@ function TxnDrawer({
                     style={{color: 'var(--accent-700)'}}
                     onClick={() =>
                       setSplitRows([
-                        {category: catId, amount: Math.ceil(numericAmount / 2)},
-                        {category: 'shopping', amount: Math.floor(numericAmount / 2)},
+                        {category: catId, subcategory, amount: Math.ceil(numericAmount / 2)},
+                        {category: 'shopping', subcategory: '', amount: Math.floor(numericAmount / 2)},
                       ])
                     }>
                     + Split
@@ -1015,13 +1037,39 @@ function TxnDrawer({
               {splitRows.length > 0 && (
                 <div className="flex flex-col gap-2">
                   {splitRows.map((s, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <div className="flex-1">
-                        <InlineCatSelect
-                          value={s.category}
-                          onChange={c2 => setSplitRows(sp => sp.map((x, xi) => (xi === i ? {...x, category: c2} : x)))}
-                        />
-                      </div>
+                    <div key={i} className="flex flex-wrap items-center gap-2">
+                      <InlineCatSelect
+                        value={s.category}
+                        onChange={c2 =>
+                          setSplitRows(sp =>
+                            sp.map((x, xi) =>
+                              // Clear the subcategory: they belong to one category.
+                              xi === i ? {...x, category: c2, subcategory: ''} : x,
+                            ),
+                          )
+                        }
+                      />
+                      {/* Only rendered when the part's category actually has
+                          subcategories, so the row never shows an empty control. */}
+                      {optionsFor(s.category).length > 0 && (
+                        <select
+                          className="select min-w-0 flex-1"
+                          value={s.subcategory}
+                          onChange={e =>
+                            setSplitRows(sp =>
+                              sp.map((x, xi) =>
+                                xi === i ? {...x, subcategory: e.target.value} : x,
+                              ),
+                            )
+                          }>
+                          <option value="">— no subcategory —</option>
+                          {optionsFor(s.category).map(o => (
+                            <option key={o.name} value={o.name}>
+                              {o.icon} {o.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       <input
                         type="number"
                         className="input w-[100px] text-right"
@@ -1039,7 +1087,7 @@ function TxnDrawer({
                     <button
                       className="press text-[11.5px] font-semibold"
                       style={{color: 'var(--accent-700)'}}
-                      onClick={() => setSplitRows(sp => [...sp, {category: 'shopping', amount: 0}])}>
+                      onClick={() => setSplitRows(sp => [...sp, {category: 'shopping', subcategory: '', amount: 0}])}>
                       + Add part
                     </button>
                     <span

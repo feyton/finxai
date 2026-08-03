@@ -417,7 +417,15 @@ function TransactionDetailSheet(
                       <View key={s.id} style={styles.infoRow}>
                         <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
                           <View style={[styles.splitDot, {backgroundColor: sc.color}]} />
-                          <Text style={styles.infoValue}>{sc.label}</Text>
+                          <Text style={styles.infoValue}>
+                            {sc.label}
+                            {/* The subcategory is the whole point of splitting finely —
+                                "Food & Drink" twice tells you nothing, "Groceries" vs
+                                "Restaurant" is the reason the part exists. */}
+                            {s.subcategory ? (
+                              <Text style={{color: T.text2}}> · {s.subcategory}</Text>
+                            ) : null}
+                          </Text>
                         </View>
                         <Text style={styles.infoValue}>RWF {fmtAmount(s.amount ?? 0)}</Text>
                       </View>
