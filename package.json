@@ -36,7 +36,6 @@
     "react-hook-form": "^7.76.0",
     "react-native": "0.85.3",
     "react-native-android-widget": "^0.21.0",
-    "react-native-blob-util": "^0.24.10",
     "react-native-date-picker": "^5.0.13",
     "react-native-gesture-handler": "^2.31.2",
     "react-native-get-random-values": "^2.0.0",
@@ -79,5 +78,13 @@
   },
   "engines": {
     "node": "^20.19.4 || ^22.13.0 || >=24.3.0"
+  },
+  "codegenConfig": {
+    "name": "AppUpdateSpec",
+    "type": "modules",
+    "jsSrcsDir": "src/native",
+    "android": {
+      "javaPackageName": "com.feyton.finxai.specs"
+    }
   }
 }

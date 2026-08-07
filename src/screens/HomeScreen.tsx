@@ -18,7 +18,10 @@ import SMSRetriever from '../Components/SMSRetriever';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {appAlert} from '../Components/AppDialog';
 import {checkForUpdate, UpdateInfo} from '../tools/updateChecker';
-import {downloadAndInstall} from '../tools/updateInstaller';
+import {
+  downloadAndInstall,
+  openInstallPermissionSettings,
+} from '../tools/updateInstaller';
 import {format} from 'date-fns';
 import {reconnect} from '../tools/database';
 import {syncAccountBalance} from '../tools/balance';
@@ -267,19 +270,23 @@ export default function HomeScreen({navigation}: any) {
     setInstalling(true);
     setProgress(0);
     try {
-      await downloadAndInstall(update.url, setProgress);
+      await downloadAndInstall(update, setProgress);
     } catch (e: any) {
       // Never silently hand off to the browser — say what failed and let the
-      // user choose the browser explicitly.
+      // user choose. A missing install permission is the one failure the user
+      // can fix directly, so that case offers Settings instead of the browser.
+      const fixable = e?.code === 'permission';
       appAlert(
         'Update failed',
         e?.message ?? 'The download did not complete.',
         [
           {text: 'Cancel', style: 'cancel'},
-          {
-            text: 'Download in browser',
-            onPress: () => update.url && Linking.openURL(update.url).catch(() => {}),
-          },
+          fixable
+            ? {text: 'Open settings', onPress: openInstallPermissionSettings}
+            : {
+                text: 'Download in browser',
+                onPress: () => update.url && Linking.openURL(update.url).catch(() => {}),
+              },
         ],
       );
     } finally {

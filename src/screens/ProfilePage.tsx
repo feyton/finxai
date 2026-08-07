@@ -19,8 +19,11 @@ import {FONTS, R, T} from '../theme';
 import categoriesData from '../tools/data.json';
 import {clearMyData, hasSeededData, seedDemoData} from '../tools/seed';
 import {supabase} from '../tools/supabase';
-import {checkForUpdate} from '../tools/updateChecker';
-import {downloadAndInstall} from '../tools/updateInstaller';
+import {checkForUpdate, UpdateInfo} from '../tools/updateChecker';
+import {
+  downloadAndInstall,
+  openInstallPermissionSettings,
+} from '../tools/updateInstaller';
 
 function Row({
   icon,
@@ -130,20 +133,25 @@ export default function ProfilePage({navigation}: any) {
 
   // Downloads in-app with progress; on failure the browser is an EXPLICIT
   // user choice (never a silent fallback — that was landing people in Chrome).
-  const installUpdate = async (url: string) => {
+  const installUpdate = async (info: UpdateInfo) => {
     setInstallPct(0);
     try {
-      await downloadAndInstall(url, f => setInstallPct(Math.round(f * 100)));
+      await downloadAndInstall(info, f => setInstallPct(Math.round(f * 100)));
     } catch (e: any) {
+      // A missing install permission is the one failure the user can fix
+      // directly, so that case offers Settings instead of the browser.
+      const fixable = e?.code === 'permission';
       appAlert(
         'Update failed',
         e?.message ?? 'The download did not complete.',
         [
           {text: 'Cancel', style: 'cancel'},
-          {
-            text: 'Download in browser',
-            onPress: () => Linking.openURL(url).catch(() => {}),
-          },
+          fixable
+            ? {text: 'Open settings', onPress: openInstallPermissionSettings}
+            : {
+                text: 'Download in browser',
+                onPress: () => info.url && Linking.openURL(info.url).catch(() => {}),
+              },
         ],
       );
     } finally {
@@ -166,7 +174,7 @@ export default function ProfilePage({navigation}: any) {
             {text: 'Later', style: 'cancel'},
             {
               text: 'Install',
-              onPress: () => info.url && installUpdate(info.url),
+              onPress: () => info.url && installUpdate(info),
             },
           ],
         );

@@ -1,65 +1,142 @@
 // Download the update APK and hand it straight to Android's package installer —
 // no browser detour. Requires the REQUEST_INSTALL_PACKAGES permission (declared
-// in AndroidManifest). The user still taps "Install" on the system dialog.
+// in AndroidManifest) plus the user's per-app "Install unknown apps" grant. The
+// user still taps "Install" on the system dialog; nothing installs silently.
 //
-// Every step validates and throws with a specific message — callers surface
-// the error and offer the browser as an EXPLICIT choice, never silently.
+// The download runs through the native AppUpdate module (Android's
+// DownloadManager), NOT react-native-blob-util — blob-util's download-to-file
+// path never completes, see src/native/NativeAppUpdate.ts for the detail.
+//
+// Every step throws an UpdateError carrying a specific code, because
+// "permission not granted" is common and fixable by the user while the rest are
+// rare — one generic message would make them indistinguishable.
 
 import {Linking, Platform} from 'react-native';
-import RNBlobUtil from 'react-native-blob-util';
+import NativeAppUpdate from '../native/NativeAppUpdate';
+import type {UpdateInfo} from './updateChecker';
+
+export type UpdateErrorCode = 'permission' | 'download' | 'corrupt';
+
+export class UpdateError extends Error {
+  code: UpdateErrorCode;
+  constructor(code: UpdateErrorCode, message: string) {
+    super(message);
+    this.name = 'UpdateError';
+    this.code = code;
+  }
+}
+
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+/** Opens the system screen where "Install unknown apps" is granted. */
+export function openInstallPermissionSettings(): void {
+  if (Platform.OS === 'android') {
+    NativeAppUpdate.openInstallPermissionSettings();
+  }
+}
 
 export async function downloadAndInstall(
-  url: string,
+  info: UpdateInfo,
   onProgress?: (fraction: number) => void,
 ): Promise<void> {
+  const url = info.url;
+  if (!url) {
+    throw new UpdateError('download', 'No download URL for this release.');
+  }
+
   if (Platform.OS !== 'android') {
     await Linking.openURL(url);
     return;
   }
 
-  const {config, fs, android} = RNBlobUtil;
-  const path = `${fs.dirs.CacheDir}/finxai-update.apk`;
-
-  // A stale half-download from a previous attempt would confuse the installer.
-  await fs.unlink(path).catch(() => {});
-
-  const task = config({path, overwrite: true, timeout: 120000}).fetch('GET', url);
-
-  if (onProgress) {
-    task.progress({interval: 250}, (received, total) => {
-      const r = parseFloat(String(received));
-      const t = parseFloat(String(total));
-      onProgress(t > 0 ? Math.min(1, r / t) : 0);
-    });
+  // Checked BEFORE the download, not after: finding out the permission is
+  // missing once 50 MB has been spent wastes a user's data bundle for nothing.
+  if (!NativeAppUpdate.canInstallPackages()) {
+    throw new UpdateError(
+      'permission',
+      'FinXAI needs permission to install apps. Allow "Install unknown apps" for FinXAI, then try again.',
+    );
   }
 
-  const res = await task;
-  const status = res.info().status;
-  if (status !== 200) {
-    throw new Error(`Download failed (HTTP ${status})`);
+  // A stale download from a previous attempt would otherwise linger in the
+  // notification shade and waste the user's storage.
+  const fileName = `finxai-${info.latest}.apk`;
+  let id: number;
+  try {
+    id = await NativeAppUpdate.startDownload(url, fileName);
+  } catch (e: any) {
+    throw new UpdateError('download', e?.message ?? 'Could not start the download.');
   }
 
-  // Sanity-check we actually got an APK, not an error page: our builds are
-  // ~48 MB — anything under 5 MB is not the release asset.
-  const stat = await fs.stat(res.path());
-  if (!stat?.size || Number(stat.size) < 5 * 1024 * 1024) {
-    await fs.unlink(res.path()).catch(() => {});
-    throw new Error('Downloaded file is not a valid APK (too small)');
+  // Poll DownloadManager rather than subscribing to its broadcast: polling is a
+  // few cheap queries a second, and it keeps all the state in this one function
+  // instead of spreading it across a receiver and an event listener.
+  let uri: string | undefined;
+  for (;;) {
+    await sleep(500);
+
+    let s;
+    try {
+      s = await NativeAppUpdate.getDownloadStatus(id);
+    } catch (e: any) {
+      NativeAppUpdate.cancelDownload(id);
+      throw new UpdateError('download', e?.message ?? 'Lost track of the download.');
+    }
+
+    if (s.bytesTotal > 0) {
+      onProgress?.(Math.min(1, s.bytesDownloaded / s.bytesTotal));
+    }
+
+    if (s.status === 'success') {
+      uri = s.uri;
+      break;
+    }
+    if (s.status === 'failed') {
+      NativeAppUpdate.cancelDownload(id);
+      throw new UpdateError(
+        'download',
+        `Download failed after ${s.bytesDownloaded} bytes (${s.reason ?? 'unknown'}).`,
+      );
+    }
+    // pending / running / paused — DownloadManager retries and resumes on its
+    // own across connection drops, so there is nothing to do but keep waiting.
+  }
+
+  if (!uri) {
+    NativeAppUpdate.cancelDownload(id);
+    throw new UpdateError('download', 'The download finished but produced no file.');
+  }
+
+  // The hash is authoritative when GitHub published one. The old code only
+  // checked the file was bigger than 5 MB, which let a truncated or tampered
+  // download reach the installer and fail there with an unactionable message.
+  if (info.sha256) {
+    let hash: string;
+    try {
+      hash = (await NativeAppUpdate.sha256OfUri(uri)).toLowerCase();
+    } catch (e: any) {
+      NativeAppUpdate.cancelDownload(id);
+      throw new UpdateError('corrupt', e?.message ?? 'Could not verify the download.');
+    }
+    if (hash !== info.sha256) {
+      NativeAppUpdate.cancelDownload(id); // also deletes the file
+      throw new UpdateError(
+        'corrupt',
+        'The downloaded file does not match the published release. Nothing was installed.',
+      );
+    }
   }
 
   onProgress?.(1);
 
-  // Launches the system installer via the library's FileProvider. If Android
-  // blocks it (e.g. "Install unknown apps" not granted for FinXAI), surface
-  // that instead of dying silently after a completed download.
   try {
-    await android.actionViewIntent(
-      res.path(),
-      'application/vnd.android.package-archive',
-    );
+    await NativeAppUpdate.installFromUri(uri);
   } catch (e: any) {
-    throw new Error(
-      'Downloaded, but the installer could not open. Allow "Install unknown apps" for FinXAI in Settings, then try again.' +
+    // Almost always the install permission being revoked between the pre-check
+    // and here, so point at the same fix.
+    throw new UpdateError(
+      'permission',
+      'Downloaded, but the installer could not open. Allow "Install unknown apps" for FinXAI, then try again.' +
         (e?.message ? `\n(${e.message})` : ''),
     );
   }
