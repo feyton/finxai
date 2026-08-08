@@ -79,8 +79,14 @@ async function main() {
   run(`git tag ${tag}`);
 
   // 3. Build signed arm64 APK (single ABI = ~40MB, not the ~130MB universal)
+  //
+  // The wrapper is picked per platform: this script was written on Windows and
+  // hardcoded gradlew.bat, which fails outright once the repo is cloned into WSL or
+  // any Linux checkout — and it fails AFTER the commit and tag are already made,
+  // leaving a dangling tag to clean up by hand.
+  const gradlew = process.platform === 'win32' ? '.\\gradlew.bat' : './gradlew';
   console.log('\n→ Building signed arm64 APK…\n');
-  run('.\\gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a --console=plain', {
+  run(`${gradlew} assembleRelease -PreactNativeArchitectures=arm64-v8a --console=plain`, {
     cwd: 'android',
   });
 
