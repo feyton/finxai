@@ -44,6 +44,38 @@ export function Pill({
   );
 }
 
+/**
+ * Where a payment happened, linked to a map.
+ *
+ * Money-out captured live is the only thing that carries a position (see
+ * locationForParsed in the mobile app), so callers render this only when both
+ * coordinates are present. The accuracy is shown rather than hidden in a tooltip: a
+ * cached fix can be kilometres wide, and "±2000m" says something very different about
+ * "were you at this shop" than "±20m" does.
+ */
+export function LocationLink({
+  lat,
+  lon,
+  accuracyM,
+}: {
+  lat: number;
+  lon: number;
+  accuracyM?: number | null;
+}) {
+  return (
+    <a
+      href={`https://maps.google.com/?q=${lat},${lon}`}
+      target="_blank"
+      rel="noreferrer"
+      className="pill press tabnum"
+      style={{color: 'var(--accent-700)', background: 'var(--accent-soft)'}}>
+      <Icon name="pin" size={11} />
+      {lat.toFixed(4)}, {lon.toFixed(4)}
+      {accuracyM ? ` · ±${Math.round(accuracyM)}m` : ''}
+    </a>
+  );
+}
+
 export function CatChip({
   cat,
   size = 30,

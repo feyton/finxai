@@ -22,6 +22,14 @@ import {join} from 'path';
 const PAIRS: [string, string][] = [
   ['categories.ts', 'categories.ts'],
   ['amortize.ts', 'amortize.ts'],
+  // Added with the web's pending-SMS review page: it promotes, ignores and
+  // re-categorises the same rows the phone does, so the merchant-rule key, the
+  // balance replay, the transfer direction and the ignore id must all be the same
+  // code — a near-copy of any of them is a silent disagreement about real money.
+  ['merchantNormalize.ts', 'merchantNormalize.ts'],
+  ['balanceReplay.ts', 'balanceReplay.ts'],
+  ['smsDirection.ts', 'smsDirection.ts'],
+  ['smsIds.ts', 'smsIds.ts'],
 ];
 const sourceOf = (f: string) => join(__dirname, '..', 'shared', f);
 const copyOf = (f: string) =>

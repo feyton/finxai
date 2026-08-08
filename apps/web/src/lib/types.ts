@@ -55,6 +55,47 @@ export interface Transaction {
   created_at: string | null;
 }
 
+/**
+ * A parsed SMS the classifier was not confident enough to file on its own — it waits
+ * here until someone confirms, corrects or ignores it. Promoting one writes a
+ * `transactions` row with the SAME id and deletes this one (see lib/reviewActions).
+ *
+ * Nearly the same shape as Transaction, minus what only a filed record has
+ * (budget_id, transfer_direction) — the direction is re-read from the SMS at promotion
+ * time rather than stored.
+ */
+export interface AutoRecord {
+  id: string;
+  amount: number | null;
+  account_id: string | null;
+  category: string | null;
+  subcategory: string | null;
+  date_time: string | null;
+  sms: string | null;
+  sender: string | null;
+  confirmed: number | null;
+  currency: string | null;
+  payee: string | null;
+  merchant: string | null;
+  transaction_type: string | null; // 'expense' | 'income' | 'transfer'
+  note: string | null;
+  fees: number | null;
+  source: string | null;
+  confidence: number | null;
+  transfer_account_id: string | null;
+  balance_after: number | null;
+  txn_ref: string | null;
+  parse_source: string | null; // 'ai' | 'regex' | null (pre-v8 rows)
+  // Where the phone was when the alert arrived. Money-out only, and only when a usable
+  // fix was already available — so most rows carry none.
+  lat: number | null;
+  lon: number | null;
+  accuracy_m: number | null;
+  location_at: string | null;
+  owner_id: string;
+  created_at: string | null;
+}
+
 export interface Budget {
   id: string;
   name: string | null;

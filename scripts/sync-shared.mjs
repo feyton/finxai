@@ -15,12 +15,18 @@ import {dirname, join} from 'node:path';
 
 const root = join(import.meta.dirname, '..');
 
-// Only what the web actually uses. merchantNormalize is deliberately NOT copied: the
-// web has no need for it yet, and copying it would create a second implementation of
-// order-dependent regex for no benefit.
+// Only what the web actually uses. The four SMS-review modules were added when the web
+// gained its own pending-SMS review page (apps/web/src/app/dashboard/review): promoting
+// a record there has to key merchant rules, recompute the balance, resolve a transfer's
+// direction and mint ignore ids EXACTLY as the phone does, or the two clients disagree
+// about the same rows.
 const FILES = [
   ['shared/categories.ts', 'apps/web/src/lib/shared/categories.ts'],
   ['shared/amortize.ts', 'apps/web/src/lib/shared/amortize.ts'],
+  ['shared/merchantNormalize.ts', 'apps/web/src/lib/shared/merchantNormalize.ts'],
+  ['shared/balanceReplay.ts', 'apps/web/src/lib/shared/balanceReplay.ts'],
+  ['shared/smsDirection.ts', 'apps/web/src/lib/shared/smsDirection.ts'],
+  ['shared/smsIds.ts', 'apps/web/src/lib/shared/smsIds.ts'],
 ];
 
 let changed = 0;

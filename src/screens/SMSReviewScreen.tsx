@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {CATS, CategoryId, FONTS, R, T, accountIcon, accountTint, resolveCat} from '../theme';
-import {CatChip, ConfPill, Icon} from '../Components/ui';
+import {CatChip, ConfPill, Icon, LocationChip} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {useSubcategories} from '../hooks/useSubcategories';
 import {useToast} from 'react-native-toast-notifications';
@@ -124,6 +124,21 @@ function FixSheet({
             </Text>
             <Text style={styles.smsBody}>{record.sms ?? '—'}</Text>
           </View>
+
+          {/* Kept alongside the raw SMS: naming an unrecognisable counterparty is the
+              hardest field on this sheet, and the place it happened is usually the
+              only clue the message itself does not carry. */}
+          {record.lat != null && record.lon != null && (
+            <View style={styles.fixLocBox}>
+              <LocationChip
+                lat={record.lat}
+                lon={record.lon}
+                accuracyM={record.accuracy_m}
+                label={record.merchant || record.payee || 'Transaction'}
+                boxed
+              />
+            </View>
+          )}
 
           {/* Type — teaching "Transfer" here trains the AI for next time */}
           <Text style={styles.fixLabel}>Type</Text>
@@ -437,6 +452,23 @@ function SmsCard({
 
         {record.fees > 0 && (
           <Text style={styles.feeNote}>Fee: {record.fees} RWF</Text>
+        )}
+
+        {/* Where the phone was when this alert arrived. It is often the fastest way
+            to settle the question the whole card is asking — a bare "payment of
+            6,300 RWF to Lambert 005868" is unrecognisable as text, and recognising
+            the place it happened decides Confirm vs Fix without opening anything.
+            Captured for money-out only, so most cards will not show this row. */}
+        {record.lat != null && record.lon != null && (
+          <View style={styles.locRow}>
+            <LocationChip
+              lat={record.lat}
+              lon={record.lon}
+              accuracyM={record.accuracy_m}
+              label={record.merchant || record.payee || 'Transaction'}
+              boxed
+            />
+          </View>
         )}
       </View>
 
@@ -820,6 +852,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 4,
   },
+  fixLocBox: {marginHorizontal: 16, marginTop: 8, alignItems: 'flex-start'},
   smsHead: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -925,6 +958,9 @@ const styles = StyleSheet.create({
     color: T.text3,
     paddingLeft: 48,
   },
+  // Indented to the same gutter as the fee note, so it hangs under the merchant
+  // rather than restarting the card at the left edge.
+  locRow: {paddingLeft: 48, alignItems: 'flex-start', paddingTop: 2},
   actions: {
     flexDirection: 'row',
     gap: 8,

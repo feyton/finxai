@@ -6,7 +6,7 @@ import {createClient} from '@/lib/supabase/client';
 import {CATS, type CategoryId, builtinSubcats, fmtAmount, resolveCat} from '@/lib/theme';
 import type {Account, Subcategory, Transaction} from '@/lib/types';
 import {Icon} from '@/components/Icon';
-import {Card, CatChip, Conf, Money, Pill, WEmpty} from '@/components/ui';
+import {Card, CatChip, Conf, LocationLink, Money, Pill, WEmpty} from '@/components/ui';
 
 const CAT_LIST = Object.values(CATS);
 const TYPE_OPTIONS = ['expense', 'income', 'transfer'] as const;
@@ -881,19 +881,7 @@ function TxnDrawer({
                 </Pill>
               )}
               {txn.lat != null && txn.lon != null && (
-                <a
-                  href={`https://maps.google.com/?q=${txn.lat},${txn.lon}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="pill press"
-                  style={{
-                    color: 'var(--accent-700)',
-                    background: 'var(--accent-soft)',
-                  }}
-                  title={`±${Math.round(txn.accuracy_m ?? 0)}m`}>
-                  <Icon name="pin" size={11} />
-                  {txn.lat.toFixed(4)}, {txn.lon.toFixed(4)}
-                </a>
+                <LocationLink lat={txn.lat} lon={txn.lon} accuracyM={txn.accuracy_m} />
               )}
             </div>
           </div>

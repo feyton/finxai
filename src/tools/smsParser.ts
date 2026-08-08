@@ -22,6 +22,13 @@ import {
 } from './merchantNormalize';
 import {MerchantRule, ParsedSMS} from './smsTypes';
 import {pickSmsFormat} from './smsFormats';
+// Pure rules the web needs too, so they live in shared/ rather than here. Re-exported
+// below so every existing `from './smsParser'` import keeps working unchanged.
+import {extractBalance} from '../../shared/balanceReplay';
+import {
+  normalizeAccountNumber,
+  resolveDirection,
+} from '../../shared/smsDirection';
 import {CATS as CAT_MAP, CategoryId, resolveCat} from '../theme';
 import categoriesData from './data.json';
 
@@ -200,22 +207,9 @@ function num(s: string | undefined): number {
   return Number.isNaN(n) ? 0 : Math.round(n);
 }
 
-// Compare account/phone numbers loosely: 250787241457 ≡ 0787241457 ≡ 787241457.
-export function normalizeAccountNumber(s: string | null | undefined): string {
-  const d = (s ?? '').replace(/\D/g, '');
-  return d.length > 9 ? d.slice(-9) : d;
-}
-
-function matchOwnAccount(
-  numberStr: string | null | undefined,
-  accounts: OwnAccountRef[] | undefined,
-): OwnAccountRef | undefined {
-  const norm = normalizeAccountNumber(numberStr);
-  if (!norm || norm.length < 6 || !accounts) {
-    return undefined;
-  }
-  return accounts.find(a => normalizeAccountNumber(a.number) === norm);
-}
+// Compares account/phone numbers loosely: 250787241457 ≡ 0787241457 ≡ 787241457.
+// Implementation in shared/smsDirection.ts, alongside the direction rule that needs it.
+export {normalizeAccountNumber};
 
 // FAILED / REVERSED transactions must never become records.
 export function detectStatus(raw: string): 'completed' | 'failed' | null {
@@ -232,27 +226,9 @@ export function detectStatus(raw: string): 'completed' | 'failed' | null {
   return null;
 }
 
-// Authoritative post-transaction balance the SMS reports. Handles all the
-// Rwandan variants: "Balance: 61,811 RWF", "Balance:5582 RWF",
-// "Balance: 64761RWF", "Available Balance: RWF2,427", "Mokash balance is RWF 3120".
-export function extractBalance(raw: string): number | null {
-  const m = raw.match(
-    /(?:available\s+balance|new\s+balance|mokash\s+balance|balance)\s*(?:is)?\s*:?\s*(?:RWF|FRW)?\s*([\d,]+(?:\.\d+)?)/i,
-  );
-  if (m) {
-    return num(m[1]);
-  }
-  // Kinyarwanda MTN Mokash formats — no literal "balance" keyword:
-  //   "Ubu ufite RWF 508 kuri Mokash"      (you now have RWF 508 on Mokash)
-  //   "Mokash ifiteho amafaranga RWF 7508" (Mokash [now] has RWF 7508)
-  const kiny = raw.match(
-    /(?:ifiteho\s+amafaranga|ufite)\s*:?\s*(?:RWF|FRW)?\s*([\d,]+(?:\.\d+)?)/i,
-  );
-  if (kiny) {
-    return num(kiny[1]);
-  }
-  return null;
-}
+// Authoritative post-transaction balance the SMS reports (shared/balanceReplay.ts —
+// the balance recomputation needs it, and so does the web).
+export {extractBalance};
 
 // "Date: 7/2/26, 9:31 AM" (BK alert format, M/D/YY) → ISO string.
 function extractOccurredAt(raw: string): string | null {
@@ -458,48 +434,25 @@ export interface RegexFacts {
 export function regexExtract(raw: string, ctx?: ParseContext): RegexFacts {
   const status = detectStatus(raw);
 
-  // BK alert format: "TRANSFER - MTN mobile money Credited account: X
-  // Debited account: Y Amount: RWF 45,000 Transaction Charge: RWF 0 ..."
-  // The words "Credited"/"Debited" here describe ACCOUNTS, not the user —
-  // direction must come from which account is the user's own.
-  const credited = raw.match(/credited\s+account\s*:?\s*([A-Za-z0-9]+)/i)?.[1] ?? null;
-  const debited = raw.match(/debited\s+account\s*:?\s*([A-Za-z0-9]+)/i)?.[1] ?? null;
+  // Direction lives in shared/smsDirection.ts: the web re-derives it from the same SMS
+  // body when it promotes a pending record, and a looser second copy there would read
+  // the word "Credited" in a Bank of Kigali alert and flip a transfer's sign.
+  const dir = resolveDirection<OwnAccountRef>(raw, {
+    accounts: ctx?.accounts,
+    currentAccountId: ctx?.currentAccountId,
+  });
+  const direction = dir.direction;
 
-  let direction: 'credit' | 'debit';
+  // Which account is on the OTHER side of the movement — only the BK alert format
+  // names one, so this stays here rather than in the shared rule.
   let counterpartyNumber: string | null = null;
   let transferAccount: OwnAccountRef | null = null;
-
-  if (credited || debited) {
-    const accounts = ctx?.accounts ?? [];
-    const current = accounts.find(a => a.id === ctx?.currentAccountId);
-    const currentNorm = normalizeAccountNumber(current?.number);
-    const creditedOwn = matchOwnAccount(credited, accounts);
-    const debitedOwn = matchOwnAccount(debited, accounts);
-
-    if (currentNorm && normalizeAccountNumber(credited) === currentNorm) {
-      direction = 'credit';
-    } else if (currentNorm && normalizeAccountNumber(debited) === currentNorm) {
-      direction = 'debit';
-    } else if (debitedOwn && debitedOwn.id !== ctx?.currentAccountId) {
-      // Money left ANOTHER of the user's accounts toward this one.
-      direction = 'credit';
-    } else {
-      // Default: banks send this alert format for movements OUT of the
-      // user's account (transfers, bill payments) — treat as debit.
-      direction = 'debit';
-    }
-    counterpartyNumber = direction === 'debit' ? credited : debited;
-    const other = direction === 'debit' ? creditedOwn : debitedOwn;
+  if (dir.credited || dir.debited) {
+    counterpartyNumber = direction === 'debit' ? dir.credited : dir.debited;
+    const other = direction === 'debit' ? dir.creditedOwn : dir.debitedOwn;
     if (other && other.id !== ctx?.currentAccountId) {
       transferAccount = other;
     }
-  } else {
-    // "kubitsa" (Kinyarwanda: to deposit/save) — e.g. "Umaze kubitsa RWF 500
-    // kuri Mokash" — money moving IN to the tracked account, same role as
-    // the English "deposit"/"received"/"credited" signals below.
-    direction = /received|credited|you have received|deposit|kubitsa/i.test(raw)
-      ? 'credit'
-      : 'debit';
   }
 
   // Amount: prefer the labelled "Amount: RWF 45,000" (BK), fall back to the

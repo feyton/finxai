@@ -1,6 +1,7 @@
 'use client';
 
 import {useState, useTransition} from 'react';
+import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {Icon} from './Icon';
 
@@ -64,17 +65,21 @@ export function SyncPill({
         </span>
       )}
 
+      {/* A count with nowhere to go was the old version of this: the dashboard could
+          say "12 to review on the phone" and that was the end of it. They are
+          reviewable here now, so the badge is the way in. */}
       {reviewCount > 0 && (
-        <span
-          className="pill tabnum"
+        <Link
+          href="/dashboard/review"
+          className="pill press tabnum"
           style={{
             background: 'var(--warn)',
             color: '#3a2400',
             padding: '3px 8px',
             fontSize: 10.5,
           }}>
-          {reviewCount} to review on the phone
-        </span>
+          {reviewCount} to review
+        </Link>
       )}
     </div>
   );

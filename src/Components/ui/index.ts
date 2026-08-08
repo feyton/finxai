@@ -6,3 +6,4 @@ export {default as Card} from './Card';
 export {default as Progress} from './Progress';
 export {default as Pill, ConfPill} from './Pill';
 export {default as SectionHeader} from './SectionHeader';
+export {default as LocationChip, openMapAt} from './LocationChip';

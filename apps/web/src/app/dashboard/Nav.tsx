@@ -7,6 +7,7 @@ import {Icon} from '@/components/Icon';
 const LINKS = [
   {href: '/dashboard', label: 'Dashboard', icon: 'grid'},
   {href: '/dashboard/transactions', label: 'Transactions', icon: 'receipt'},
+  {href: '/dashboard/review', label: 'SMS Review', icon: 'alert'},
   {href: '/dashboard/accounts', label: 'Accounts', icon: 'wallet'},
   {href: '/dashboard/budgets', label: 'Budgets', icon: 'pie'},
   {href: '/dashboard/debts', label: 'Debts', icon: 'coins'},

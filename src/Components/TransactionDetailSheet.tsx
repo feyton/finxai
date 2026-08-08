@@ -19,14 +19,14 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import {Linking, Platform, Pressable, StyleSheet, Text, View} from 'react-native';
+import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {CATS, FONTS, R, T, fmtAmount, resolveCat} from '../theme';
 import {syncAccountBalance} from '../tools/balance';
 import {reclassifySms} from '../tools/smsIngest';
 import {supabase} from '../tools/supabase';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {appAlert} from './AppDialog';
-import {Icon} from './ui';
+import {Icon, LocationChip} from './ui';
 
 const SOURCE_LABEL: Record<string, string> = {
   sms: 'From SMS',
@@ -360,39 +360,22 @@ function TransactionDetailSheet(
                     <InfoRow label="Note" value={tx.note} />
                   </>
                 ) : null}
-                {/* Where the money went out. Captured only for money-out
-                    captured live (see tools/smsIngest locationForParsed), so most
-                    rows will not have it — and until now there was nowhere in the
-                    app it could be seen even when present, which made the whole
-                    feature untestable from the user's side. */}
+                {/* Where the money went out. Captured only for money-out captured
+                    live (see tools/smsIngest locationForParsed), so most rows will
+                    not have it. Rendered by the same component the SMS review card
+                    uses, so a position reads identically before and after approval. */}
                 {tx.lat != null && tx.lon != null && (
                   <>
                     <View style={styles.infoDivider} />
-                    <Pressable
-                      onPress={() => {
-                        const q = `${tx.lat},${tx.lon}`;
-                        Linking.openURL(
-                          Platform.OS === 'android'
-                            ? `geo:${q}?q=${q}(${encodeURIComponent(
-                                tx.merchant || tx.payee || 'Transaction',
-                              )})`
-                            : `https://maps.google.com/?q=${q}`,
-                        ).catch(() =>
-                          Linking.openURL(`https://maps.google.com/?q=${q}`).catch(
-                            () => {},
-                          ),
-                        );
-                      }}
-                      style={({pressed}) => [styles.infoRow, {opacity: pressed ? 0.6 : 1}]}>
+                    <View style={styles.infoRow}>
                       <Text style={styles.infoLabel}>Where</Text>
-                      <View style={styles.locVal}>
-                        <Icon name="MapPin" size={12} color={T.accent} strokeWidth={2.2} />
-                        <Text style={styles.locText} numberOfLines={1}>
-                          {Number(tx.lat).toFixed(4)}, {Number(tx.lon).toFixed(4)}
-                          {tx.accuracy_m ? ` · ±${Math.round(tx.accuracy_m)}m` : ''}
-                        </Text>
-                      </View>
-                    </Pressable>
+                      <LocationChip
+                        lat={tx.lat}
+                        lon={tx.lon}
+                        accuracyM={tx.accuracy_m}
+                        label={tx.merchant || tx.payee || 'Transaction'}
+                      />
+                    </View>
                   </>
                 )}
               </View>
@@ -517,15 +500,6 @@ const styles = StyleSheet.create({
     backgroundColor: T.accentSoft,
   },
   retryText: {fontFamily: FONTS.semibold, fontSize: 11, color: T.accent, lineHeight: 15},
-  locVal: {flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1},
-  locText: {
-    // Monospaced so the two coordinates line up and read as data rather than
-    // prose; accent-coloured because the row is tappable and opens a map.
-    fontFamily: 'monospace',
-    fontSize: 12,
-    color: T.accent,
-    flexShrink: 1,
-  },
   smsText: {
     fontFamily: 'monospace',
     fontSize: 11.5,
