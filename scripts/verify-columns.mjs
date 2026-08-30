@@ -27,6 +27,9 @@ const EXPECTED = [
   ['transactions', 'channel,pay_code'],
   ['auto_records', 'channel,pay_code'],
   ['merchant_rules', 'channel,pay_code'],
+  // v17 — merchant->place memory
+  ['transactions', 'location_source'],
+  ['auto_records', 'location_source'],
 ];
 
 let missing = 0;

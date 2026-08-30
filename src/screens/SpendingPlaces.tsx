@@ -127,6 +127,8 @@ interface Place {
   lon: number;
   total: number;
   count: number;
+  /** How many of `count` got their position from merchant memory, not a fix. */
+  inherited: number;
   worstAccuracy: number;
   txns: any[];
 }
@@ -181,10 +183,19 @@ export default function SpendingPlaces({navigation}: any) {
       const amt = t.amount ?? 0;
       sum += amt;
       const p = byKey.get(key);
+      // An inherited pin says "this merchant is usually here", not "you were
+      // measured here" — counted so the place can say so rather than passing a
+      // lookup off as an observation.
+      const inherited = t.location_source === 'merchant' ? 1 : 0;
       if (p) {
         p.total += amt;
         p.count += 1;
-        p.worstAccuracy = Math.max(p.worstAccuracy, t.accuracy_m ?? 0);
+        p.inherited += inherited;
+        // A guessed pin has no accuracy of its own; folding the source fix's
+        // radius in here would overstate what is known about this payment.
+        p.worstAccuracy = inherited
+          ? p.worstAccuracy
+          : Math.max(p.worstAccuracy, t.accuracy_m ?? 0);
         p.txns.push(t);
       } else {
         byKey.set(key, {
@@ -193,7 +204,8 @@ export default function SpendingPlaces({navigation}: any) {
           lon,
           total: amt,
           count: 1,
-          worstAccuracy: t.accuracy_m ?? 0,
+          inherited,
+          worstAccuracy: inherited ? 0 : t.accuracy_m ?? 0,
           txns: [t],
         });
       }
@@ -429,6 +441,15 @@ export default function SpendingPlaces({navigation}: any) {
                       <Text style={styles.placeMeta}>
                         {p.lat.toFixed(4)}, {p.lon.toFixed(4)}
                         {p.worstAccuracy ? ` · ±${Math.round(p.worstAccuracy)}m` : ''}
+                        {/* Say when a pin is merchant memory rather than a fix
+                            taken at the time. "All" vs "some" matters: a place
+                            with no measured visit at all is a weaker claim than
+                            one anchored by even a single real observation. */}
+                        {p.inherited === p.count
+                          ? ' · usual spot'
+                          : p.inherited > 0
+                          ? ` · ${p.inherited} from usual spot`
+                          : ''}
                       </Text>
                     </View>
                     <View style={{alignItems: 'flex-end', gap: 2}}>

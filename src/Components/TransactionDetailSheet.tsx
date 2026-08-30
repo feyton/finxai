@@ -373,6 +373,7 @@ function TransactionDetailSheet(
                         lat={tx.lat}
                         lon={tx.lon}
                         accuracyM={tx.accuracy_m}
+                        source={tx.location_source}
                         label={tx.merchant || tx.payee || 'Transaction'}
                       />
                     </View>

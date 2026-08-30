@@ -43,7 +43,12 @@ import {
 } from '../tools/merchantMemory';
 import {syncAccountBalance} from '../tools/balance';
 import {ignoredSmsId} from '../tools/txnId';
-import {backfillPayCodes, findAccountForSms, persistParsedSms} from '../tools/smsIngest';
+import {
+  backfillMerchantLocations,
+  backfillPayCodes,
+  findAccountForSms,
+  persistParsedSms,
+} from '../tools/smsIngest';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -191,6 +196,11 @@ const SMSRetriever: React.FC = () => {
       // network — without it the Pay-again screen opens empty for exactly the
       // people with the most history to pay from.
       await backfillPayCodes(db, userId!);
+
+      // Tier 2: give past money-out rows the place their merchant is known
+      // for. Local lookup against positions already captured — no GPS, no
+      // radio, no permission prompt.
+      await backfillMerchantLocations(db, userId!);
 
       // Fresh dedupe sets for THIS run — see loadDedupeSets for why they are not read
       // from a render closure.

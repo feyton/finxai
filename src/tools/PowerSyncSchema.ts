@@ -53,6 +53,10 @@ const transactions = new Table({
   lon: column.real,
   accuracy_m: column.real,          // metres; a cached fix can be km-wide
   location_at: column.text,         // when the FIX was taken, not the txn
+  // 'device' = a real cached fix; 'merchant' = inherited from a previous
+  // device-located payment to the same merchant (v17). Never inherit from an
+  // inherited row — see merchantLocation in smsIngest.
+  location_source: column.text,
   owner_id: column.text,
   created_at: column.text,
 });
@@ -94,6 +98,7 @@ const auto_records = new Table({
   lon: column.real,
   accuracy_m: column.real,
   location_at: column.text,
+  location_source: column.text,
   owner_id: column.text,
   created_at: column.text,
 });

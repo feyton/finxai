@@ -24,6 +24,7 @@ import {
 import {ParsedSMS} from './smsTypes';
 import {getChannelRules, getMerchantChannels, getMerchantRules} from './merchantMemory';
 import {ignoredSmsId, rowExists, smsAlreadyRecorded, smsTransactionId} from './txnId';
+import {isUsablePattern, normalizeMerchant} from '../../shared/merchantNormalize';
 import {syncAccountBalance} from './balance';
 
 export interface AccountLike {
@@ -176,7 +177,17 @@ export async function persistParsedSms(
     return 'duplicate';
   }
 
-  const loc = locationForParsed(parsed, args.location);
+  const deviceLoc = locationForParsed(parsed, args.location);
+  // Tier 2: with no live fix, fall back to where this merchant has been seen
+  // before. Gated the same way locationForParsed gates a real fix — there is no
+  // place attached to receiving money or shuffling it between your own
+  // accounts — so inheritance can never widen what carries a position.
+  const inheritedLoc =
+    !deviceLoc && !parsed.isTransfer && parsed.direction === 'debit'
+      ? await merchantLocation(db, ownerId, parsed.merchant)
+      : null;
+  const loc = deviceLoc ?? inheritedLoc;
+  const locationSource = deviceLoc ? 'device' : inheritedLoc ? 'merchant' : null;
   const txType = parsed.isTransfer
     ? 'transfer'
     : parsed.direction === 'credit'
@@ -192,8 +203,8 @@ export async function persistParsedSms(
           confirmed, source, confidence,
           transfer_account_id, transfer_direction, balance_after, txn_ref,
           parse_source, channel, pay_code,
-          lat, lon, accuracy_m, location_at, owner_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          lat, lon, accuracy_m, location_at, location_source, owner_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         txnId,
         parsed.amount,
@@ -219,6 +230,7 @@ export async function persistParsedSms(
         loc?.lon ?? null,
         loc?.accuracyM ?? null,
         loc?.at ?? null,
+        locationSource,
         ownerId,
         now,
       ],
@@ -232,8 +244,8 @@ export async function persistParsedSms(
         payee, merchant, transaction_type, fees, currency,
         confirmed, source, confidence, transfer_account_id,
         balance_after, txn_ref, parse_source, channel, pay_code,
-        lat, lon, accuracy_m, location_at, owner_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        lat, lon, accuracy_m, location_at, location_source, owner_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       txnId,
       parsed.amount,
@@ -258,6 +270,7 @@ export async function persistParsedSms(
       loc?.lon ?? null,
       loc?.accuracyM ?? null,
       loc?.at ?? null,
+      locationSource,
       ownerId,
       now,
     ],
@@ -417,8 +430,8 @@ export async function promoteAutoRecord(
         confirmed, source, confidence,
         transfer_account_id, transfer_direction, balance_after, txn_ref,
         parse_source, note, channel, pay_code,
-        lat, lon, accuracy_m, location_at, owner_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        lat, lon, accuracy_m, location_at, location_source, owner_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       record.id,
       record.amount,
@@ -457,6 +470,7 @@ export async function promoteAutoRecord(
       record.lon ?? null,
       record.accuracy_m ?? null,
       record.location_at ?? null,
+      record.location_source ?? null,
       ownerId,
       now,
     ],
@@ -615,6 +629,113 @@ export async function backfillPayCodes(db: any, ownerId: string): Promise<number
     // Never let a backfill break SMS ingest — it is an enhancement, not a
     // prerequisite, and the poller runs right after this.
     console.warn('[Backfill] pay_code backfill failed:', e);
+    return 0;
+  }
+}
+
+/**
+ * Where this merchant has been SEEN before (ROADMAP §2, Tier 2).
+ *
+ * A cached GPS fix only exists when the phone happened to hold one as the SMS
+ * arrived, which is a minority of transactions — so most spending has no
+ * position and the map plots a thin, misleading sample. Once a merchant has
+ * been located once, every later payment to them can inherit that pin for free:
+ * no GPS, no radio, no permission prompt.
+ *
+ * Reads ONLY from rows whose position came from a real device fix. Inheriting
+ * from an inherited row would let one wrong pin propagate through the whole
+ * history with nothing to trace it back to; this way a pin is always at most
+ * one hop from an actual observation.
+ *
+ * Matching is on the NORMALISED merchant key, not the raw name, so "THRIVE G
+ * Ltd" inherits from "Thrive G" — the same grouping the Pay-again list uses.
+ * The scan is bounded and runs against local SQLite, so it stays cheap even
+ * when called once per message during a batch poll.
+ */
+export async function merchantLocation(
+  db: any,
+  ownerId: string,
+  merchant: string | null | undefined,
+): Promise<SmsLocation | null> {
+  const key = normalizeMerchant(merchant ?? '').key;
+  if (!isUsablePattern(key)) {
+    return null;
+  }
+  try {
+    const {rows} = await db.execute(
+      `SELECT merchant, lat, lon, accuracy_m, location_at
+         FROM transactions
+        WHERE owner_id = ?
+          AND lat IS NOT NULL AND lon IS NOT NULL
+          AND location_source = 'device'
+        ORDER BY date_time DESC
+        LIMIT 300`,
+      [ownerId],
+    );
+    const hit = (rows?._array ?? []).find(
+      (r: any) => normalizeMerchant(r.merchant ?? '').key === key,
+    );
+    if (!hit) {
+      return null;
+    }
+    return {
+      lat: hit.lat,
+      lon: hit.lon,
+      // Carried from the observation, not invented: accuracy describes how well
+      // that original fix was known, and location_at says WHEN it was taken —
+      // both are what let a stale or vague inherited pin be judged as such.
+      accuracyM: hit.accuracy_m ?? null,
+      at: hit.location_at ?? null,
+    };
+  } catch (e) {
+    console.warn('[Location] merchant lookup failed:', e);
+    return null;
+  }
+}
+
+/**
+ * Give a position to past money-out rows that never had one, by inheriting from
+ * the merchant's known place. Runs alongside the pay-code backfill.
+ *
+ * Same shape and same reasoning as backfillPayCodes: local-only, idempotent,
+ * and it writes nothing for a merchant we have never located, so rows that
+ * cannot be improved are examined once per run rather than re-written.
+ */
+export async function backfillMerchantLocations(
+  db: any,
+  ownerId: string,
+): Promise<number> {
+  try {
+    const {rows} = await db.execute(
+      `SELECT id, merchant FROM transactions
+        WHERE owner_id = ? AND lat IS NULL
+          AND transaction_type = 'expense'
+          AND merchant IS NOT NULL AND merchant != ''
+        LIMIT 500`,
+      [ownerId],
+    );
+    const list: any[] = rows?._array ?? [];
+    let filled = 0;
+    for (const r of list) {
+      const loc = await merchantLocation(db, ownerId, r.merchant);
+      if (!loc) {
+        continue;
+      }
+      await db.execute(
+        `UPDATE transactions
+            SET lat = ?, lon = ?, accuracy_m = ?, location_at = ?,
+                location_source = 'merchant'
+          WHERE id = ?`,
+        [loc.lat, loc.lon, loc.accuracyM ?? null, loc.at ?? null, r.id],
+      );
+      filled++;
+    }
+    if (filled > 0) {
+      console.log(`[Backfill] inherited a place for ${filled} row(s)`);
+    }
+    return filled;
+  } catch (e) {
+    console.warn('[Backfill] merchant location backfill failed:', e);
     return 0;
   }
 }

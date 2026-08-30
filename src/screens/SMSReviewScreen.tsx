@@ -150,6 +150,7 @@ function FixSheet({
                 lat={record.lat}
                 lon={record.lon}
                 accuracyM={record.accuracy_m}
+                source={record.location_source}
                 label={record.merchant || record.payee || 'Transaction'}
                 boxed
               />
@@ -549,6 +550,7 @@ function SmsCard({
               lat={record.lat}
               lon={record.lon}
               accuracyM={record.accuracy_m}
+              source={record.location_source}
               label={record.merchant || record.payee || 'Transaction'}
               boxed
             />

@@ -696,25 +696,25 @@ describe('extractPayCode', () => {
     // before it was added: a quarter of all spending, silently uncovered.
     expect(
       extractPayCode(
-        '*165*S*1000 RWF transferred to Steven BAYIRINGIRE (250787384838) at 2026-07-27 20:40:03 .Fee: 20RWF.Balance: 10080RWF.Dial *182*1*3# and send money abroad',
+        '*165*S*1000 RWF transferred to SAMPLE PAYEE (250780000001) at 2026-07-27 20:40:03 .Fee: 20RWF.Balance: 10080RWF.Dial *182*1*3# and send money abroad',
       ),
-    ).toBe('0787384838');
+    ).toBe('0780000001');
   });
 
   it('is not fooled by the promo USSD or the trailing fee/balance', () => {
     // The same message carries "Dial *182*1*3#" and "Fee: 20RWF.Balance:
     // 10080RWF" — none of which is the payee's code.
     const code = extractPayCode(
-      '*165*S*800 RWF transferred to Emmanuel N (250799492544) at 2026-07-25 18:28:32 .Fee: 20RWF.Balance: 9672RWF.Dial *182*1*3#',
+      '*165*S*800 RWF transferred to OTHER PAYEE (250780000002) at 2026-07-25 18:28:32 .Fee: 20RWF.Balance: 9672RWF.Dial *182*1*3#',
     );
-    expect(code).toBe('0799492544');
+    expect(code).toBe('0780000002');
   });
 
   it('accepts a genuine 4-digit merchant code', () => {
     // Real: rejecting anything under 5 digits lost this merchant entirely.
     expect(
       extractPayCode(
-        'TxId:28922667043*S*Your payment of 640 RWF to SALAMA DOLCE PHARMACY LTD 5285 was completed at 2026-07-02 11:00:15. Balance: 622 RWF. Fee 0 RWF.*EN#',
+        'TxId:28922667043*S*Your payment of 640 RWF to SAMPLE PHARMACY LTD 5285 was completed at 2026-07-02 11:00:15. Balance: 622 RWF. Fee 0 RWF.*EN#',
       ),
     ).toBe('5285');
   });
@@ -723,7 +723,7 @@ describe('extractPayCode', () => {
     // "0788******" cannot be dialled; extracting a partial number would put an
     // un-payable payee in the list.
     expect(
-      extractPayCode('You have sent 30,000 RWF to ALINE UWASE (0788******). Fee 250 RWF.'),
+      extractPayCode('You have sent 30,000 RWF to SAMPLE PAYEE (0788******). Fee 250 RWF.'),
     ).toBeNull();
   });
 

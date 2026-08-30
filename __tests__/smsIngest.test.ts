@@ -18,6 +18,7 @@ import {
   findAccountForSms,
   locationForParsed,
   persistParsedSms,
+  backfillMerchantLocations,
   backfillPayCodes,
   promoteAutoRecord,
   AccountLike,
@@ -770,5 +771,159 @@ describe('backfillPayCodes', () => {
       }),
     };
     await expect(backfillPayCodes(db, OWNER)).resolves.toBe(0);
+  });
+});
+
+// ── Tier 2: merchant→place memory (migration v17) ────────────────
+//
+// The value of an inherited pin depends entirely on it being distinguishable
+// from a real one: "you were here" and "this merchant is usually here" are
+// different claims, and merging them lets a guess be read as evidence.
+describe('merchant location inheritance', () => {
+  const account: AccountLike = {id: ACCT, name: 'MTN MoMo', address: 'MTN'};
+  const KNOWN = {
+    merchant: 'Simba Supermarket',
+    lat: -1.9441,
+    lon: 30.0619,
+    accuracy_m: 25,
+    location_at: '2026-07-01T10:00:00.000Z',
+  };
+
+  // `located` seeds what the Tier 2 lookup finds; every execute is recorded.
+  function fakeDb(located: any[] = []) {
+    const calls: {sql: string; params: any[]}[] = [];
+    return {
+      calls,
+      execute: jest.fn(async (sql: string, params: any[] = []) => {
+        calls.push({sql, params});
+        if (sql.includes("location_source = 'device'") && sql.trim().startsWith('SELECT')) {
+          return {rows: {_array: located}};
+        }
+        return {rows: {_array: []}};
+      }),
+    };
+  }
+
+  const args = (over: Partial<ParsedSMS> = {}, location?: SmsLocation | null) => ({
+    parsed: parsed({merchant: 'Simba Supermarket', confidence: 0.97, ...over}),
+    account,
+    ownerId: OWNER,
+    body: 'You have paid 5,000 RWF to Simba Supermarket',
+    smsDate: 1_700_000_000_000,
+    occurredAt: '2026-07-30T09:00:00.000Z',
+    location,
+  });
+
+  const insert = (db: any) =>
+    db.calls.find((c: any) => c.sql.includes('INSERT INTO transactions'));
+
+  const valueOf = (sql: string, params: any[], column: string) => {
+    const cols = /\(([^)]*)\)\s*VALUES/is.exec(sql)![1].split(',').map(c => c.trim());
+    const slots = /VALUES\s*\(([\s\S]*)\)/i.exec(sql)![1].split(',').map(s => s.trim());
+    const idx = cols.indexOf(column);
+    const paramIndex = slots.slice(0, idx + 1).filter(s => s === '?').length - 1;
+    return params[paramIndex];
+  };
+
+  it('inherits the place when no live fix was captured', async () => {
+    const db = fakeDb([KNOWN]);
+    await persistParsedSms(db, args({}, null));
+    const call = insert(db)!;
+    expect(valueOf(call.sql, call.params, 'lat')).toBe(KNOWN.lat);
+    expect(valueOf(call.sql, call.params, 'location_source')).toBe('merchant');
+    // The ORIGINAL fix time, not now: it is what lets a stale inherited pin be
+    // recognised as stale rather than looking freshly observed.
+    expect(valueOf(call.sql, call.params, 'location_at')).toBe(KNOWN.location_at);
+  });
+
+  it('prefers a real fix and labels it as one', async () => {
+    const db = fakeDb([KNOWN]);
+    await persistParsedSms(db, args({}, {lat: -2.1, lon: 30.5, accuracyM: 8}));
+    const call = insert(db)!;
+    expect(valueOf(call.sql, call.params, 'lat')).toBe(-2.1);
+    expect(valueOf(call.sql, call.params, 'location_source')).toBe('device');
+  });
+
+  it('never inherits from an already-inherited row', async () => {
+    // Enforced in the query, not in JS: one wrong pin must not be able to
+    // propagate through the history with nothing tracing it to an observation.
+    const db = fakeDb([KNOWN]);
+    await persistParsedSms(db, args({}, null));
+    const lookup = db.calls.find((c: any) => c.sql.includes('FROM transactions') && c.sql.includes('lat IS NOT NULL'));
+    expect(lookup!.sql).toContain("location_source = 'device'");
+  });
+
+  it('does not inherit for income or transfers', async () => {
+    // Nobody goes anywhere to receive money or move it between own accounts.
+    for (const over of [{direction: 'credit' as const}, {isTransfer: true}]) {
+      const db = fakeDb([KNOWN]);
+      await persistParsedSms(db, args(over, null));
+      const call = insert(db)!;
+      expect(valueOf(call.sql, call.params, 'lat')).toBeNull();
+      expect(valueOf(call.sql, call.params, 'location_source')).toBeNull();
+    }
+  });
+
+  it('leaves the row unlocated when the merchant has never been seen', async () => {
+    const db = fakeDb([]);
+    await persistParsedSms(db, args({}, null));
+    const call = insert(db)!;
+    expect(valueOf(call.sql, call.params, 'lat')).toBeNull();
+    expect(valueOf(call.sql, call.params, 'location_source')).toBeNull();
+  });
+
+  it('matches on the normalised name, so spelling variants still inherit', async () => {
+    const db = fakeDb([{...KNOWN, merchant: 'SIMBA SUPERMARKET LTD'}]);
+    await persistParsedSms(db, args({merchant: 'Simba Supermarket'}, null));
+    expect(valueOf(insert(db)!.sql, insert(db)!.params, 'location_source')).toBe('merchant');
+  });
+});
+
+describe('backfillMerchantLocations', () => {
+  const KNOWN = {
+    merchant: 'Simba Supermarket',
+    lat: -1.9441,
+    lon: 30.0619,
+    accuracy_m: 25,
+    location_at: '2026-07-01T10:00:00.000Z',
+  };
+
+  function fakeDb(unlocated: any[], located: any[]) {
+    const calls: {sql: string; params: any[]}[] = [];
+    return {
+      calls,
+      updates: () => calls.filter(c => c.sql.trim().startsWith('UPDATE transactions')),
+      execute: jest.fn(async (sql: string, params: any[] = []) => {
+        calls.push({sql, params});
+        if (sql.includes('lat IS NULL')) {
+          return {rows: {_array: unlocated}};
+        }
+        if (sql.includes("location_source = 'device'")) {
+          return {rows: {_array: located}};
+        }
+        return {rows: {_array: []}};
+      }),
+    };
+  }
+
+  it('gives past rows the place their merchant is known for', async () => {
+    const db = fakeDb([{id: 't1', merchant: 'Simba Supermarket'}], [KNOWN]);
+    expect(await backfillMerchantLocations(db, OWNER)).toBe(1);
+    const u = db.updates()[0];
+    expect(u.sql).toContain("location_source = 'merchant'");
+    expect(u.params).toEqual([KNOWN.lat, KNOWN.lon, KNOWN.accuracy_m, KNOWN.location_at, 't1']);
+  });
+
+  it('writes nothing for a merchant never located', async () => {
+    const db = fakeDb([{id: 't2', merchant: 'Unknown Shop'}], []);
+    expect(await backfillMerchantLocations(db, OWNER)).toBe(0);
+    expect(db.updates()).toHaveLength(0);
+  });
+
+  it('never throws — it runs on the ingest path', async () => {
+    const db = {execute: jest.fn(async () => {
+      throw new Error('db gone');
+    })};
+    await expect(backfillMerchantLocations(db, OWNER)).resolves.toBe(0);
   });
 });

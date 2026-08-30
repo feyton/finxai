@@ -32,6 +32,11 @@ export default function LocationChip({
   lon,
   accuracyM,
   label,
+  /**
+   * 'device' (or unset) — a real fix taken when this payment happened.
+   * 'merchant' — inherited from a previous visit to the same merchant (v17).
+   */
+  source,
   /** Boxed presentation with a leading caption, for use inside a card. */
   boxed = false,
 }: {
@@ -39,13 +44,19 @@ export default function LocationChip({
   lon: number;
   accuracyM?: number | null;
   label?: string;
+  source?: string | null;
   boxed?: boolean;
 }) {
   const coords = `${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`;
+  const inherited = source === 'merchant';
   // A cached fix can be kilometres wide, and a 2km radius says something very
   // different about "were you at this shop" than a 20m one — so the accuracy is part
   // of the reading, never hidden behind it.
-  const accuracy = accuracyM ? ` · ±${Math.round(accuracyM)}m` : '';
+  //
+  // An inherited pin shows no radius at all: the source fix's accuracy describes how
+  // well a DIFFERENT visit was known, and printing it here would dress a lookup up as
+  // a measurement of this payment.
+  const accuracy = !inherited && accuracyM ? ` · ±${Math.round(accuracyM)}m` : '';
 
   const body = (
     <View style={styles.row}>
@@ -53,6 +64,7 @@ export default function LocationChip({
       <Text style={styles.text} numberOfLines={1}>
         {coords}
         {accuracy}
+        {inherited ? ' · usual spot' : ''}
       </Text>
     </View>
   );
@@ -64,7 +76,9 @@ export default function LocationChip({
       style={({pressed}) => [boxed && styles.box, {opacity: pressed ? 0.6 : 1}]}>
       {boxed ? (
         <View style={styles.boxInner}>
-          <Text style={styles.caption}>Where this happened</Text>
+          <Text style={styles.caption}>
+            {inherited ? 'Where you usually pay them' : 'Where this happened'}
+          </Text>
           {body}
         </View>
       ) : (
