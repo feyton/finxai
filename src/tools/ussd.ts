@@ -14,8 +14,12 @@ export type PayRail = 'momopay' | 'sendmoney';
 
 /** Local Rwandan mobile number, the form normalisePayCode produces: 07XXXXXXXX. */
 const PHONE_RE = /^07\d{8}$/;
-/** MoMoPay merchant codes observed in the wild are 5-10 digits, zeros kept. */
-const MERCHANT_CODE_RE = /^\d{5,10}$/;
+/**
+ * MoMoPay merchant codes observed in the real corpus run from 4 digits
+ * ("SALAMA DOLCE PHARMACY LTD 5285") to 6 ("THRIVE G Ltd 888840"), zeros kept.
+ * The upper bound stays at 10 so a stray long reference number cannot pass.
+ */
+const MERCHANT_CODE_RE = /^\d{4,10}$/;
 
 /**
  * Which rail a stored `channel` corresponds to, or null when it is one we

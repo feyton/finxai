@@ -513,6 +513,15 @@ const PAY_CODE_RE =
 const USSD_MERCHANT_RE = /\*182\*8\*1\*(\d{4,10})/;
 // "You have sent 5,000 RWF to JOHN 0788123456"
 const SENT_TO_RE = /\bsent\b[^.]{0,80}?\bto\s+[^.]{0,60}?\b((?:250)?0?7\d{8})\b/i;
+// MTN's send-money confirmation puts the recipient's number in PARENTHESES:
+//   "*165*S*1000 RWF transferred to Steven B (250787384838) at 2026-07-27 ..."
+// Measured against the real corpus (scripts/eval-paycode.mts), this one format
+// is 55 of 218 money-out messages — a quarter of all spending, and every single
+// one was missed before this pattern existed. Anchoring on the parentheses is
+// what keeps it off the "Fee: 20RWF.Balance: 10080RWF" numbers that follow, and
+// off the "Dial *182*1*3#" promo tail these messages also carry.
+const TRANSFERRED_TO_RE =
+  /\btransferred\s+to\s+[^(]{0,80}?\(\s*\+?((?:250)?0?7\d{8})\s*\)/i;
 
 /**
  * Canonical local form, so the same payee aggregates as one merchant however
@@ -532,15 +541,19 @@ export function extractPayCode(raw: string): string | null {
   if (ussd) {
     return ussd[1];
   }
-  const m = PAY_CODE_RE.exec(raw) ?? SENT_TO_RE.exec(raw);
+  const m =
+    PAY_CODE_RE.exec(raw) ?? TRANSFERRED_TO_RE.exec(raw) ?? SENT_TO_RE.exec(raw);
   if (!m) {
     return null;
   }
   const code = normalisePayCode(m[1]);
-  // A bare 4-digit "code" is as likely to be a year or a truncated reference as
-  // a merchant, and dialling a wrong merchant code moves real money. Phone
-  // numbers are exempt: they are self-identifying by shape.
-  if (!/^0?7\d{8}$/.test(code) && code.length < 5) {
+  // Four is the real floor, not five: the corpus contains genuine 4-digit
+  // merchant codes ("to SALAMA DOLCE PHARMACY LTD 5285 was completed"), and
+  // rejecting them lost a real merchant. Three or fewer stays out — at that
+  // length a stray number is as likely to be a truncated reference as a code,
+  // and dialling a wrong merchant code moves real money. Phone numbers are
+  // exempt from the floor entirely: they are self-identifying by shape.
+  if (!/^0?7\d{8}$/.test(code) && code.length < 4) {
     return null;
   }
   return code;
