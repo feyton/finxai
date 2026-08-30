@@ -17,6 +17,13 @@ version-bump commit.
   `dry_run: true` builds and verifies but publishes nothing (and warms the
   caches for the next real release).
 - Old releases are pruned automatically — the workflow keeps the newest 5.
+- **Rapid commits collapse into one release, and that is fine.** The workflow
+  uses a `release-apk` concurrency group with `cancel-in-progress: false`, so a
+  run never interrupts one that is already building. GitHub allows only one
+  *pending* run per group, though, so when three commits land while a build is
+  running, the middle one is **cancelled** and the newest is built. A cancelled
+  run in the list is normal — the latest code still ships. Only worry if the
+  most recent run is cancelled or failed.
 
 ### Why arm64-only?
 Real phones are arm64-v8a; a single-ABI build is ~40 MB instead of the ~130 MB
