@@ -43,6 +43,25 @@ import {appAlert} from '../Components/AppDialog';
 // Below this they are still searchable — see `filtered`.
 const REGULAR_MIN = 5;
 
+/**
+ * "…, last 3 days ago", or nothing at all.
+ *
+ * date-fns THROWS a RangeError on an invalid date rather than returning a
+ * placeholder, and this runs inside a list row — one malformed date_time (a
+ * legacy row, a partial sync) would take down the whole screen instead of
+ * degrading one line of subtitle.
+ */
+function lastSeen(at: string | null | undefined): string {
+  if (!at) {
+    return '';
+  }
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) {
+    return '';
+  }
+  return `, last ${formatDistanceToNowStrict(d, {addSuffix: true})}`;
+}
+
 interface Payee {
   key: string;
   name: string;
@@ -199,10 +218,7 @@ export default function PayMerchant({navigation}: any) {
           {item.name}
         </Text>
         <Text style={styles.rowMeta} numberOfLines={1}>
-          {item.channel} · {item.payCode} · paid {item.times}×
-          {item.lastAt
-            ? `, last ${formatDistanceToNowStrict(new Date(item.lastAt), {addSuffix: true})}`
-            : ''}
+          {item.channel} · {item.payCode} · paid {item.times}×{lastSeen(item.lastAt)}
         </Text>
       </View>
       <Icon name="Phone" size={16} color={T.text3} strokeWidth={2.2} />
