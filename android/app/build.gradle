@@ -80,10 +80,16 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // CI derives the release version from git (see .github/workflows/release.yml)
-        // and injects it via ORG_GRADLE_PROJECT_FINXAI_VERSION_*. The literals below
-        // are only what a local dev build reports — releases never use them.
-        versionCode (findProperty('FINXAI_VERSION_CODE') ?: '63').toInteger()
-        versionName (findProperty('FINXAI_VERSION_NAME') ?: '1.31-dev')
+        // and injects it via ORG_GRADLE_PROJECT_FINXAI_VERSION_*. The fallbacks are
+        // only what a local dev build reports — releases never use them.
+        //
+        // Computed into locals first: `versionCode (expr).toInteger()` parses as
+        // `(versionCode(expr)).toInteger()` — .toInteger() on versionCode's void
+        // return — which fails the whole configuration with a bare "Value is null".
+        def finxaiVersionCode = (findProperty('FINXAI_VERSION_CODE') ?: '63').toInteger()
+        def finxaiVersionName = (findProperty('FINXAI_VERSION_NAME') ?: '1.31-dev').toString()
+        versionCode finxaiVersionCode
+        versionName finxaiVersionName
     }
     signingConfigs {
         release {
