@@ -12,8 +12,8 @@
  *   - mobile: Authorization: Bearer <supabase access token>
  */
 import {NextResponse} from 'next/server';
-import {createClient as createBareClient} from '@supabase/supabase-js';
-import {createClient} from '@/lib/supabase/server';
+import {authedUser} from '@/lib/authedUser';
+import {rateLimit} from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,23 +27,6 @@ function escapeHtml(s: string): string {
   );
 }
 
-async function authedUser(request: Request) {
-  const auth = request.headers.get('authorization');
-  if (auth?.toLowerCase().startsWith('bearer ')) {
-    const token = auth.slice(7).trim();
-    const bare = createBareClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {auth: {persistSession: false, autoRefreshToken: false}},
-    );
-    const {data} = await bare.auth.getUser(token);
-    if (data.user) return data.user;
-  }
-  const supabase = await createClient();
-  const {data} = await supabase.auth.getUser();
-  return data.user;
-}
-
 export async function POST(request: Request) {
   const apiKey = process.env.MAILJET_API_KEY;
   const secretKey = process.env.MAILJET_SECRET_KEY;
@@ -55,9 +38,20 @@ export async function POST(request: Request) {
     );
   }
 
-  const user = await authedUser(request);
+  const {user} = await authedUser(request);
   if (!user) {
     return NextResponse.json({error: 'Unauthorized'}, {status: 401});
+  }
+
+  // Sharing an account with someone is a rare, deliberate act; anything past a
+  // handful per hour is either a bug loop or someone using us to spam — both
+  // burn Mailjet quota and sender reputation.
+  const rl = rateLimit(`invite:${user.id}`, {limit: 5, windowMs: 60 * 60_000});
+  if (!rl.ok) {
+    return NextResponse.json(
+      {error: 'Too many invites — try again later.'},
+      {status: 429, headers: {'Retry-After': String(rl.retryAfterSec)}},
+    );
   }
 
   const body = await request.json().catch(() => ({}));

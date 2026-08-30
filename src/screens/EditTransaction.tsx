@@ -198,7 +198,12 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
             // transaction was split.
             p.subcategory || null,
             null,
-            userId ?? '',
+            // The PARENT TRANSACTION's owner, not the editor's uid (the web
+            // drawer already does this). Split rows live in the transaction
+            // owner's sync bucket; a shared editor writing their own uid here
+            // produced rows the owner never downloaded, sitting alongside the
+            // owner's old rows the editor's DELETE was never allowed to touch.
+            tx.owner_id ?? userId ?? '',
           ],
         );
       }

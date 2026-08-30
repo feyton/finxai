@@ -22,6 +22,7 @@ import {NextResponse, after} from 'next/server';
 import {authedUser} from '@/lib/authedUser';
 import {logAiUsage} from '@/lib/aiUsage';
 import {MODELS, apiKeyFor, providerForUser} from '@/lib/aiProvider';
+import {rateLimit, underDailyCostCap} from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,6 +50,26 @@ export async function POST(request: Request) {
     return NextResponse.json({error: 'Unauthorized'}, {status: 401});
   }
 
+  // The throttle bounds the request rate, the cost cap bounds the money. Sized
+  // so a first-install inbox sweep (sequential, one SMS per round trip) never
+  // hits it, while a loop hammering the endpoint does. On 429 the mobile
+  // client falls back to regex + the review queue, and the retry path
+  // (reclassifySms) recovers the classification later — degraded, not broken.
+  const rl = rateLimit(`classify:${user.id}`, {limit: 120, windowMs: 5 * 60_000});
+  if (!rl.ok) {
+    return NextResponse.json(
+      {error: 'Too many classification requests — slow down and retry.'},
+      {status: 429, headers: {'Retry-After': String(rl.retryAfterSec)}},
+    );
+  }
+  const cap = await underDailyCostCap(supabase, user.id);
+  if (!cap.ok) {
+    return NextResponse.json(
+      {error: `Daily AI budget reached ($${cap.capUsd.toFixed(2)}). Resets at midnight UTC.`},
+      {status: 429, headers: {'Retry-After': '3600'}},
+    );
+  }
+
   const body = await request.json().catch(() => ({}));
   const system = String(body.system ?? '');
   const userPrompt = String(body.user ?? '');
@@ -57,6 +78,12 @@ export async function POST(request: Request) {
   const schema = body.schema && typeof body.schema === 'object' ? body.schema : null;
   if (!userPrompt) {
     return NextResponse.json({error: 'Missing "user" prompt'}, {status: 400});
+  }
+  // An SMS plus taxonomy context has a known size; anything bigger is not this
+  // app's traffic. Reject rather than truncate — a truncated prompt classifies
+  // wrong instead of failing loud.
+  if (system.length > 30_000 || userPrompt.length > 10_000) {
+    return NextResponse.json({error: 'Prompt too large'}, {status: 413});
   }
 
   const provider = await providerForUser(supabase, user.id);

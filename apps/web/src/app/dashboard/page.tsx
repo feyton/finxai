@@ -106,7 +106,9 @@ export default async function DashboardPage() {
             </div>
             <div className="text-[12px] text-ink2">
               {d.reviewCount > 0 ? (
-                <b style={{color: 'var(--accent-700)'}}>{d.reviewCount} waiting for review on the phone</b>
+                <Link href="/dashboard/review">
+                  <b style={{color: 'var(--accent-700)'}}>{d.reviewCount} waiting for review</b>
+                </Link>
               ) : (
                 'Everything sorted'
               )}
@@ -345,7 +347,8 @@ export default async function DashboardPage() {
                 )}
                 {d.reviewCount > 0 && (
                   <Insight tint="var(--accent-700)" icon="sparkles">
-                    <b>{d.reviewCount}</b> SMS records are waiting for a quick check on your phone.
+                    <b>{d.reviewCount}</b> SMS records are waiting for a quick check —{' '}
+                    <Link href="/dashboard/review" className="underline">review them here</Link>.
                   </Insight>
                 )}
                 {savingsRate > 0 && (

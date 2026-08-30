@@ -16,6 +16,7 @@ import {authedUser} from '@/lib/authedUser';
 import {logAiUsage} from '@/lib/aiUsage';
 import {MODELS, apiKeyFor, providerForUser} from '@/lib/aiProvider';
 import {fromGeminiResponse, toGeminiContents, toGeminiTools} from '@/lib/geminiChat';
+import {rateLimit, underDailyCostCap} from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,12 +30,40 @@ export async function POST(request: Request) {
     return NextResponse.json({error: 'Unauthorized'}, {status: 401});
   }
 
+  // Chat runs the pricier model, so its throttle is tighter than classify's.
+  // An agentic turn is 1-3 calls (tool round trips), so 30/5min is ~10 real
+  // coach exchanges — beyond any legitimate conversation pace.
+  const rl = rateLimit(`chat:${user.id}`, {limit: 30, windowMs: 5 * 60_000});
+  if (!rl.ok) {
+    return NextResponse.json(
+      {error: 'Too many coach requests — give it a minute.'},
+      {status: 429, headers: {'Retry-After': String(rl.retryAfterSec)}},
+    );
+  }
+  const cap = await underDailyCostCap(supabase, user.id);
+  if (!cap.ok) {
+    return NextResponse.json(
+      {error: `Daily AI budget reached ($${cap.capUsd.toFixed(2)}). Resets at midnight UTC.`},
+      {status: 429, headers: {'Retry-After': '3600'}},
+    );
+  }
+
   const body = await request.json().catch(() => ({}));
   const messages = body.messages;
   const systemPrompt = String(body.systemPrompt ?? '');
   const tools = Array.isArray(body.tools) ? body.tools : [];
   if (!Array.isArray(messages) || messages.length === 0) {
     return NextResponse.json({error: 'Missing "messages"'}, {status: 400});
+  }
+  // Generous for the coach's real shape (system prompt + tool catalog + a
+  // conversation), a wall for anyone using the endpoint as a general proxy.
+  if (
+    messages.length > 60 ||
+    systemPrompt.length > 60_000 ||
+    tools.length > 24 ||
+    JSON.stringify(messages).length > 200_000
+  ) {
+    return NextResponse.json({error: 'Request too large'}, {status: 413});
   }
 
   const provider = await providerForUser(supabase, user.id);

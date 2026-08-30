@@ -10,7 +10,12 @@ import {baseUrlFrom} from '@/lib/site';
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
-  const next = url.searchParams.get('next') ?? '/dashboard';
+  // Only a same-site path is a valid target. Unvalidated, `next=@evil.com`
+  // concatenates into `https://app.feyton.co.rw@evil.com` — a well-formed URL
+  // whose host is evil.com (everything before @ parses as userinfo) — turning
+  // the OAuth callback into an open redirect.
+  const rawNext = url.searchParams.get('next') ?? '/dashboard';
+  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/dashboard';
   const base = baseUrlFrom(request);
 
   if (!code) {
