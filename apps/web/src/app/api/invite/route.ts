@@ -1,8 +1,11 @@
 /**
  * POST /api/invite — sends a FinXAI share-invitation email via Mailjet.
  *
- * Replaces the Supabase edge function (send-invite): the Next.js app is the
- * backend now. Mailjet credentials live in the server's env, never in git:
+ * The only invite path. It replaced a Supabase edge function, which was deleted
+ * from the repo on 2026-08-30 once this had been serving traffic for weeks —
+ * two mailers with two providers is two sets of credentials to keep.
+ *
+ * Mailjet credentials live in the server's env, never in git:
  *   MAILJET_API_KEY, MAILJET_SECRET_KEY,
  *   INVITE_FROM_EMAIL (a Mailjet-verified sender), INVITE_FROM_NAME,
  *   APP_LINK (defaults to the GitHub releases page).

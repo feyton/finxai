@@ -57,9 +57,9 @@ finxai/
   - The web is online-first, so no PowerSync on web — Supabase Realtime covers
     live updates. (PowerSync-web via wa-sqlite is only for future offline web.)
 - **Server tier (Next.js on Contabo) can host:**
-  - the **invite emailer** (move `send-invite` from a Supabase Edge Function to a
-    Next.js route handler that holds the Brevo creds as VPS env vars — one fewer
-    moving part);
+  - the **invite emailer** — DONE: `/api/invite` on Contabo (Mailjet), holding
+    its creds as VPS env vars. The Supabase Edge Function it replaced was
+    deleted from the repo on 2026-08-30; nothing is deployed on Supabase;
   - an **AI proxy** so the Anthropic key lives server-side instead of on devices;
   - **cron** (systemd timer / node-cron) for scheduled-payment reminders,
     debt-installment nudges, and digest emails;
@@ -80,7 +80,7 @@ finxai/
 3. Scaffold `apps/web` (Next.js + Supabase SSR), ship a read-only dashboard, then
    editing. RLS already protects writes.
 4. Stand up `app.feyton.co.rw` on Contabo (Nginx + TLS + PM2); move `send-invite`
-   into a Next.js route handler once it's live.
+   into a Next.js route handler once it's live. — DONE.
 
 **Status (2026-07-09) — Phase 3+4 read-only slice shipped:**
 - `apps/web` scaffolded (Next.js 15 App Router + Supabase SSR, Google OAuth,
