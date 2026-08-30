@@ -39,6 +39,10 @@ import {buildUssd, ussdTelUrl} from '../tools/ussd';
 import {FONTS, R, T} from '../theme';
 import {appAlert} from '../Components/AppDialog';
 
+// How many payments make someone a "regular" worth suggesting unprompted.
+// Below this they are still searchable — see `filtered`.
+const REGULAR_MIN = 5;
+
 interface Payee {
   key: string;
   name: string;
@@ -83,52 +87,73 @@ export default function PayMerchant({navigation}: any) {
       rules.set(r.pattern, r);
     }
 
-    const byKey = new Map<string, Payee>();
+    // Counted across ALL rows for a payee, then built once. Doing both in a
+    // single pass got this wrong: the count started from whichever row first
+    // produced a dialable entry, so a merchant whose latest payment used a rail
+    // we cannot rebuild lost its history along with it.
+    const byKey = new Map<string, {rowsSeen: any[]}>();
     for (const r of (rows as any[]) ?? []) {
-      const norm = normalizeMerchant(r.merchant ?? '');
-      if (!norm.key) {
-        continue;
-      }
-      const rule = rules.get(norm.key);
       // Grouping on the normalised key, not the raw name, so "THRIVE G Ltd" and
       // "Thrive G" are one payee rather than two rows that pay the same code.
-      const existing = byKey.get(norm.key);
-      if (existing) {
-        existing.times += 1;
+      const key = normalizeMerchant(r.merchant ?? '').key;
+      if (!key) {
         continue;
       }
-      const channel = rule?.channel ?? r.channel;
-      const payCode = rule?.pay_code ?? r.pay_code;
-      // Hide anything we cannot actually dial rather than offering a dead row.
-      if (!buildUssd({channel, payCode})) {
+      const bucket = byKey.get(key) ?? {rowsSeen: []};
+      bucket.rowsSeen.push(r);
+      byKey.set(key, bucket);
+    }
+
+    const out: Payee[] = [];
+    for (const [key, {rowsSeen}] of byKey) {
+      const rule = rules.get(key);
+      // rowsSeen is newest-first (the query orders by date), so the first row
+      // we can actually dial is the most recent usable way to pay them.
+      const usable = rowsSeen.find(r =>
+        buildUssd({
+          channel: rule?.channel ?? r.channel,
+          payCode: rule?.pay_code ?? r.pay_code,
+        }),
+      );
+      // Omit rather than show a dead row.
+      if (!usable) {
         continue;
       }
-      byKey.set(norm.key, {
-        key: norm.key,
-        name: (rule?.display_name || r.merchant || norm.display || '').trim(),
-        channel,
-        payCode,
-        lastAmount: Math.round(r.amount ?? 0),
-        lastAt: r.date_time,
-        times: 1,
+      const norm = normalizeMerchant(usable.merchant ?? '');
+      out.push({
+        key,
+        name: (rule?.display_name || usable.merchant || norm.display || '').trim(),
+        channel: rule?.channel ?? usable.channel,
+        payCode: rule?.pay_code ?? usable.pay_code,
+        lastAmount: Math.round(usable.amount ?? 0),
+        lastAt: usable.date_time,
+        times: rowsSeen.length,
       });
     }
-    return [...byKey.values()];
+    // Habit first, recency second: the person you pay weekly should be at the
+    // top even if you happened to pay someone else more recently.
+    return out.sort(
+      (a, b) => b.times - a.times || String(b.lastAt).localeCompare(String(a.lastAt)),
+    );
   }, [rows, ruleRows]);
+
+  const regulars = useMemo(() => payees.filter(p => p.times >= REGULAR_MIN), [payees]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
+    // With no query this is a SUGGESTION list, so it only offers people you
+    // actually pay repeatedly — otherwise every one-off from the last few
+    // months crowds out the handful you came here for, which defeats the point.
     if (!needle) {
-      return payees;
+      return regulars;
     }
-    // Match the code too — "who is 888840?" is a real way to search when the
-    // name on the SMS was never that memorable.
+    // Searching drops the threshold: the curation is about what we volunteer,
+    // not about what we will admit to knowing. Matches the code too, because
+    // "who is 888840?" is a real way to look when the SMS name was forgettable.
     return payees.filter(
-      p =>
-        p.name.toLowerCase().includes(needle) ||
-        p.payCode.includes(needle),
+      p => p.name.toLowerCase().includes(needle) || p.payCode.includes(needle),
     );
-  }, [payees, q]);
+  }, [payees, regulars, q]);
 
   const open = (p: Payee) => {
     setSelected(p);
@@ -174,9 +199,9 @@ export default function PayMerchant({navigation}: any) {
           {item.name}
         </Text>
         <Text style={styles.rowMeta} numberOfLines={1}>
-          {item.channel} · {item.payCode}
+          {item.channel} · {item.payCode} · paid {item.times}×
           {item.lastAt
-            ? ` · ${formatDistanceToNowStrict(new Date(item.lastAt), {addSuffix: true})}`
+            ? `, last ${formatDistanceToNowStrict(new Date(item.lastAt), {addSuffix: true})}`
             : ''}
         </Text>
       </View>
@@ -223,7 +248,11 @@ export default function PayMerchant({navigation}: any) {
             <Text style={styles.emptyText}>
               {payees.length === 0
                 ? 'No payees yet. Once you pay someone by MoMo, the confirmation SMS teaches FinXAI their code and they appear here.'
-                : 'No match.'}
+                : q.trim()
+                ? 'No match.'
+                : // Regulars are empty but payees exist: say so, or the ones we
+                  // are hiding look like data the app lost.
+                  `Nobody you've paid ${REGULAR_MIN}+ times yet. Search to find any of your ${payees.length} payees.`}
             </Text>
           </View>
         }
