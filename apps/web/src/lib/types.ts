@@ -40,17 +40,26 @@ export interface Transaction {
   transfer_account_id: string | null; // counterparty account for transfers
   transfer_direction: string | null; // 'in' | 'out' (transfers only)
   balance_after: number | null; // bank-reported balance after this txn (audit)
+  // The bank's own reference. Present since v6 and written by the web's own
+  // promote path, which this type could not previously describe.
+  txn_ref: string | null;
   // Which path classified this: 'ai' when the server-side model answered, 'regex'
   // when it fell back to on-device pattern matching. Null on rows written before
   // migration v8 added the column.
   parse_source: string | null;
-  // Where the money went out. Only set for money-out captured live from a position
-  // the phone already had — see locationForParsed in the mobile app. Null everywhere
-  // else, which is most rows.
+  // How the money left and the payee's id on that rail (v16) — what the phone's
+  // "Pay again" rebuilds a USSD string from.
+  channel: string | null;
+  pay_code: string | null;
+  // Where the money went out. Null on most rows.
   lat: number | null;
   lon: number | null;
   accuracy_m: number | null;
   location_at: string | null;
+  // 'device' = a real fix taken as the SMS arrived; 'merchant' = inherited from
+  // a previous device-located payment to the same merchant (v17). Do not render
+  // an inherited pin as though it were measured.
+  location_source: string | null;
   owner_id: string;
   created_at: string | null;
 }
@@ -167,6 +176,12 @@ export interface Debt {
   paid: number | null;
   tint: string | null;
   icon: string | null;
+  // v14 — how interest is charged and how the management fee is taken. The web's
+  // own debt form writes all four; the type simply never caught up.
+  method: string | null; // 'flat' | 'reducing' | 'equal_principal'
+  management_fee_pct: number | null;
+  management_fee_flat: number | null;
+  fee_timing: string | null; // 'upfront' | 'spread'
   owner_id: string;
   created_at: string | null;
 }

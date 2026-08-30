@@ -54,6 +54,39 @@ describe('shared/ copies in apps/web', () => {
     expect(copy).toBe(source);
   });
 
+  // The taxonomy DATA, not just the code that reads it. Both clients bucket
+  // spending by these ids, so a subcategory added on the phone and missing on
+  // the web re-files transactions in every web report — the same failure as the
+  // resolveCat drift above, with no code change to notice.
+  it('the category taxonomy is byte-identical too', () => {
+    const source = normalise(
+      readFileSync(join(__dirname, '..', 'src', 'tools', 'data.json'), 'utf8'),
+    );
+    const copy = normalise(
+      readFileSync(
+        join(__dirname, '..', 'apps', 'web', 'src', 'lib', 'subcategories.json'),
+        'utf8',
+      ),
+    );
+    if (source !== copy) {
+      throw new Error(
+        'apps/web/src/lib/subcategories.json has drifted from src/tools/data.json. ' +
+          'Run `npm run sync:shared`. Do NOT edit the copy — edit src/tools/data.json.',
+      );
+    }
+    expect(copy).toBe(source);
+  });
+
+  it('both sides agree on the set of category ids', () => {
+    // Parsed rather than textual, so this still fails usefully if the two files
+    // are ever legitimately formatted differently.
+    const ids = (raw: string) =>
+      JSON.parse(raw).categories.map((c: any) => c.id).sort();
+    expect(
+      ids(readFileSync(join(__dirname, '..', 'apps', 'web', 'src', 'lib', 'subcategories.json'), 'utf8')),
+    ).toEqual(ids(readFileSync(join(__dirname, '..', 'src', 'tools', 'data.json'), 'utf8')));
+  });
+
   it('the copy still carries the branches whose absence caused the reporting bugs', () => {
     // Belt-and-braces: even if the identity check were somehow bypassed, these are the
     // specific behaviours that were wrong on the web.
