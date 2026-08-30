@@ -43,7 +43,7 @@ import {
 } from '../tools/merchantMemory';
 import {syncAccountBalance} from '../tools/balance';
 import {ignoredSmsId} from '../tools/txnId';
-import {findAccountForSms, persistParsedSms} from '../tools/smsIngest';
+import {backfillPayCodes, findAccountForSms, persistParsedSms} from '../tools/smsIngest';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -185,6 +185,12 @@ const SMSRetriever: React.FC = () => {
       // (timestamps baked into the key, plus the poisonous 'unknown' rule).
       // Idempotent — a no-op once it has run.
       await migrateMerchantRuleKeys(db, userId!);
+
+      // Fill channel/pay_code on rows written before migration v16. Regex-only
+      // over SMS bodies we already stored, so it costs nothing and needs no
+      // network — without it the Pay-again screen opens empty for exactly the
+      // people with the most history to pay from.
+      await backfillPayCodes(db, userId!);
 
       // Fresh dedupe sets for THIS run — see loadDedupeSets for why they are not read
       // from a render closure.

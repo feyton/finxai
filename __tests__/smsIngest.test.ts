@@ -18,6 +18,7 @@ import {
   findAccountForSms,
   locationForParsed,
   persistParsedSms,
+  backfillPayCodes,
   promoteAutoRecord,
   AccountLike,
   SmsLocation,
@@ -701,5 +702,73 @@ describe('channel and pay_code persistence', () => {
     const call = db.calls.find(c => c.sql.includes('INSERT INTO transactions'))!;
     expect(valueOf(call.sql, call.params, 'channel')).toBe('Send money');
     expect(valueOf(call.sql, call.params, 'pay_code')).toBe('0788999888');
+  });
+});
+
+// ── Backfilling rows written before migration v16 ─────────────────
+describe('backfillPayCodes', () => {
+  const MOMO =
+    'Your payment of 2,500 RWF to THRIVE G Ltd 888840 was completed at 2026-07-29 20:04:10.  Balance: 5,680 RWF. Fee 0 RWF.*EN#';
+
+  function fakeDb(rows: any[]) {
+    const calls: {sql: string; params: any[]}[] = [];
+    return {
+      calls,
+      updates: () => calls.filter(c => c.sql.startsWith('UPDATE transactions')),
+      execute: jest.fn(async (sql: string, params: any[] = []) => {
+        calls.push({sql, params});
+        if (sql.trim().startsWith('SELECT')) {
+          return {rows: {_array: rows}};
+        }
+        return {rows: {_array: []}};
+      }),
+    };
+  }
+
+  it('fills the code and channel from a stored SMS body', async () => {
+    const db = fakeDb([{id: 't1', sms: MOMO, transaction_type: 'expense'}]);
+    expect(await backfillPayCodes(db, OWNER)).toBe(1);
+    const [u] = db.updates();
+    expect(u.params).toEqual(['MoMoPay', '888840', 't1']);
+  });
+
+  it('does not write a row whose SMS names no code', async () => {
+    // Examined every run, written never — the alternative is a pointless
+    // UPDATE per row per start, each one a sync operation.
+    const db = fakeDb([
+      {id: 't2', sms: 'Your payment of 5,000 RWF to SAWA CITI LTD has been completed.', transaction_type: 'expense'},
+    ]);
+    expect(await backfillPayCodes(db, OWNER)).toBe(0);
+    expect(db.updates()).toHaveLength(0);
+  });
+
+  it('skips income and transfers — there is nothing to re-dial', async () => {
+    const db = fakeDb([
+      {id: 't3', sms: MOMO, transaction_type: 'income'},
+      {id: 't4', sms: MOMO, transaction_type: 'transfer'},
+    ]);
+    expect(await backfillPayCodes(db, OWNER)).toBe(0);
+  });
+
+  it('only considers rows that have no code yet', async () => {
+    const db = fakeDb([]);
+    await backfillPayCodes(db, OWNER);
+    expect(db.calls[0].sql).toContain('pay_code IS NULL');
+  });
+
+  it('preserves a channel already set, but fills a missing one', async () => {
+    // COALESCE in the UPDATE: a user-corrected rail must survive a backfill.
+    const db = fakeDb([{id: 't5', sms: MOMO, transaction_type: 'expense'}]);
+    await backfillPayCodes(db, OWNER);
+    expect(db.updates()[0].sql).toContain('channel = COALESCE(channel, ?)');
+  });
+
+  it('never throws — ingest runs right after it', async () => {
+    const db = {
+      execute: jest.fn(async () => {
+        throw new Error('db gone');
+      }),
+    };
+    await expect(backfillPayCodes(db, OWNER)).resolves.toBe(0);
   });
 });

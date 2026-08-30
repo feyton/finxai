@@ -561,3 +561,60 @@ export async function reclassifySms(
 
   return {ok: true, merchant: parsed.merchant};
 }
+
+/**
+ * Fill `channel` / `pay_code` on rows that predate migration v16.
+ *
+ * Without this the Pay-again screen opens empty on an established account and
+ * only fills up as new payments arrive — the feature would look broken to the
+ * person who has the most history to pay from.
+ *
+ * Deliberately regex-only and local: both fields come from `extractPayCode` /
+ * the parser's channel hint reading the SMS body we already stored, so this
+ * needs no network, no model call and no cost. That is also why it is safe to
+ * run on every start — see below.
+ *
+ * Idempotent and cheap: it only looks at rows where `pay_code IS NULL`, and it
+ * only WRITES when a code was actually found, so a row whose SMS names no code
+ * is examined once per run and never written. Rows the user has already
+ * corrected are untouched because they are no longer NULL.
+ *
+ * Returns the number of rows filled, for logging.
+ */
+export async function backfillPayCodes(db: any, ownerId: string): Promise<number> {
+  try {
+    const {rows} = await db.execute(
+      `SELECT id, sms, transaction_type FROM transactions
+        WHERE owner_id = ? AND pay_code IS NULL AND sms IS NOT NULL AND sms != ''
+        LIMIT 1000`,
+      [ownerId],
+    );
+    const list: any[] = rows?._array ?? [];
+    let filled = 0;
+    for (const r of list) {
+      const facts = regexExtract(String(r.sms));
+      if (!facts.payCode) {
+        continue;
+      }
+      // Money-in has no code to re-dial, and re-paying a transfer to your own
+      // account is not a thing anyone wants a shortcut for.
+      if (r.transaction_type !== 'expense') {
+        continue;
+      }
+      await db.execute(
+        'UPDATE transactions SET channel = COALESCE(channel, ?), pay_code = ? WHERE id = ?',
+        [facts.channelHint || null, facts.payCode, r.id],
+      );
+      filled++;
+    }
+    if (filled > 0) {
+      console.log(`[Backfill] pay_code filled on ${filled} row(s)`);
+    }
+    return filled;
+  } catch (e) {
+    // Never let a backfill break SMS ingest — it is an enhancement, not a
+    // prerequisite, and the poller runs right after this.
+    console.warn('[Backfill] pay_code backfill failed:', e);
+    return 0;
+  }
+}
