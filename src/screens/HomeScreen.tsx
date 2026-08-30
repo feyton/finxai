@@ -275,16 +275,18 @@ export default function HomeScreen({navigation}: any) {
       // Never silently hand off to the browser — say what failed and let the
       // user choose. A missing install permission is the one failure the user
       // can fix directly, so that case offers Settings instead of the browser.
+      // 'signature' is not a failure at all: it's the one-time reinstall the
+      // key rotation requires, and the browser download is step 1 of it.
       const fixable = e?.code === 'permission';
       appAlert(
-        'Update failed',
+        e?.code === 'signature' ? 'One-time reinstall needed' : 'Update failed',
         e?.message ?? 'The download did not complete.',
         [
           {text: 'Cancel', style: 'cancel'},
           fixable
             ? {text: 'Open settings', onPress: openInstallPermissionSettings}
             : {
-                text: 'Download in browser',
+                text: e?.code === 'signature' ? 'Download new APK' : 'Download in browser',
                 onPress: () => update.url && Linking.openURL(update.url).catch(() => {}),
               },
         ],

@@ -1,98 +1,90 @@
 # Shipping FinXAI to your device (no Play Store)
 
-## One-time setup (already done on this machine)
+## How releases work (continuous delivery)
 
-- **Release keystore**: `android/app/finxai_release.keystore` (gitignored). Credentials live in
-  `C:\Users\feyto\.gradle\gradle.properties` (outside the repo — Gradle reads it automatically):
-  `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
-  Do NOT put them back in `android/gradle.properties` — that file is git-tracked and the old
-  passwords were exposed in the repo history (rotated 2026-07-08 for that reason).
-- **BACK BOTH UP** (keystore + passwords) somewhere safe (password manager + cloud drive).
-  If you lose them, devices with the app installed will refuse updates until they uninstall.
-- Play Store restricts `READ_SMS` apps heavily — side-loading avoids that fight entirely.
+**Every push to `main` is a release.** `.github/workflows/release.yml` builds a
+signed arm64 APK with heavy caching and publishes it as a GitHub Release, which
+the in-app updater and Obtainium pick up. There is no release command and no
+version-bump commit.
 
-## Cut a release (primary path — local build)
-
-**One command:**
-
-```bash
-npm run release            # asks major / minor / patch, then does everything
-# or non-interactive:
-npm run release -- minor
-```
-
-It bumps `versionCode` + `versionName` (and `src/appVersion.ts`), commits, tags,
-builds a **signed arm64-v8a APK** (~40 MB, not the ~130 MB universal build),
-pushes `main`, and publishes a GitHub Release with the APK attached via `gh`.
-
-Requirements: [`gh`](https://cli.github.com/) authenticated (`gh auth login`) and
-signing creds in `~/.gradle/gradle.properties`.
+- **Version** is derived from git: `versionName = <VERSION file>.<commits since
+  VERSION last changed>`, `versionCode = commit count on main`. To bump
+  major/minor, edit the `VERSION` file at the repo root (the patch resets to 0).
+- **Skipping a release:** put `[skip ci]` in the commit message, or note that
+  pushes touching only `apps/web/**`, `supabase/**`, `eval/**`, or Markdown
+  don't trigger an APK build (web has its own deploy workflow).
+- **Manual dry run:** Actions tab → Release APK → Run workflow with
+  `dry_run: true` builds and verifies but publishes nothing (and warms the
+  caches for the next real release).
+- Old releases are pruned automatically — the workflow keeps the newest 5.
 
 ### Why arm64-only?
-The old CI build was a **universal APK** bundling native libs for all four ABIs
-(arm64, armeabi-v7a, x86, x86_64) → ~130 MB. Real phones are arm64-v8a, so a
-single-ABI build is ~1/3 the size with zero downside for side-loading. The
-`-PreactNativeArchitectures=arm64-v8a` flag is baked into `npm run build` and the
-release script.
+Real phones are arm64-v8a; a single-ABI build is ~40 MB instead of the ~130 MB
+universal APK, with zero downside for side-loading. The
+`-PreactNativeArchitectures=arm64-v8a` flag is what actually filters prebuilt
+`.so` files from AAR deps — a `buildType abiFilters` block does not.
 
-### Version bump prompt on push
-`.githooks/pre-push` asks "is this a release? maj/min/patch/N" when you push
-`main`. Pick a bump type and it runs `npm run release <type>` for you; pick N and
-the push proceeds normally. Enable once (already done on this machine):
+## Signing
 
-```bash
-git config core.hooksPath .githooks
-```
+- The release keystore lives ONLY in GitHub Actions secrets (`KEYSTORE_BASE64`,
+  `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`) plus offline backups.
+  **Never commit it or its passwords** — the original 2025 keystore and its
+  passwords leaked in public git history and had to be rotated (releases ≥ 1.32
+  are signed with the replacement key; devices on ≤ 1.31 needed a one-time
+  uninstall/reinstall, guided by the updater).
+- The workflow verifies the built APK's certificate against the repo variable
+  `RELEASE_CERT_SHA256` **before publishing** — a wrong key installs fine on a
+  clean device and breaks only existing installs, so it must never reach the
+  update channel. After any future rotation, update that variable:
 
-## In-app self-update checker
-The app checks GitHub Releases on opening **Profile** and shows a **New** badge on
-"Check for updates" when a newer version is out; tapping it opens the APK
-download. `src/appVersion.ts` holds the running version (the release script keeps
-it in sync). No store needed.
+  ```bash
+  keytool -list -v -keystore <keystore> -storepass <pass> | grep SHA256
+  gh variable set RELEASE_CERT_SHA256 -R feyton/finxai --body "<AA:BB:...>"
+  ```
 
-## Manual APK build / install
+- **BACK THE KEYSTORE UP** (file + passwords) in a password manager and a cloud
+  drive. If it is lost, every installed device refuses updates until the user
+  uninstalls.
+- Play Store restricts `READ_SMS` apps heavily — side-loading avoids that
+  fight entirely.
+
+## In-app self-update
+The app checks GitHub Releases on Home and Profile. Downloads go through
+Android's DownloadManager, are **SHA-256-verified against GitHub's published
+asset digest** (a release without a digest is refused), then handed to the
+system installer. `src/appVersion.ts` is rewritten by CI at build time.
+
+## Obtainium (auto-updates on device)
+Install [Obtainium](https://github.com/ImranR98/Obtainium), add app →
+`https://github.com/feyton/finxai`. It installs/updates whenever a new Release
+appears.
+
+## Local dev build / install
 
 ```bash
 npm run build   # signed arm64 APK → android/app/build/outputs/apk/release/app-release.apk
 adb install -r android/app/build/outputs/apk/release/app-release.apk
 ```
 
-Or copy the APK to the phone and open it — allow "install unknown apps".
+Local builds report version `1.31-dev` and need signing creds in
+`~/.gradle/gradle.properties` (`KEYSTORE_PASSWORD`, `KEY_ALIAS`,
+`KEY_PASSWORD`) plus the keystore at `android/app/finxai_release.keystore`.
+This is for on-device testing only — releases come from CI.
 
-## Obtainium (auto-updates on device)
-
-Install [Obtainium](https://github.com/ImranR98/Obtainium), add app →
-`https://github.com/feyton/finxai`. It installs/updates whenever a new Release
-appears. Private repo? Add a GitHub PAT with `repo` read scope in Obtainium
-settings.
-
-## CI (fallback only)
-`.github/workflows/release.yml` no longer runs on tags — it's a **manual**
-`workflow_dispatch` fallback (Actions tab) that uploads an arm64 APK artifact.
-Use it only when you can't build locally.
-
-### CI secrets (GitHub → repo → Settings → Secrets and variables → Actions)
-
-| Secret | Value |
-|---|---|
-| `KEYSTORE_BASE64` | `base64 -w0 android/app/finxai_release.keystore` output |
-| `KEYSTORE_PASSWORD` | same as local gradle.properties |
-| `KEY_ALIAS` | same as local gradle.properties |
-| `KEY_PASSWORD` | same as local gradle.properties |
-
-PowerShell one-liner for the base64:
-
-```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("android\app\finxai_release.keystore")) | Set-Clipboard
-```
+## CI performance notes (ported from the bibiliya pipeline, all measured)
+- `gradle/actions/setup-gradle@v5` (pinned: v6's caching is closed-source and
+  this job holds the signing key) + `org.gradle.caching=true` in
+  `android/gradle.properties` — the env-var form of that toggle silently does
+  nothing.
+- ccache wraps the NDK compilers (React Native's CMake picks it up from PATH);
+  `compiler_check=content` is required on CI or every lookup misses. Native
+  rebuild: 81.7s cold → 11.1s warm.
+- Don't add a `.cxx` directory cache — it never hits (Gradle's up-to-date check
+  reads state in `app/build/` that isn't cached alongside it).
 
 ## Alternatives considered
-
-- **Firebase App Distribution** — nice tester UX and install analytics, but requires
-  adding Firebase to the project and testers installing App Tester. Worth it only
-  if you start distributing to several people.
-- **OTA JS updates (CodePush-style)** — CodePush itself retired with App Center.
-  The modern option is [hot-updater](https://github.com/gronxb/hot-updater), which
-  supports **Supabase storage** as the backend (which you already run). It ships
-  JS-only changes instantly without reinstalling the APK. Native changes still
-  need a new APK. Consider this once the native side stabilizes.
+- **Firebase App Distribution** — nice tester UX, but requires Firebase + App
+  Tester. Worth it only with a bigger tester group.
+- **OTA JS updates** — [hot-updater](https://github.com/gronxb/hot-updater)
+  supports Supabase storage as backend and ships JS-only changes without an
+  APK install. Consider once the native side stabilizes.

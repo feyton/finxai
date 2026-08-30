@@ -1,50 +1,201 @@
-name: Release APK (fallback)
+name: Release APK
 
-# Primary releases are built locally and published via `npm run release`
-# (faster, and produces a ~40MB arm64 APK instead of the ~130MB universal one).
-# This workflow is a manual fallback only — run it from the Actions tab when you
-# can't build locally. It no longer triggers on tag pushes.
+# Continuous delivery: every push to main that can affect the APK becomes its
+# own GitHub Release, which the in-app updater and Obtainium pick up. There are
+# no version-bump commits — the version is derived from git:
+#
+#   versionName = <VERSION file>.<commits since VERSION last changed>
+#   versionCode = total commit count on main (monotonic, survives base bumps)
+#
+# Bumping major/minor = editing the VERSION file; the patch resets to 0 on the
+# commit that edits it. `[skip ci]` in a commit message skips the release.
+#
+# Caching numbers and hard-won gotchas below are ported from the bibiliya
+# release pipeline, where every number was measured (13m33s -> 7m37s):
+# ccache is the fix for the native compile, the Gradle build-cache TOGGLE must
+# live in android/gradle.properties (the ORG_GRADLE_PROJECT_ env form silently
+# does nothing), and a .cxx directory cache never hits — don't add one.
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'apps/web/**'
+      - 'supabase/**'
+      - 'design_handoff_finxai/**'
+      - 'eval/**'
+      - '**.md'
+      - '.github/workflows/deploy-web.yml'
   workflow_dispatch:
     inputs:
-      arch:
-        description: 'ABI to build (arm64-v8a keeps the APK small)'
-        default: 'arm64-v8a'
-        type: string
+      dry_run:
+        description: 'Build and verify, but publish nothing'
+        type: boolean
+        default: false
+
+# Two pushes racing would publish releases out of order and the loser's tag
+# would still exist. Queue them; never cancel a run in progress — an
+# interrupted publish is the one state this pipeline cannot clean up after.
+concurrency:
+  group: release-apk
+  cancel-in-progress: false
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 45
 
-      - uses: actions/setup-node@v4
+    # The default workflow token is read-only, which is right for everything
+    # except `gh release create` here. Scoped to the job, not the repo default.
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history — versionCode is the commit count
+
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
 
-      - name: Install dependencies
-        run: npm ci
+      # Restores ~/.gradle/caches + wrapper. The build-cache toggle lives in
+      # android/gradle.properties (see the note there).
+      #
+      # Pinned at v5 ON PURPOSE: v6 moves the caching code into a closed-source
+      # component under Gradle's commercial terms. Caching is most of this
+      # job's savings and this job holds the signing key — v5 is MIT and does
+      # the same work. Revisit only if v5 stops getting security fixes.
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          build-scan-publish: false
+          cache-cleanup: on-success
 
-      - name: Decode keystore
-        run: echo "$KEYSTORE_BASE64" | base64 -d > android/app/finxai_release.keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      # ccache wraps the NDK compilers; React Native's CMake toolchain picks it
+      # up on its own (find_program(ccache) + RULE_LAUNCH_COMPILE), so having
+      # it on PATH is the entire setup. Installed via apt rather than a
+      # marketplace action: this workflow holds the signing key, and every
+      # third-party action in it is another owner of that secret.
+      - name: Install ccache
+        run: sudo apt-get install -y ccache
 
-      - name: Build release APK (${{ inputs.arch }})
-        run: cd android && ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=${{ inputs.arch }}
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-
+
+      # compiler_check=content is REQUIRED on CI: ccache defaults to keying on
+      # the compiler's mtime, and CI re-downloads the NDK every run with fresh
+      # timestamps, so every lookup would miss and the cache would be pure tax.
+      - name: Configure ccache
+        run: |
+          ccache --set-config=max_size=2G
+          ccache --set-config=compiler_check=content
+          ccache --zero-stats
+
+      - run: npm ci
+
+      - name: Derive version from git
+        id: version
+        run: |
+          set -euo pipefail
+          BASE=$(tr -d '[:space:]' < VERSION)
+          ANCHOR=$(git log -n1 --format=%H -- VERSION)
+          PATCH=$(git rev-list --count "$ANCHOR..HEAD")
+          CODE=$(git rev-list --count HEAD)
+          NAME="$BASE.$PATCH"
+          echo "name=$NAME"  >> "$GITHUB_OUTPUT"
+          echo "code=$CODE"  >> "$GITHUB_OUTPUT"
+          echo "tag=v$NAME"  >> "$GITHUB_OUTPUT"
+          echo "Building v$NAME (code $CODE)"
+          # The JS bundle reads its version from appVersion.ts (the in-app
+          # updater compares it against the latest release tag).
+          sed -i "s/APP_VERSION = '[^']*'/APP_VERSION = '$NAME'/" src/appVersion.ts
+
+      - name: Restore keystore
         env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$KEYSTORE_B64" | base64 -d > android/app/finxai_release.keystore
+          test -s android/app/finxai_release.keystore
+
+      - name: Typecheck and test
+        run: |
+          npx tsc --noEmit
+          npm test
+
+      - name: Build signed arm64 APK
+        env:
+          # The runner has more headroom than a laptop; the committed heap in
+          # android/gradle.properties is sized for local work.
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx5g -Dorg.gradle.daemon=false
           ORG_GRADLE_PROJECT_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           ORG_GRADLE_PROJECT_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           ORG_GRADLE_PROJECT_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_FINXAI_VERSION_CODE: ${{ steps.version.outputs.code }}
+          ORG_GRADLE_PROJECT_FINXAI_VERSION_NAME: ${{ steps.version.outputs.name }}
+        # arm64-only keeps the APK ~40MB instead of the ~130MB universal build.
+        # -PreactNativeArchitectures is the RN mechanism that actually filters
+        # prebuilt .so files from AAR deps; a buildType abiFilters block does not.
+        run: cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --console=plain
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: finxai-apk
-          path: android/app/build/outputs/apk/release/app-release.apk
+      - name: ccache stats
+        if: always()
+        run: ccache -s
+
+      # A release signed by the wrong key installs fine on a clean device and
+      # fails only for people who already have the app — it looks green and
+      # breaks exactly the users it must not. Compare against the known-good
+      # fingerprint (repo variable RELEASE_CERT_SHA256) before publishing.
+      - name: Verify APK signature
+        env:
+          EXPECTED: ${{ vars.RELEASE_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          ACTUAL=$("$APKSIGNER" verify --print-certs "$APK" \
+            | grep -i 'SHA-256 digest' | head -1 | awk '{print $NF}' | tr 'a-f' 'A-F')
+          NORM=$(printf '%s' "$EXPECTED" | tr -d ':' | tr 'a-f' 'A-F')
+          echo "expected: $NORM"
+          echo "actual:   $ACTUAL"
+          if [ -z "$NORM" ]; then
+            echo "::error::RELEASE_CERT_SHA256 repo variable is not set — cannot prove this APK is signed by the release key"
+            exit 1
+          fi
+          [ "$ACTUAL" = "$NORM" ] || { echo "::error::APK is signed by the WRONG key — refusing to publish"; exit 1; }
+          echo "signature ok"
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' || inputs.dry_run == false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          ASSET="finxai-$TAG.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$ASSET"
+          gh release create "$TAG" "$ASSET" \
+            --title "$TAG" \
+            --generate-notes \
+            --target "$GITHUB_SHA"
+          echo "Released $TAG ($(du -m "$ASSET" | cut -f1) MB)"
+
+      # Per-push releases pile up fast and only the latest matters to the
+      # updater and Obtainium. Keep a few for rollback, prune the rest.
+      - name: Keep the last 5 releases
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 100 --json tagName -q '.[].tagName' \
+            | tail -n +6 \
+            | xargs -r -I{} gh release delete {} --cleanup-tag -y

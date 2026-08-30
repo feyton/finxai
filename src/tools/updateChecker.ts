@@ -6,6 +6,15 @@ import {APP_VERSION} from '../appVersion';
 
 const REPO = 'feyton/finxai';
 
+// Releases from 1.32 on are signed with a NEW keystore (the old one leaked in
+// public git history and had to be burned). Android refuses to install an
+// update whose signature differs from the installed app, so a device running
+// anything older than 1.32 must uninstall once and reinstall — data is safe in
+// the cloud and comes back on sign-in. This constant is how a pre-1.32 build
+// knows to guide the user through that instead of letting the system installer
+// fail with an unactionable "App not installed".
+const NEW_SIGNATURE_FROM = '1.32';
+
 export interface UpdateInfo {
   available: boolean;
   current: string;
@@ -14,6 +23,9 @@ export interface UpdateInfo {
   notes?: string;
   size?: number; // bytes, from the release asset
   sha256?: string; // lowercase hex, from the asset digest when GitHub has one
+  // True when the target release is signed with a different key than the
+  // running app, so an in-place install would be refused by Android.
+  reinstallRequired?: boolean;
 }
 
 // semver-ish compare; returns >0 if a > b. Tolerates a leading "v".
@@ -61,5 +73,9 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
     notes: data.body,
     size: typeof apk?.size === 'number' ? apk.size : undefined,
     sha256: digest ? digest[1].toLowerCase() : undefined,
+    reinstallRequired:
+      compareVersions(APP_VERSION, NEW_SIGNATURE_FROM) < 0 &&
+      !!latest &&
+      compareVersions(latest, NEW_SIGNATURE_FROM) >= 0,
   };
 }

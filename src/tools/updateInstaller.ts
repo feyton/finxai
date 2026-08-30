@@ -15,7 +15,7 @@ import {Linking, Platform} from 'react-native';
 import NativeAppUpdate from '../native/NativeAppUpdate';
 import type {UpdateInfo} from './updateChecker';
 
-export type UpdateErrorCode = 'permission' | 'download' | 'corrupt';
+export type UpdateErrorCode = 'permission' | 'download' | 'corrupt' | 'signature';
 
 export class UpdateError extends Error {
   code: UpdateErrorCode;
@@ -47,6 +47,31 @@ export async function downloadAndInstall(
   if (Platform.OS !== 'android') {
     await Linking.openURL(url);
     return;
+  }
+
+  // Checked BEFORE the download: Android refuses an update signed with a
+  // different key, so downloading it would waste the user's data bundle only
+  // to fail at the very last dialog. Guide the reinstall instead.
+  if (info.reinstallRequired) {
+    throw new UpdateError(
+      'signature',
+      `FinXAI ${info.latest} is signed with a new, more secure key, so Android needs a one-time reinstall:\n\n` +
+        '1. Download the new APK (button below)\n' +
+        '2. Uninstall FinXAI\n' +
+        '3. Install the downloaded APK and sign back in\n\n' +
+        'Your accounts and transactions are synced to the cloud and will all come back.',
+    );
+  }
+
+  // Refuse a release with no published checksum: since v1.29 every release
+  // carries GitHub's sha256 asset digest, so a missing one means something is
+  // wrong with the release itself — and skipping verification silently would
+  // reopen the door the digest check closed.
+  if (!info.sha256) {
+    throw new UpdateError(
+      'download',
+      'This release has no published checksum, so the download cannot be verified. You can get it from GitHub in your browser instead.',
+    );
   }
 
   // Checked BEFORE the download, not after: finding out the permission is

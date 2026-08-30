@@ -79,8 +79,11 @@ android {
         applicationId "com.feyton.finxai"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 63
-        versionName "1.30"
+        // CI derives the release version from git (see .github/workflows/release.yml)
+        // and injects it via ORG_GRADLE_PROJECT_FINXAI_VERSION_*. The literals below
+        // are only what a local dev build reports — releases never use them.
+        versionCode (findProperty('FINXAI_VERSION_CODE') ?: '63').toInteger()
+        versionName (findProperty('FINXAI_VERSION_NAME') ?: '1.31-dev')
     }
     signingConfigs {
         release {
