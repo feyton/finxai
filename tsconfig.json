@@ -5,7 +5,10 @@
   "compilerOptions": {
     "target": "esnext",
     "module": "esnext",
-    "types": ["jest"],
+    // "node" is declared, not inherited: the drift test and crashReporter use
+    // Node globals (__dirname, global), and they only ever typechecked because
+    // the old App.test.tsx happened to drag @types/node into the program.
+    "types": ["jest", "node"],
     "lib": ["es2022"],
     "allowJs": true,
     "jsx": "react-jsx",
