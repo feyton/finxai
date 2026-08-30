@@ -31,6 +31,7 @@ import EditTransaction from './src/screens/EditTransaction';
 import CategoryStats from './src/screens/CategoryStats';
 import CategoryTransactions from './src/screens/CategoryTransactions';
 import SpendingPlaces from './src/screens/SpendingPlaces';
+import PayMerchant from './src/screens/PayMerchant';
 import DebtScreen from './src/screens/DebtScreen';
 import DebtDetails from './src/screens/DebtDetails';
 import AddDebt from './src/screens/AddDebt';
@@ -48,6 +49,26 @@ import {refreshBalanceWidget} from './src/widgets/refreshWidget';
 import {startSyncWatchdog} from './src/tools/syncWatchdog';
 
 const Stack = createNativeStackNavigator();
+
+// Deep links on the app's own scheme. Today the only source is the launcher
+// long-press shortcut (finxai://pay), which exists because the pay-again
+// feature is about removing steps from a payment and making someone open the
+// app and navigate to it gives most of those steps back.
+//
+// React Navigation handles both entry paths — cold start via getInitialURL and
+// a warm app via the url event — which matters here because MainActivity is
+// singleTask, so a second launch delivers onNewIntent rather than restarting.
+//
+// Guarded by the auth check below it: when signed out the navigator is not
+// mounted at all, so the link resolves once the user reaches the app proper.
+const LINKING = {
+  prefixes: ['finxai://'],
+  config: {
+    screens: {
+      PayMerchant: 'pay',
+    },
+  },
+};
 
 function App(): React.JSX.Element {
   const [session, setSession] = useState<Session | null>(null);
@@ -200,7 +221,7 @@ function App(): React.JSX.Element {
       <PowerSyncContext.Provider value={db}>
         <GestureHandlerRootView style={{flex: 1}}>
           <ToastProvider>
-          <NavigationContainer>
+          <NavigationContainer linking={LINKING}>
             {!session ? (
               <LoginScreen />
             ) : (
@@ -219,6 +240,7 @@ function App(): React.JSX.Element {
                 <Stack.Screen name="CategoryStats" component={CategoryStats} />
                 <Stack.Screen name="CategoryTransactions" component={CategoryTransactions} />
                 <Stack.Screen name="SpendingPlaces" component={SpendingPlaces} />
+                <Stack.Screen name="PayMerchant" component={PayMerchant} />
                 <Stack.Screen name="CreateAccount" component={CreateAccountScreen} />
                 <Stack.Screen name="CreateBudget" component={CreateBudgetScreen} />
                 <Stack.Screen name="BudgetDetails" component={BudgetDetails} />

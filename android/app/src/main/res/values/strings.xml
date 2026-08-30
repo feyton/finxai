@@ -1,4 +1,8 @@
 <resources>
     <string name="app_name">FinXAi</string>
     <string name="widget_balance_description" translatable="false">Account balances at a glance</string>
+    <!-- Launcher long-press shortcut. Short label has ~10 chars before the
+         launcher truncates it, so it is not just a clipped copy of the long one. -->
+    <string name="shortcut_pay_short">Pay</string>
+    <string name="shortcut_pay_long">Pay a merchant again</string>
 </resources>

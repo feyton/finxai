@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Long-press the launcher icon to jump straight to paying someone again.
+
+  The whole point of the pay-again feature is removing typing from a payment,
+  and making the user open the app, find the tab and tap through costs back
+  much of what the feature saves. From the launcher this is: long-press, tap,
+  pick a name, confirm the amount.
+
+  Static rather than dynamic (ShortcutManager) on purpose for now: a static
+  shortcut needs no native module and cannot go stale. The intent below is a
+  plain VIEW on the app's own scheme, so adding per-merchant dynamic shortcuts
+  later ("Pay THRIVE G Ltd") means pushing shortcuts with the same intent shape
+  and a merchant query parameter — no changes needed on the JS side beyond
+  reading that parameter.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="pay_again"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_pay_short"
+        android:shortcutLongLabel="@string/shortcut_pay_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.feyton.finxai"
+            android:targetClass="com.feyton.finxai.MainActivity"
+            android:data="finxai://pay" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+</shortcuts>

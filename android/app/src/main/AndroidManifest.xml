@@ -50,6 +50,19 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
+        <!-- Own-scheme deep links. Currently only finxai://pay, fired by the
+             launcher long-press shortcut; React Native's Linking delivers it
+             to JS. NOT a browsable http(s) filter — nothing outside the app
+             should be able to drive it, least of all a web page. -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <data android:scheme="finxai" />
+        </intent-filter>
+        <!-- Launcher long-press actions. -->
+        <meta-data
+            android:name="android.app.shortcuts"
+            android:resource="@xml/shortcuts" />
       </activity>
 
       <!-- Real-time SMS capture: receiver hands the message to a headless JS
