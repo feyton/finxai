@@ -1,0 +1,91 @@
+# PowerSync Sync Rules — THE DOWNLOAD AUTHORIZATION BOUNDARY.
+#
+# This file is the source of truth; the deployed copy lives in the PowerSync
+# dashboard (Manage instances -> Sync rules) and is edited by hand. Nothing
+# automates the round trip, so:
+#
+#   1. Edit here, commit.
+#   2. Paste into the dashboard and Deploy.
+#   3. Wait for the deploy to finish before shipping a client that depends on it.
+#
+# Until 2026-08-30 this existed ONLY in the dashboard. That made it invisible to
+# review and to git blame, which is how the duplicate `transfers` and
+# `split_details` entries below survived from v3_1 (2026-07) to now: the note
+# saying "delete the duplicates" was written in a SQL comment nobody re-read.
+#
+# RLS is a separate, independent boundary (see supabase_migration_v*.sql). These
+# rules decide what a device DOWNLOADS; RLS decides what the server ACCEPTS and
+# returns. A row must pass both. Getting these rules wrong is a data leak even
+# with correct RLS, because sync rules run server-side as the sync service.
+#
+# ---------------------------------------------------------------------------
+# Adding a COLUMN needs no change here: every data query is `SELECT *`, so new
+# columns stream down automatically. (v5/v6/v11/v12/v14 all assumed this; v8
+# flagged it as unverified. Confirmed on 2026-08-30 — it is `SELECT *`.)
+# Adding a TABLE does need a line here, plus the matching PowerSyncSchema.ts
+# entry on the client. Order for both: Postgres -> these rules -> client.
+# ---------------------------------------------------------------------------
+
+bucket_definitions:
+  # Everything the signed-in user owns.
+  user_data:
+    parameters: SELECT token_parameters.user_id AS user_id
+    data:
+      # owner_id is uuid and bucket.user_id is text. The `::text` cast is the
+      # form used by the tables that carry the app's core data and is known to
+      # work in production; the uncast form appeared on later additions. They
+      # are normalised to the cast form here rather than left mixed, so nobody
+      # has to wonder which one is load-bearing.
+      - SELECT * FROM accounts WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM transactions WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM auto_records WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM split_details WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM transfers WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM ignored_sms WHERE owner_id::text = bucket.user_id
+
+      - SELECT * FROM budgets WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM budget_items WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM budget_groups WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM budget_group_contributors WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM budget_group_expenses WHERE owner_id::text = bucket.user_id
+
+      - SELECT * FROM scheduled_payments WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM subscriptions WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM debts WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM debt_schedules WHERE owner_id::text = bucket.user_id
+
+      - SELECT * FROM shopping_lists WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM shopping_items WHERE owner_id::text = bucket.user_id
+
+      - SELECT * FROM merchant_rules WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM subcategories WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM user_settings WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM shared_people WHERE owner_id::text = bucket.user_id
+
+      # NOT a duplicate — two different sides of the same table. The owner needs
+      # the shares they created; the invitee needs the shares pointing at them
+      # (AccountDetails reads these to decide whether the editor may edit).
+      - SELECT * FROM account_shares WHERE owner_id::text = bucket.user_id
+      - SELECT * FROM account_shares WHERE shared_with_id::text = bucket.user_id
+
+  # Accounts shared TO this user, one bucket per shared account.
+  shared_accounts:
+    parameters: >-
+      SELECT account_id FROM account_shares
+       WHERE shared_with_id::text = token_parameters.user_id
+         AND status = 'active'
+    data:
+      - SELECT * FROM accounts WHERE id = bucket.account_id
+      - SELECT * FROM transactions WHERE account_id = bucket.account_id
+      # ⚠ split_details is deliberately ABSENT and cannot simply be added:
+      # data queries filter on bucket parameters only — no joins, no subqueries
+      # — and split_details has no account_id to filter on, only
+      # transaction_id. So a shared editor on the phone sees a shared
+      # transaction with none of its split rows.
+      #
+      # supabase_migration_v15 granted them RLS access to those rows, so the
+      # server would serve them; the gap is purely the download path. Closing
+      # it means denormalising account_id onto split_details (migration +
+      # backfill + writing it on every split insert), which is why it is not
+      # done here. Until then, split editing on a SHARED account is web-only —
+      # the web reads Postgres directly and is unaffected.

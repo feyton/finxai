@@ -7,6 +7,7 @@ import {
   detectTransfer,
   extractAccountRef,
   extractBalance,
+  extractPayCode,
   extractTransferHint,
   candidateNames,
   findRule,
@@ -618,5 +619,81 @@ describe('transfer hints', () => {
     expect(hint?.destSuffix).toBe('947');
     // Previously discarded — without it, matching was amount+day only.
     expect(hint?.srcSuffix).toBe('2911');
+  });
+});
+
+// ── Pay code ─────────────────────────────────────────────────────
+//
+// The code is what a future "pay again" dials, so a wrong answer here moves
+// real money to the wrong payee. Every body below is a real observed format.
+describe('extractPayCode', () => {
+  it('reads a MoMoPay merchant code trailing the payee name', () => {
+    expect(
+      extractPayCode(
+        'Your payment of 2,500 RWF to THRIVE G Ltd 888840 was completed at 2026-07-29 20:04:10.  Balance: 5,680 RWF. Fee 0 RWF.*EN#',
+      ),
+    ).toBe('888840');
+  });
+
+  it('keeps a leading-zero merchant code exactly as printed', () => {
+    // 002597 is not 2597 — the code is a string, and re-dialling a numerically
+    // "equal" value reaches a different merchant or nothing at all.
+    expect(
+      extractPayCode(
+        'Your payment of 1,500 RWF to Valentine 002597 was completed at 2026-07-29 11:37:48.  Balance: 3,152 RWF. Fee 0 RWF.*EN#',
+      ),
+    ).toBe('002597');
+  });
+
+  it('normalises a 250-prefixed recipient phone to local form', () => {
+    // 250788999888 and 0788999888 are the same payee; storing both spellings
+    // would split one merchant into two in the pay-again list.
+    expect(
+      extractPayCode(
+        'Your payment of 20,000 RWF to JOHN DOE 250788999888 has been completed. Fee was 100 RWF. Your new balance: 41,711 RWF.',
+      ),
+    ).toBe('0788999888');
+  });
+
+  it('returns null when the SMS names no code', () => {
+    expect(
+      extractPayCode(
+        'Your payment of 5,000 RWF to SAWA CITI LTD has been completed. Fee was 0 RWF. Your new balance: 61,811 RWF.',
+      ),
+    ).toBeNull();
+  });
+
+  it('does not mistake a balance, fee or date for a code', () => {
+    // The anchor is the "was/has been completed" tail; without it the 61,811
+    // balance or the 2026 in a timestamp reads as a perfectly good code.
+    const code = extractPayCode(
+      'Your payment of 5,000 RWF to SAWA CITI LTD has been completed. Fee was 0 RWF. Your new balance: 61,811 RWF.',
+    );
+    expect(code).not.toBe('61811');
+    expect(code).not.toBe('2026');
+  });
+
+  it('prefers an echoed USSD string when the network includes one', () => {
+    expect(extractPayCode('Payment via *182*8*1*123456# of 1,000 RWF')).toBe('123456');
+  });
+
+  it('reads the recipient phone from a send-money confirmation', () => {
+    expect(
+      extractPayCode('You have sent 5,000 RWF to JOHN 0788123456. Fee 100 RWF.'),
+    ).toBe('0788123456');
+  });
+
+  it('rejects a too-short code rather than dialling a guess', () => {
+    expect(
+      extractPayCode('Your payment of 500 RWF to Shop 12 has been completed.'),
+    ).toBeNull();
+  });
+
+  it('is surfaced on the parsed facts', () => {
+    const f = regexExtract(
+      'Your payment of 2,500 RWF to THRIVE G Ltd 888840 was completed at 2026-07-29 20:04:10.  Balance: 5,680 RWF. Fee 0 RWF.*EN#',
+    );
+    expect(f.payCode).toBe('888840');
+    expect(f.channelHint).toBe('MoMoPay');
   });
 });

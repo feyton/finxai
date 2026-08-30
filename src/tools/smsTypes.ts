@@ -24,6 +24,10 @@ export interface ParsedSMS {
   // Payment rail used, e.g. 'MoMoPay' | 'Send money' | 'Receive' |
   // 'Bank transfer' | 'Cash Power' | 'Airtime' | 'Bill' | 'Other'.
   channel?: string;
+  // The payee's identifier on that rail — a MoMoPay merchant code or the
+  // recipient's phone in local form (0788…). Null when the SMS names none.
+  // Together with `channel` this is what rebuilds a USSD string to pay again.
+  payCode?: string | null;
   // True when the money moved between the user's OWN accounts (BK↔MoMo,
   // MoMo↔Mokash, self-transfer) — net-zero across net worth, not spend/income.
   isTransfer?: boolean;

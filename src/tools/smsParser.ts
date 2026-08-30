@@ -425,6 +425,9 @@ export interface RegexFacts {
   status: 'completed' | 'failed' | null;
   occurred_at: string | null;
   channelHint: string;
+  // The payee's identifier on the rail that was used — a MoMoPay merchant code
+  // or the recipient's phone number. This is what "pay again" dials.
+  payCode: string | null;
   // BK alert format: the account on the other side of the movement.
   counterpartyNumber: string | null;
   // Set when the counterparty is one of the user's OWN accounts.
@@ -482,9 +485,65 @@ export function regexExtract(raw: string, ctx?: ParseContext): RegexFacts {
     status,
     occurred_at: extractOccurredAt(raw) ?? extractBprDate(raw) ?? extractBkV2Date(raw),
     channelHint: detectChannel(raw, direction === 'credit'),
+    payCode: extractPayCode(raw),
     counterpartyNumber,
     transferAccount,
   };
+}
+
+// ── Pay code ───────────────────────────────────────────────────
+//
+// Deterministic, so it lives with the regex facts rather than the model half:
+// the code is the difference between dialling the right merchant and sending
+// money to a stranger, and a fuzzy answer there is worse than no answer.
+//
+// Two real shapes, both from MTN MoMo confirmations, where the identifier
+// trails the payee name:
+//   "...to THRIVE G Ltd 888840 was completed at ..."   -> merchant code
+//   "...to JOHN DOE 250788999888 has been completed."  -> phone number
+//   "...to SAWA CITI LTD has been completed."          -> none, correctly null
+//
+// Anchoring on the "was/has been completed" tail is what keeps this honest:
+// an unanchored "trailing digits" rule happily returns a balance, a fee or a
+// date fragment.
+const PAY_CODE_RE =
+  /\bto\s+[^.]{0,80}?\b(\d{4,15})\s*(?:has\s+been|was)\s+(?:completed|paid)/i;
+// Some networks echo the USSD string that was dialled; when present it is the
+// most direct statement of the merchant code there is.
+const USSD_MERCHANT_RE = /\*182\*8\*1\*(\d{4,10})/;
+// "You have sent 5,000 RWF to JOHN 0788123456"
+const SENT_TO_RE = /\bsent\b[^.]{0,80}?\bto\s+[^.]{0,60}?\b((?:250)?0?7\d{8})\b/i;
+
+/**
+ * Canonical local form, so the same payee aggregates as one merchant however
+ * the network wrote it: 250788999888 / 788999888 / 0788999888 all collapse to
+ * 0788999888. Merchant codes are left exactly as printed.
+ */
+function normalisePayCode(digits: string): string {
+  const local = digits.replace(/^250/, '');
+  if (/^7\d{8}$/.test(local)) {
+    return `0${local}`;
+  }
+  return local;
+}
+
+export function extractPayCode(raw: string): string | null {
+  const ussd = USSD_MERCHANT_RE.exec(raw);
+  if (ussd) {
+    return ussd[1];
+  }
+  const m = PAY_CODE_RE.exec(raw) ?? SENT_TO_RE.exec(raw);
+  if (!m) {
+    return null;
+  }
+  const code = normalisePayCode(m[1]);
+  // A bare 4-digit "code" is as likely to be a year or a truncated reference as
+  // a merchant, and dialling a wrong merchant code moves real money. Phone
+  // numbers are exempt: they are self-identifying by shape.
+  if (!/^0?7\d{8}$/.test(code) && code.length < 5) {
+    return null;
+  }
+  return code;
 }
 
 function detectChannel(raw: string, isCredit: boolean): string {
@@ -719,6 +778,7 @@ function factsToParsed(
     txn_ref: f.txn_ref,
     occurred_at: f.occurred_at,
     channel,
+    payCode: f.payCode,
     isTransfer,
     status: f.status ?? undefined,
     transferAccountId: f.transferAccount?.id ?? null,
