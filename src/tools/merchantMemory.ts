@@ -190,6 +190,7 @@ export async function recordCorrection(
   userId: string,
   subcategory?: string,
   displayName?: string,
+  pay?: {channel?: string | null; payCode?: string | null},
 ): Promise<void> {
   await upsertRule(
     db,
@@ -199,6 +200,7 @@ export async function recordCorrection(
     'correction',
     subcategory,
     displayName,
+    pay,
   );
 }
 
@@ -210,6 +212,11 @@ async function upsertRule(
   kind: 'confirmation' | 'correction',
   subcategory?: string,
   displayName?: string,
+  // How to PAY this merchant, when the user states it in the Fix sheet. This
+  // is the user's override; the observed history lives on the transactions
+  // themselves. Undefined means "don't touch" — passing null would erase a
+  // code the user typed, from a confirmation that never mentioned payment.
+  pay?: {channel?: string | null; payCode?: string | null},
 ): Promise<void> {
   const norm = normalizeMerchant(merchant);
   const pattern = norm.key;
@@ -230,16 +237,26 @@ async function upsertRule(
     if (existing) {
       await db.execute(
         `UPDATE merchant_rules
-         SET ${countCol} = ?, category = ?, subcategory = ?, display_name = ?, updated_at = ?
+         SET ${countCol} = ?, category = ?, subcategory = ?, display_name = ?, updated_at = ?,
+             channel = COALESCE(?, channel), pay_code = COALESCE(?, pay_code)
          WHERE id = ?`,
-        [(existing.n ?? 0) + 1, category, subcategory ?? '', display, now, existing.id],
+        [
+          (existing.n ?? 0) + 1,
+          category,
+          subcategory ?? '',
+          display,
+          now,
+          pay?.channel ?? null,
+          pay?.payCode ?? null,
+          existing.id,
+        ],
       );
     } else {
       await db.execute(
         `INSERT INTO merchant_rules
            (id, pattern, category, subcategory, display_name,
-            correction_count, confirmation_count, owner_id, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            correction_count, confirmation_count, channel, pay_code, owner_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           generateUUID(),
           pattern,
@@ -248,6 +265,8 @@ async function upsertRule(
           display,
           kind === 'correction' ? 1 : 0,
           kind === 'confirmation' ? 1 : 0,
+          pay?.channel ?? null,
+          pay?.payCode ?? null,
           userId,
           now,
         ],

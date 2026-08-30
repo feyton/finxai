@@ -571,3 +571,135 @@ describe('promoteAutoRecord', () => {
     expect(insert(db).params).not.toContain('');
   });
 });
+
+// ── Payment channel + code persistence (migration v16) ────────────
+//
+// These columns are what "pay again" dials, so losing them is not cosmetic.
+// The column-list/placeholder alignment is asserted structurally because a
+// miscount is silent until it hits a real database, and each of these INSERTs
+// has ~30 columns.
+describe('channel and pay_code persistence', () => {
+  const account: AccountLike = {id: ACCT, name: 'MTN MoMo', address: 'MTN'};
+
+  function fakeDb() {
+    const calls: {sql: string; params: any[]}[] = [];
+    return {
+      calls,
+      execute: jest.fn(async (sql: string, params: any[] = []) => {
+        calls.push({sql, params});
+        return {rows: {_array: []}};
+      }),
+    };
+  }
+
+  const args = (over: Partial<ParsedSMS> = {}) => ({
+    parsed: parsed({channel: 'MoMoPay', payCode: '888840', ...over}),
+    account,
+    ownerId: OWNER,
+    body: 'Your payment of 2,500 RWF to THRIVE G Ltd 888840 was completed.',
+    smsDate: 1_700_000_000_000,
+    occurredAt: '2026-07-30T09:00:00.000Z',
+    location: null,
+  });
+
+  /** Column names and value slots must line up, or the write silently shifts. */
+  const assertAligned = (sql: string, params: any[]) => {
+    const cols = /\(([^)]*)\)\s*VALUES/is.exec(sql)![1].split(',').length;
+    const valuesClause = /VALUES\s*\(([\s\S]*)\)/i.exec(sql)![1];
+    const slots = valuesClause.split(',').length;
+    const placeholders = (valuesClause.match(/\?/g) ?? []).length;
+    expect(slots).toBe(cols);
+    expect(params.length).toBe(placeholders);
+  };
+
+  const valueOf = (sql: string, params: any[], column: string) => {
+    const cols = /\(([^)]*)\)\s*VALUES/is
+      .exec(sql)![1]
+      .split(',')
+      .map(c => c.trim());
+    const slots = /VALUES\s*\(([\s\S]*)\)/i.exec(sql)![1].split(',').map(s => s.trim());
+    const idx = cols.indexOf(column);
+    expect(idx).toBeGreaterThanOrEqual(0);
+    // Params only fill the '?' slots, so map the column's slot to its param.
+    const paramIndex = slots.slice(0, idx + 1).filter(s => s === '?').length - 1;
+    expect(slots[idx]).toBe('?');
+    return params[paramIndex];
+  };
+
+  it('writes both columns when auto-saving a confident parse', async () => {
+    const db = fakeDb();
+    await persistParsedSms(db, args({confidence: 0.97}));
+    const call = db.calls.find(c => c.sql.includes('INSERT INTO transactions'))!;
+    assertAligned(call.sql, call.params);
+    expect(valueOf(call.sql, call.params, 'channel')).toBe('MoMoPay');
+    expect(valueOf(call.sql, call.params, 'pay_code')).toBe('888840');
+  });
+
+  it('carries both columns into the review queue', async () => {
+    const db = fakeDb();
+    await persistParsedSms(db, args({confidence: 0.5}));
+    const call = db.calls.find(c => c.sql.includes('INSERT INTO auto_records'))!;
+    assertAligned(call.sql, call.params);
+    expect(valueOf(call.sql, call.params, 'channel')).toBe('MoMoPay');
+    expect(valueOf(call.sql, call.params, 'pay_code')).toBe('888840');
+  });
+
+  it('stores null rather than undefined when the SMS names no code', async () => {
+    // undefined binds as NULL in some drivers and throws in others; be explicit.
+    const db = fakeDb();
+    await persistParsedSms(db, args({confidence: 0.97, channel: undefined, payCode: undefined}));
+    const call = db.calls.find(c => c.sql.includes('INSERT INTO transactions'))!;
+    expect(valueOf(call.sql, call.params, 'pay_code')).toBeNull();
+    expect(valueOf(call.sql, call.params, 'channel')).toBeNull();
+  });
+
+  it('survives promotion out of the review queue', async () => {
+    // The bug this guards is the one that dropped locations on confirm: a
+    // column added to the ingest INSERTs but forgotten in the promote INSERT.
+    const db = fakeDb();
+    await promoteAutoRecord(db, {
+      record: {
+        id: 'rec-1',
+        amount: 2500,
+        account_id: ACCT,
+        category: 'shopping',
+        date_time: '2026-07-30T09:00:00.000Z',
+        sms: 'x',
+        sender: 'MTN',
+        merchant: 'THRIVE G Ltd',
+        transaction_type: 'expense',
+        channel: 'MoMoPay',
+        pay_code: '888840',
+      },
+      ownerId: OWNER,
+      direction: 'debit',
+      balanceAfter: null,
+    });
+    const call = db.calls.find(c => c.sql.includes('INSERT INTO transactions'))!;
+    assertAligned(call.sql, call.params);
+    expect(valueOf(call.sql, call.params, 'channel')).toBe('MoMoPay');
+    expect(valueOf(call.sql, call.params, 'pay_code')).toBe('888840');
+  });
+
+  it('lets the Fix sheet override a misread rail on promotion', async () => {
+    const db = fakeDb();
+    await promoteAutoRecord(db, {
+      record: {
+        id: 'rec-2',
+        amount: 2500,
+        account_id: ACCT,
+        date_time: '2026-07-30T09:00:00.000Z',
+        transaction_type: 'expense',
+        channel: 'MoMoPay',
+        pay_code: '888840',
+      },
+      ownerId: OWNER,
+      direction: 'debit',
+      balanceAfter: null,
+      overrides: {channel: 'Send money', payCode: '0788999888'},
+    });
+    const call = db.calls.find(c => c.sql.includes('INSERT INTO transactions'))!;
+    expect(valueOf(call.sql, call.params, 'channel')).toBe('Send money');
+    expect(valueOf(call.sql, call.params, 'pay_code')).toBe('0788999888');
+  });
+});

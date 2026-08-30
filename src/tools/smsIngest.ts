@@ -191,8 +191,9 @@ export async function persistParsedSms(
           payee, merchant, transaction_type, fees, currency,
           confirmed, source, confidence,
           transfer_account_id, transfer_direction, balance_after, txn_ref,
-          parse_source, lat, lon, accuracy_m, location_at, owner_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          parse_source, channel, pay_code,
+          lat, lon, accuracy_m, location_at, owner_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         txnId,
         parsed.amount,
@@ -212,6 +213,8 @@ export async function persistParsedSms(
         parsed.balance_after,
         parsed.txn_ref,
         parsed.parseSource ?? 'regex',
+        parsed.channel ?? null,
+        parsed.payCode ?? null,
         loc?.lat ?? null,
         loc?.lon ?? null,
         loc?.accuracyM ?? null,
@@ -228,9 +231,9 @@ export async function persistParsedSms(
        (id, amount, account_id, category, subcategory, date_time, sms, sender,
         payee, merchant, transaction_type, fees, currency,
         confirmed, source, confidence, transfer_account_id,
-        balance_after, txn_ref, parse_source,
+        balance_after, txn_ref, parse_source, channel, pay_code,
         lat, lon, accuracy_m, location_at, owner_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 0, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       txnId,
       parsed.amount,
@@ -249,6 +252,8 @@ export async function persistParsedSms(
       parsed.balance_after,
       parsed.txn_ref,
       parsed.parseSource ?? 'regex',
+      parsed.channel ?? null,
+      parsed.payCode ?? null,
       loc?.lat ?? null,
       loc?.lon ?? null,
       loc?.accuracyM ?? null,
@@ -385,6 +390,9 @@ export async function promoteAutoRecord(
       accountId?: string;
       type?: 'expense' | 'income' | 'transfer';
       note?: string | null;
+      /** How it was paid — the Fix sheet can correct a misread rail or code. */
+      channel?: string | null;
+      payCode?: string | null;
     };
   },
 ): Promise<{txType: string; accountId: string}> {
@@ -408,8 +416,9 @@ export async function promoteAutoRecord(
         payee, merchant, transaction_type, fees, currency,
         confirmed, source, confidence,
         transfer_account_id, transfer_direction, balance_after, txn_ref,
-        parse_source, note, lat, lon, accuracy_m, location_at, owner_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        parse_source, note, channel, pay_code,
+        lat, lon, accuracy_m, location_at, owner_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RWF', 1, 'sms', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       record.id,
       record.amount,
@@ -435,6 +444,12 @@ export async function promoteAutoRecord(
       // NULL rather than '' when blank, so "has a note" is a simple IS NOT NULL check
       // everywhere downstream.
       (o.note ?? record.note) || null,
+      // How it was paid, overridable from the Fix sheet. Same reasoning as the
+      // location columns below: this is a property of the payment, so it must
+      // survive promotion rather than being re-derived (the SMS is kept, but a
+      // record confirmed offline would otherwise lose the code for good).
+      o.channel ?? record.channel ?? null,
+      o.payCode ?? record.pay_code ?? null,
       // The four columns whose omission was the whole bug. Carried even when the type
       // changes: a fix can alter how a payment is filed, never where it happened, and
       // the money-out gate already ran at ingest.
@@ -523,7 +538,8 @@ export async function reclassifySms(
     `UPDATE ${table}
         SET category = ?, subcategory = ?, merchant = ?, payee = ?,
             transaction_type = ?, confidence = ?, parse_source = 'ai',
-            transfer_account_id = ?
+            transfer_account_id = ?,
+            channel = COALESCE(?, channel), pay_code = COALESCE(?, pay_code)
       WHERE id = ?`,
     [
       parsed.category,
@@ -533,6 +549,12 @@ export async function reclassifySms(
       txType,
       parsed.confidence,
       parsed.isTransfer ? parsed.transferAccountId ?? null : null,
+      // Unlike location, these ARE recoverable from the stored SMS — they are
+      // regex-derived — so re-running backfills every row written before v16.
+      // COALESCE keeps a user's hand-corrected value when the re-parse finds
+      // nothing, so a retry can add information but never silently remove it.
+      parsed.channel ?? null,
+      parsed.payCode ?? null,
       record.id,
     ],
   );

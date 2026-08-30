@@ -42,6 +42,10 @@ const transactions = new Table({
   balance_after: column.real,       // bank-reported balance after this txn (audit)
   txn_ref: column.text,             // bank's Ref/Event # — de-dupes multi-sender alerts
   parse_source: column.text,        // 'ai' | 'regex' — which path classified this
+  // The rail the money took and the payee's id on it — what "pay again"
+  // rebuilds a USSD string from. See supabase_migration_v16.sql.
+  channel: column.text,             // 'MoMoPay' | 'Send money' | 'Bank transfer' | …
+  pay_code: column.text,            // merchant code, or recipient phone as 07XXXXXXXX
   // Money-out only, live-captured only, from Android's cached last-known fix.
   // Null for income, transfers, and anything polled from history — see
   // supabase_migration_v11.sql for why.
@@ -82,6 +86,10 @@ const auto_records = new Table({
   balance_after: column.real,  // bank-reported balance after this txn
   txn_ref: column.text,        // bank's Ref/Event # — de-dupes multi-sender alerts
   parse_source: column.text,   // 'ai' | 'regex' — which path classified this
+  // Carried through review so confirming does not drop them — the same way
+  // locations were once lost on promote.
+  channel: column.text,
+  pay_code: column.text,
   lat: column.real,            // see transactions above
   lon: column.real,
   accuracy_m: column.real,
@@ -290,6 +298,10 @@ const merchant_rules = new Table({
   display_name: column.text,       // name the user chose; fixes future SMS too
   correction_count: column.integer, // times user corrected this mapping
   confirmation_count: column.integer,// times user confirmed this mapping
+  // The learned way to PAY this merchant, not just to file them. Synced (was
+  // device-local AsyncStorage) so a reinstall or a second device keeps it.
+  channel: column.text,
+  pay_code: column.text,
   owner_id: column.text,
   updated_at: column.text,
 });
