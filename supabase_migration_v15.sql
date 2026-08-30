@@ -2,6 +2,17 @@
 --
 -- Three things, all independent; run the whole file in the SQL editor.
 --
+-- APPLIED 2026-08-30. Verified after the fact: all three parts landed, and
+-- pg_policies also revealed that auto_records, scheduled_payments and
+-- subscriptions ALREADY carried owner policies named `<table>_owner`, created
+-- outside this repo and recorded in no migration. So the exposure the audit
+-- flagged never existed — the tables were correctly scoped the whole time,
+-- just undocumented. The `<table>_owner` policies are now redundant with the
+-- ones below (RLS policies are permissive/OR'd, so duplicates are harmless
+-- but they widen the surface anyone has to reason about). Dropping them is
+-- v16's job, once their `qual` is confirmed equivalent — never drop a policy
+-- you have not read.
+--
 -- 1) RLS stated outright for the three pre-repo tables no migration ever
 --    touched: auto_records, scheduled_payments, subscriptions.
 --
