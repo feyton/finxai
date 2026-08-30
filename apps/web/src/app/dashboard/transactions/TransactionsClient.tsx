@@ -7,6 +7,7 @@ import {CATS, type CategoryId, builtinSubcats, fmtAmount, resolveCat} from '@/li
 import type {Account, Subcategory, Transaction} from '@/lib/types';
 import {Icon} from '@/components/Icon';
 import {Card, CatChip, Conf, LocationLink, Money, Pill, WEmpty} from '@/components/ui';
+import {rebalanceAccount} from '@/lib/reviewActions';
 
 const CAT_LIST = Object.values(CATS);
 const TYPE_OPTIONS = ['expense', 'income', 'transfer'] as const;
@@ -753,23 +754,27 @@ function TxnDrawer({
     setBusy(true);
     setErr(null);
     try {
-      // balance adjustments with the ORIGINAL movement sign
+      // Reverse the OLD movement, then apply the NEW one. These are two
+      // different signs whenever the type changed: re-applying with the
+      // original sign moved a flipped expense->income the wrong way, by twice
+      // the amount. Replay hides that on any account with a bank-reported
+      // balance, which is why it survived — but the delta below is the whole
+      // story for manual-only accounts, where nothing ever corrects it.
       const sign = movementSign(txn.transaction_type, txn.transfer_direction);
+      const newDirection =
+        txType === 'transfer' ? txn.transfer_direction ?? (sign > 0 ? 'in' : 'out') : null;
+      const newSign = movementSign(txType, newDirection);
       const deltas = new Map<string, number>();
       const add = (acc: string | null, dl: number) => {
         if (!acc) return;
         deltas.set(acc, (deltas.get(acc) ?? 0) + dl);
       };
       add(txn.account_id, -(sign * (txn.amount ?? 0)));
-      add(accountId || txn.account_id, sign * numericAmount);
-      for (const [accId, dl] of deltas) {
-        if (Math.round(dl) === 0) continue;
-        const {data} = await supabase.from('accounts').select('available_balance').eq('id', accId).single();
-        await supabase
-          .from('accounts')
-          .update({available_balance: (data?.available_balance ?? 0) + dl})
-          .eq('id', accId);
-      }
+      add(accountId || txn.account_id, newSign * numericAmount);
+      // Balances are settled AFTER the transaction is written, further down —
+      // replay reads the rows, so adjusting first would recompute the old state.
+      // This also replaces a SELECT-then-UPDATE pair whose gap silently lost a
+      // delta whenever the phone synced or a second tab saved in between.
 
       const cleanMerchant = merchant.trim();
       const patch: Partial<Transaction> = {
@@ -778,7 +783,7 @@ function TxnDrawer({
         category: txType === 'transfer' ? txn.category : CATS[catId].label,
         subcategory: txType === 'transfer' ? null : subcategory || null,
         transaction_type: txType,
-        transfer_direction: txType === 'transfer' ? txn.transfer_direction ?? (sign > 0 ? 'in' : 'out') : null,
+        transfer_direction: newDirection,
         note: note || null,
         // `payee` is written alongside `merchant` because the two are kept in step
         // everywhere else — the mobile ingest sets both from the same value, and
@@ -814,6 +819,10 @@ function TxnDrawer({
         const {error: se} = await supabase.from('split_details').insert(newRows);
         if (se) throw se;
       }
+      for (const [accId, dl] of deltas) {
+        await rebalanceAccount(supabase, accId, dl);
+      }
+
       onSplitsChange(txn.id, newRows);
       onLocal(txn.id, patch);
       onClose();
@@ -828,16 +837,15 @@ function TxnDrawer({
     setBusy(true);
     try {
       const sign = movementSign(txn.transaction_type, txn.transfer_direction);
-      if (txn.account_id) {
-        const {data} = await supabase.from('accounts').select('available_balance').eq('id', txn.account_id).single();
-        await supabase
-          .from('accounts')
-          .update({available_balance: (data?.available_balance ?? 0) - sign * (txn.amount ?? 0)})
-          .eq('id', txn.account_id);
-      }
       await supabase.from('split_details').delete().eq('transaction_id', txn.id);
       const {error} = await supabase.from('transactions').delete().eq('id', txn.id);
       if (error) throw error;
+      // After the delete, so replay sees the history it is meant to recompute.
+      // A deletion can also change WHICH row is the balance anchor, which is
+      // precisely why a decrement is the wrong tool here.
+      if (txn.account_id) {
+        await rebalanceAccount(supabase, txn.account_id, -sign * (txn.amount ?? 0));
+      }
       onDeleted(txn.id);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Delete failed');

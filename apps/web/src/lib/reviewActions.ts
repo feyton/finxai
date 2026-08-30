@@ -52,6 +52,34 @@ function uuid(): string {
  * transaction the page just created. The 300-row window and DESC order match
  * src/tools/balance.ts exactly — replayBalance is order-dependent by design.
  */
+/**
+ * Bring an account's balance back in line after its transactions changed.
+ *
+ * Replay FIRST: it recomputes from the newest bank-reported balance forward, so
+ * it is idempotent and repairs whatever drift already existed rather than
+ * carrying it. `delta` is only used when replay has nothing to anchor on — a
+ * manual-only account, where no SMS ever states a balance — and even then it
+ * goes through the RPC so the arithmetic happens in one locked statement.
+ *
+ * Callers must do this AFTER writing the transaction, never before: replay
+ * reads the rows, so running it first would recompute the old state.
+ */
+export async function rebalanceAccount(
+  supabase: SupabaseClient,
+  accountId: string,
+  delta: number,
+): Promise<void> {
+  if (!accountId) return;
+  const replayed = await syncAccountBalance(supabase, accountId);
+  if (replayed !== null) return;
+  if (Math.round(delta) === 0) return;
+  const {error} = await supabase.rpc('adjust_account_balance', {
+    p_account_id: accountId,
+    p_delta: delta,
+  });
+  if (error) throw error;
+}
+
 export async function syncAccountBalance(
   supabase: SupabaseClient,
   accountId: string,
