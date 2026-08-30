@@ -39,7 +39,11 @@ $$;
 COMMENT ON FUNCTION public.adjust_account_balance(uuid, numeric) IS
   'Race-free balance adjustment: does the arithmetic in one locked statement instead of a read-then-write. Runs as the CALLER, so RLS still governs access. Fallback for accounts with no bank-reported balance to replay from.';
 
--- anon is deliberately excluded: there is no signed-out reason to move money.
+-- NOTE: this grant alone does NOT exclude anon — Postgres grants EXECUTE on a
+-- new function to PUBLIC by default, and anon is in PUBLIC. Verified after
+-- deploy: anon reaches the function (though RLS makes it a no-op). v20 adds the
+-- REVOKE that actually closes it. Kept here so a fresh environment sees why v20
+-- exists rather than reading this as belt-and-braces.
 GRANT EXECUTE ON FUNCTION public.adjust_account_balance(uuid, numeric) TO authenticated;
 
 -- Verify — expect one row, prosecdef = false (INVOKER, not DEFINER):
