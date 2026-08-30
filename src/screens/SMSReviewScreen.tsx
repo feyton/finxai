@@ -30,6 +30,7 @@ import {supabase} from '../tools/supabase';
 import {syncAccountBalance} from '../tools/balance';
 import {ignoredSmsId} from '../tools/txnId';
 import {promoteAutoRecord, reclassifySms} from '../tools/smsIngest';
+import {buildUssd, railFor} from '../tools/ussd';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -49,7 +50,18 @@ export interface Fix {
   // Free-text note, captured here so a review doesn't have to be finished and
   // then re-opened from the Transactions list just to add context.
   note: string;
+  // How the money actually left — the rail and the payee's id on it. Correcting
+  // these is what makes "Pay again" dial the right thing, and confirming trains
+  // the merchant rule so future SMS from this payee inherit it.
+  channel: string | null;
+  payCode: string | null;
 }
+
+// The rails a person can be paid on, narrowest-useful set. Deliberately not the
+// parser's full CHANNELS list: 'Receive' is not a way to pay someone, and
+// offering rails we cannot rebuild a USSD string for invites a correction that
+// silently does nothing.
+const PAY_CHANNELS = ['MoMoPay', 'Send money', 'Bank transfer', 'Airtime', 'Bill'];
 
 const FIX_TYPES: {id: Fix['type']; label: string}[] = [
   {id: 'expense', label: 'Money out'},
@@ -77,6 +89,8 @@ function FixSheet({
   const [note, setNote] = useState('');
   const [accountId, setAccountId] = useState('');
   const [fixType, setFixType] = useState<Fix['type']>('expense');
+  const [channel, setChannel] = useState<string | null>(null);
+  const [payCode, setPayCode] = useState('');
   const {subcatsFor} = useSubcategories();
   const subcats = subcatsFor(cat);
 
@@ -98,6 +112,8 @@ function FixSheet({
           ? 'transfer'
           : 'expense',
       );
+      setChannel(record.channel ?? null);
+      setPayCode(record.pay_code ?? '');
     }
   }, [visible, record]);
 
@@ -174,10 +190,12 @@ function FixSheet({
             style={styles.fixInput}
           />
 
-          {/* Payment channel */}
+          {/* Which of YOUR accounts paid. This was labelled "Payment channel",
+              which is the name of a different thing entirely — the rail, edited
+              below — and made the real channel field look like it existed. */}
           {accounts.length > 0 && (
             <>
-              <Text style={styles.fixLabel}>Payment channel</Text>
+              <Text style={styles.fixLabel}>Paid from</Text>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -198,6 +216,68 @@ function FixSheet({
                   );
                 })}
               </ScrollView>
+            </>
+          )}
+
+          {/* How the money left, and the payee's id on that rail. Money-out
+              only: there is nothing to re-dial for income, and re-paying a
+              transfer to your own account is not a thing anyone wants a
+              shortcut for. The preview is the honesty check — it shows exactly
+              what "Pay again" would dial, and stays hidden when the pair does
+              not produce a valid string, so a wrong code is visibly wrong here
+              rather than at the dialer. */}
+          {fixType === 'expense' && (
+            <>
+              <Text style={styles.fixLabel}>How you paid</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{gap: 8, paddingBottom: 4, paddingHorizontal: 16}}>
+                {PAY_CHANNELS.map(c => {
+                  const on = channel === c;
+                  return (
+                    <Pressable
+                      key={c}
+                      onPress={() => setChannel(on ? null : c)}
+                      style={[
+                        styles.channelChip,
+                        on && {borderColor: T.accent, backgroundColor: T.accent + '18'},
+                      ]}>
+                      <Text
+                        style={[styles.channelName, on && {color: T.text}]}
+                        numberOfLines={1}>
+                        {c}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+
+              {railFor(channel) && (
+                <>
+                  <Text style={styles.fixLabel}>
+                    {railFor(channel) === 'sendmoney' ? 'Their number' : 'Merchant code'}
+                  </Text>
+                  <TextInput
+                    value={payCode}
+                    onChangeText={setPayCode}
+                    keyboardType="number-pad"
+                    placeholder={
+                      railFor(channel) === 'sendmoney' ? '07XXXXXXXX' : 'e.g. 888840'
+                    }
+                    placeholderTextColor={T.text3}
+                    style={styles.fixInput}
+                  />
+                  <Text style={styles.fixHint}>
+                    {buildUssd({channel, payCode: payCode.trim()})
+                      ? `Pay again will dial ${buildUssd({
+                          channel,
+                          payCode: payCode.trim(),
+                        })}`
+                      : 'Not enough to dial this payee yet.'}
+                  </Text>
+                </>
+              )}
             </>
           )}
 
@@ -289,6 +369,10 @@ function FixSheet({
                 accountId,
                 type: fixType,
                 note: note.trim(),
+                // Only meaningful for money out; blank the pair otherwise so a
+                // record re-typed as income cannot keep a stale code.
+                channel: fixType === 'expense' ? channel : null,
+                payCode: fixType === 'expense' ? payCode.trim() || null : null,
               })
             }
             style={({pressed}) => [styles.fixSave, {opacity: pressed ? 0.85 : 1}]}>
@@ -661,6 +745,8 @@ export default function SMSReviewScreen({navigation}: any) {
           accountId: fix.accountId,
           type: txType,
           note: fix.note,
+          channel: fix.channel,
+          payCode: fix.payCode,
         },
       });
 
@@ -684,6 +770,13 @@ export default function SMSReviewScreen({navigation}: any) {
           userId!,
           txType === 'transfer' ? '' : fix.subcategory ?? '',
           merchant,
+          // Teach how to PAY them, not just how to file them. Undefined rather
+          // than null when the user left it blank, so a correction about a
+          // category never wipes a code learned earlier — see upsertRule.
+          {
+            channel: fix.channel ?? undefined,
+            payCode: fix.payCode ?? undefined,
+          },
         );
         if (record.sender && accountId) {
           await recordChannel(db, record.sender, accountId, userId!);
@@ -1121,6 +1214,13 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 8,
     lineHeight: 15,
+  },
+  fixHint: {
+    marginHorizontal: 16,
+    marginTop: 6,
+    fontFamily: FONTS.regular,
+    fontSize: 11.5,
+    color: T.text3,
   },
   fixInput: {
     marginHorizontal: 16,
