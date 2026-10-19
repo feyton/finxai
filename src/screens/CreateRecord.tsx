@@ -15,6 +15,7 @@ import {CatChip, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {useSubcategories} from '../hooks/useSubcategories';
 import {CATS, CategoryId, FONTS, R, T, accountIcon, accountTint, fmtAmount, resolveCat} from '../theme';
+import {rebalanceAccount} from '../tools/balance';
 import categoriesData from '../tools/data.json';
 
 function generateUUID(): string {
@@ -164,14 +165,11 @@ export default function CreateRecord({navigation}: any) {
          VALUES (?, ?, ?, ?, ?, ?, 1, 'RWF', ?, ?, 'transfer', '', 0, NULL, 'manual', 1, ?, 'in', ?, ?)`,
         [generateUUID(), numericAmount, to.id, '', '', when.toISOString(), from.name, `From ${from.name}`, from.id, userId ?? '', now],
       );
-      await db.execute(
-        'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
-        [numericAmount, from.id],
-      );
-      await db.execute(
-        'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-        [numericAmount, to.id],
-      );
+      // Replay where the account has a bank-reported balance, a delta only where
+      // it has none. A raw increment here stacked on top of whatever replay last
+      // wrote, and the next SMS's replay then silently overwrote it.
+      await rebalanceAccount(db, from.id, -numericAmount);
+      await rebalanceAccount(db, to.id, numericAmount);
       navigation.goBack();
     } catch (e: any) {
       setError(e?.message ?? 'Something went wrong');
@@ -225,17 +223,11 @@ export default function CreateRecord({navigation}: any) {
           now,
         ],
       );
-      if (type === 'income') {
-        await db.execute(
-          'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-          [numericAmount, activeAccount],
-        );
-      } else {
-        await db.execute(
-          'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
-          [numericAmount, activeAccount],
-        );
-      }
+      await rebalanceAccount(
+        db,
+        activeAccount,
+        type === 'income' ? numericAmount : -numericAmount,
+      );
       navigation.goBack();
     } catch (e: any) {
       setError(e?.message ?? 'Something went wrong');

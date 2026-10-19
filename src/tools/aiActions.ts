@@ -16,6 +16,7 @@ import {AbstractPowerSyncDatabase} from '@powersync/react-native';
 // literals where it is easy to mangle.
 const NL = String.fromCharCode(10);
 import {CATS, CategoryId, fmtAmount, resolveCat} from '../theme';
+import {rebalanceAccount} from './balance';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -197,11 +198,8 @@ export const AI_ACTIONS: AiAction[] = [
           input.note ?? '', 0, null, 'ai', 1, ctx.userId, now,
         ],
       );
-      const sign = input.type === 'income' ? 1 : -1;
-      await ctx.db.execute(
-        'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-        [sign * amt, account.id],
-      );
+      // Same settle-after-write rule as a manual save (see rebalanceAccount).
+      await rebalanceAccount(ctx.db, account.id, input.type === 'income' ? amt : -amt);
       return `Recorded ${input.type} of RWF ${fmtAmount(amt)} (${label}) on ${account.name}.`;
     },
   },

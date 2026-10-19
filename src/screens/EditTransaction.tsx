@@ -18,6 +18,7 @@ import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {CatChip, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {useSubcategories} from '../hooks/useSubcategories';
+import {movementDelta, rebalanceAccount} from '../tools/balance';
 import {
   CATS,
   CategoryId,
@@ -37,8 +38,9 @@ function uuid(): string {
   });
 }
 
-// Balance-movement sign as originally recorded — changing the TYPE
-// re-classifies the record, it does not move money again.
+// Which way a transaction moves its account. Used only to pick a transfer's
+// direction when one is created by changing the type; the balance arithmetic
+// itself is movementDelta, the same rule replay uses.
 function movementSign(txType: string, transferDirection?: string | null): number {
   if (txType === 'income') {
     return 1;
@@ -135,34 +137,37 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
     try {
       const sign = movementSign(tx.transaction_type ?? 'expense', tx.transfer_direction);
       const newAccountId = accountId || tx.account_id;
-      // Only touch balances when the money actually moved. Reclassifying a
-      // transaction (category, subcategory, merchant, note, splits) leaves every
-      // balance exactly where it was, so the revert/re-apply pair below is a
-      // no-op that still costs two `accounts` UPDATEs — and for a shared editor
-      // those UPDATEs are refused by RLS, upload-fail, and get retried forever,
-      // blocking every write queued behind them.
-      const movedMoney =
-        numericAmount !== Math.round(tx.amount ?? 0) || newAccountId !== tx.account_id;
-      if (movedMoney) {
-        // revert the original effect from the original account
-        if (tx.account_id) {
-          await db.execute(
-            'UPDATE accounts SET available_balance = available_balance - ? WHERE id = ?',
-            [sign * (tx.amount ?? 0), tx.account_id],
-          );
-        }
-        // apply the (possibly new) amount to the (possibly new) account
-        if (newAccountId) {
-          await db.execute(
-            'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
-            [sign * numericAmount, newAccountId],
-          );
-        }
-      }
       const transferDirection =
         txType === 'transfer'
           ? tx.transfer_direction ?? (sign > 0 ? 'in' : 'out')
           : null;
+      // Reverse the OLD movement, then apply the NEW one — two different signs
+      // whenever the type changed. This used to re-apply with the original sign
+      // and ignore type changes entirely, so flipping an expense to income left a
+      // manual-only balance off by twice the amount (the web drawer had the same
+      // bug, fixed in 695eb0b). Replay already counted the type, so the two paths
+      // disagreed about what an edit meant.
+      const oldDelta = movementDelta(tx);
+      const newDelta = movementDelta({
+        ...tx,
+        amount: numericAmount,
+        transaction_type: txType,
+        transfer_direction: transferDirection,
+      });
+      const deltas = new Map<string, number>();
+      const add = (acc: string | null | undefined, dl: number) => {
+        if (acc) {
+          deltas.set(acc, (deltas.get(acc) ?? 0) + dl);
+        }
+      };
+      add(tx.account_id, -oldDelta);
+      add(newAccountId, newDelta);
+      // Only touch balances when the money actually moved, and only as the owner.
+      // A shared editor's `accounts` UPDATE is refused by RLS, upload-fails, and
+      // blocks every write queued behind it; the owner's next replay corrects the
+      // balance for an anchored account anyway.
+      const movedMoney =
+        canMoveMoney && [...deltas.values()].some(dl => Math.round(dl) !== 0);
       await db.execute(
         'UPDATE transactions SET amount = ?, account_id = ?, category = ?, subcategory = ?, merchant = ?, note = ?, transaction_type = ?, transfer_direction = ? WHERE id = ?',
         [
@@ -206,6 +211,13 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
             tx.owner_id ?? userId ?? '',
           ],
         );
+      }
+      // After the row is written: replay reads it, so settling first would
+      // recompute the old state.
+      if (movedMoney) {
+        for (const [accId, dl] of deltas) {
+          await rebalanceAccount(db, accId, dl);
+        }
       }
       navigation.goBack();
     } catch (e: any) {

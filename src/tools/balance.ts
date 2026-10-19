@@ -44,3 +44,38 @@ export async function syncAccountBalance(
 
   return result;
 }
+
+// Brings an account's balance back in line after its transactions changed — the
+// phone's twin of rebalanceAccount in apps/web/src/lib/reviewActions.ts.
+//
+// Replay FIRST: it is idempotent and repairs drift that already existed instead
+// of carrying it forward. `delta` is only used when replay has nothing to anchor
+// on (a manual-only account, where no SMS ever states a balance). Before this,
+// manual saves always took the delta path, so on SMS-backed accounts they stacked
+// increments on top of whatever replay had last written.
+//
+// Callers must run this AFTER writing the transaction: replay reads the rows, so
+// running it first recomputes the old state.
+//
+// Known limit of the fallback: the local `col = col + ?` is atomic in SQLite, but
+// PowerSync uploads the RESULT as a plain PATCH, so a web edit landing on the
+// same manual-only account between this write and the upload can still be lost.
+// Closing that needs the connector to send deltas via adjust_account_balance.
+export async function rebalanceAccount(
+  db: any,
+  accountId: string | null | undefined,
+  delta: number,
+): Promise<void> {
+  if (!accountId) {
+    return;
+  }
+  const replayed = await syncAccountBalance(db, accountId);
+  if (replayed !== null || Math.round(delta) === 0) {
+    return;
+  }
+  await db.execute(
+    'UPDATE accounts SET available_balance = available_balance + ? WHERE id = ?',
+    [delta, accountId],
+  );
+  refreshBalanceWidget();
+}
