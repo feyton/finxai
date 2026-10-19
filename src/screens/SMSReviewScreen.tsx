@@ -3,7 +3,6 @@ import React, {useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  KeyboardAvoidingView,
   Modal,
   Pressable,
   ScrollView,
@@ -17,6 +16,7 @@ import {CATS, CategoryId, FONTS, R, T, accountIcon, accountTint, resolveCat} fro
 import {CatChip, ConfPill, Icon, LocationChip} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {useSubcategories} from '../hooks/useSubcategories';
+import {useKeyboardHeight} from '../hooks/useKeyboardHeight';
 import {useToast} from 'react-native-toast-notifications';
 import {
   getMerchantChannels,
@@ -92,6 +92,7 @@ function FixSheet({
   const [channel, setChannel] = useState<string | null>(null);
   const [payCode, setPayCode] = useState('');
   const {subcatsFor} = useSubcategories();
+  const keyboardHeight = useKeyboardHeight();
   const subcats = subcatsFor(cat);
 
   // Re-seed local state each time the sheet opens for a record
@@ -115,7 +116,12 @@ function FixSheet({
       setChannel(record.channel ?? null);
       setPayCode(record.pay_code ?? '');
     }
-  }, [visible, record]);
+    // Keyed on the record's ID, not the object. useQuery hands back fresh row
+    // objects whenever ANY auto_records row changes (a sync download, the
+    // poller, an upload settling), so depending on `record` re-seeded the form
+    // mid-edit — wiping whatever was being typed into the note.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, record?.id]);
 
   return (
     <Modal
@@ -124,7 +130,7 @@ function FixSheet({
       animationType="slide"
       statusBarTranslucent
       onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{flex: 1}} behavior="height">
+      <View style={{flex: 1, paddingBottom: keyboardHeight}}>
         <Pressable style={styles.sheetOverlay} onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />
@@ -381,7 +387,7 @@ function FixSheet({
             <Text style={styles.fixSaveText}>Save & confirm</Text>
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }

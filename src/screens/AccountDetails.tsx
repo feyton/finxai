@@ -9,7 +9,6 @@ import {
   SectionList,
   StyleSheet,
   Text,
-  KeyboardAvoidingView,
   TextInput,
   View,
 } from 'react-native';
@@ -21,6 +20,7 @@ import {TxRow} from '../Components/TxRow';
 import {Icon} from '../Components/ui';
 import {appAlert} from '../Components/AppDialog';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {useKeyboardHeight} from '../hooks/useKeyboardHeight';
 import {sendInviteEmail} from '../tools/invites';
 import {syncAccountBalance} from '../tools/balance';
 import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
@@ -45,6 +45,7 @@ function ShareSheet({
   const db = usePowerSync();
   const {userId, name} = useCurrentUser();
   const [email, setEmail] = useState('');
+  const keyboardHeight = useKeyboardHeight();
   const [access, setAccess] = useState<'view' | 'edit'>('view');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -96,11 +97,10 @@ function ShareSheet({
       statusBarTranslucent
       onRequestClose={onClose}>
       {/* The email field sits near the bottom of a bottom sheet, so the soft keyboard
-          covered it completely — you could not see what you were typing. Same
-          KeyboardAvoidingView wrapper the SMS Fix sheet uses; 'height' is the behaviour
-          that works for a bottom-anchored sheet on Android, where 'padding' leaves the
-          sheet where it is and just adds space underneath it. */}
-      <KeyboardAvoidingView style={{flex: 1}} behavior="height">
+          covered it completely — you could not see what you were typing. Padded by
+          the keyboard height, like the SMS Fix sheet; KeyboardAvoidingView here
+          flickered in a feedback loop (see hooks/useKeyboardHeight). */}
+      <View style={{flex: 1, paddingBottom: keyboardHeight}}>
       <Pressable style={styles.sheetOverlay} onPress={onClose} />
       <View style={styles.sheet}>
         <View style={styles.sheetHandle} />
@@ -182,7 +182,7 @@ function ShareSheet({
           <Text style={styles.shareSaveText}>{busy ? 'Sharing…' : 'Share account'}</Text>
         </Pressable>
       </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
