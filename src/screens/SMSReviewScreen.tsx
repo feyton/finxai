@@ -1,5 +1,5 @@
 import {usePowerSync, useQuery} from '@powersync/react-native';
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -29,7 +29,14 @@ import {extractBalance, parseSmsWithAI, regexExtract} from '../tools/smsParser';
 import {supabase} from '../tools/supabase';
 import {syncAccountBalance} from '../tools/balance';
 import {ignoredSmsId} from '../tools/txnId';
-import {promoteAutoRecord, reclassifySms} from '../tools/smsIngest';
+import {
+  type RecheckResult,
+  promoteAutoRecord,
+  recheckPending,
+  reclassifySms,
+  undoRecheck,
+} from '../tools/smsIngest';
+import {isUsablePattern, normalizeMerchant} from '../../shared/merchantNormalize';
 import {buildUssd, railFor} from '../tools/ussd';
 
 function uuid(): string {
@@ -619,6 +626,44 @@ function SmsCard({
   );
 }
 
+// ── Cluster header: one merchant, several pending records ─────
+function GroupHeader({
+  group,
+  onConfirmAll,
+}: {
+  group: any[];
+  onConfirmAll: (group: any[]) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const name = group[0].merchant || group[0].payee || 'Unknown';
+  const cat = CATS[(resolveCat(group[0].category ?? '') as CategoryId) ?? 'misc'];
+  return (
+    <View style={styles.groupHead}>
+      <View style={{flex: 1}}>
+        <Text style={styles.groupName} numberOfLines={1}>
+          {name}
+        </Text>
+        <Text style={styles.groupMeta} numberOfLines={1}>
+          {group.length} pending{cat ? ` · as ${cat.label}` : ''}
+        </Text>
+      </View>
+      <Pressable
+        disabled={busy}
+        onPress={async () => {
+          setBusy(true);
+          await onConfirmAll(group);
+          setBusy(false);
+        }}
+        style={({pressed}) => [styles.groupBtn, {opacity: busy ? 0.5 : pressed ? 0.8 : 1}]}>
+        <Icon name="Check" size={14} color={T.accentInk} strokeWidth={2.6} />
+        <Text style={styles.groupBtnText}>
+          {busy ? 'Confirming…' : `Confirm all ${group.length}`}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
 // ── Screen ─────────────────────────────────────────────────────
 export default function SMSReviewScreen({navigation}: any) {
   const db = usePowerSync();
@@ -655,7 +700,44 @@ export default function SMSReviewScreen({navigation}: any) {
     }
   };
 
-  const handleConfirm = async (record: any) => {
+  // Re-run the learned rules over the queue after anything that taught one, and
+  // say what moved — a silent re-filing would look like records vanishing.
+  // Undo restores them exactly (see undoRecheck).
+  const recheck = async (lead?: string) => {
+    let res: RecheckResult;
+    try {
+      res = await recheckPending(db, userId!);
+    } catch (e) {
+      console.warn('[SMSReview] recheck error:', e);
+      return;
+    }
+    const n = res.promoted.length;
+    if (!n) {
+      if (lead) {
+        toast.show(lead, {type: 'success'});
+      }
+      return;
+    }
+    const text = `${lead ? `${lead} · ` : ''}also filed ${n} similar`;
+    const id = toast.show(
+      <View style={styles.toastRow}>
+        <Icon name="Sparkles" size={15} color={T.accent} strokeWidth={2.2} />
+        <Text style={styles.toastText}>{text}</Text>
+        <Pressable
+          hitSlop={10}
+          onPress={async () => {
+            toast.hide(id);
+            await undoRecheck(db, res);
+            toast.show(`Put ${n} back in review`, {type: 'normal'});
+          }}>
+          <Text style={styles.toastUndo}>Undo</Text>
+        </Pressable>
+      </View>,
+      {type: 'normal', duration: 7000},
+    );
+  };
+
+  const handleConfirm = async (record: any, {thenRecheck = true} = {}) => {
     try {
       // One shared promotion path (tools/smsIngest) rather than a hand-written INSERT
       // here — four copies of this column list is what silently dropped the location.
@@ -683,9 +765,21 @@ export default function SMSReviewScreen({navigation}: any) {
           txType === 'transfer' ? '' : record.subcategory ?? '',
         );
       }
+      if (thenRecheck) {
+        await recheck();
+      }
     } catch (e) {
       console.warn('[SMSReview] confirm error:', e);
     }
+  };
+
+  // One merchant's whole cluster in one tap, then a single re-check — not one
+  // per record, which would re-scan the queue N times.
+  const handleConfirmAll = async (group: any[]) => {
+    for (const r of group) {
+      await handleConfirm(r, {thenRecheck: false});
+    }
+    await recheck(`Confirmed ${group.length}`);
   };
 
   // Re-run classification for ONE pending record, using its stored SMS text.
@@ -790,12 +884,37 @@ export default function SMSReviewScreen({navigation}: any) {
           await recordChannel(db, record.sender, accountId, userId!);
         }
       }
+      await recheck();
     } catch (e) {
       console.warn('[SMSReview] fix error:', e);
     }
   };
 
   const isEmpty = records.length === 0;
+
+  // Same-merchant records sit together, biggest cluster first, so the queue
+  // reads as "7 from Simba" rather than 86 unrelated cards — and a cluster can
+  // be confirmed in one tap. Keyed like the rule store (normalizeMerchant), so
+  // a group is exactly the set one rule will cover.
+  const groups = useMemo(() => {
+    const by = new Map<string, any[]>();
+    for (const r of records as any[]) {
+      // Only a key the rule store would accept groups anything. "Unknown" is
+      // not a merchant: on a real queue it gathered a MoKash deposit, a MoKash
+      // withdrawal and a person-to-person transfer under one "Confirm all".
+      const k = normalizeMerchant(r.merchant || r.payee || '').key;
+      const key = isUsablePattern(k) ? k : `_${r.id}`;
+      by.set(key, [...(by.get(key) ?? []), r]);
+    }
+    return [...by.values()].sort((a, b) => b.length - a.length);
+  }, [records]);
+  const rows = useMemo(
+    () =>
+      groups.flatMap(g =>
+        g.map((r, i) => ({record: r, group: i === 0 && g.length > 1 ? g : null})),
+      ),
+    [groups],
+  );
 
   return (
     <SafeAreaView style={styles.root}>
@@ -851,19 +970,22 @@ export default function SMSReviewScreen({navigation}: any) {
         </View>
       ) : (
         <FlatList
-          data={records}
-          keyExtractor={item => item.id}
+          data={rows}
+          keyExtractor={item => item.record.id}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
-          renderItem={({item}) => (
-            <SmsCard
-              record={item}
-              accounts={accounts as any[]}
-              onConfirm={() => handleConfirm(item)}
-              onFix={fix => handleFix(item, fix)}
-              onIgnore={() => handleIgnore(item)}
-              onRetry={() => handleRetry(item)}
-            />
+          renderItem={({item: {record: item, group}}) => (
+            <>
+              {group && <GroupHeader group={group} onConfirmAll={handleConfirmAll} />}
+              <SmsCard
+                record={item}
+                accounts={accounts as any[]}
+                onConfirm={() => handleConfirm(item)}
+                onFix={fix => handleFix(item, fix)}
+                onIgnore={() => handleIgnore(item)}
+                onRetry={() => handleRetry(item)}
+              />
+            </>
           )}
         />
       )}
@@ -928,6 +1050,38 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   list: {paddingHorizontal: 16, paddingBottom: 32, gap: 12},
+  groupHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 8,
+    marginBottom: 12,
+    paddingLeft: 4,
+  },
+  groupName: {fontFamily: FONTS.semibold, fontSize: 15, color: T.text},
+  groupMeta: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3, marginTop: 1},
+  groupBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    height: 36,
+    borderRadius: R.pill,
+    backgroundColor: T.accent,
+  },
+  groupBtnText: {fontFamily: FONTS.semibold, fontSize: 12.5, color: T.accentInk},
+  toastRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: T.surface3,
+    borderRadius: R.small,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    maxWidth: 360,
+  },
+  toastText: {flex: 1, fontFamily: FONTS.medium, fontSize: 13, color: T.text},
+  toastUndo: {fontFamily: FONTS.semibold, fontSize: 13, color: T.accent},
   // card
   card: {
     backgroundColor: T.surface,

@@ -13,6 +13,8 @@ import {THRESHOLD_AUTO_SAVE} from './smsTypes';
 import {
   ParseContext,
   candidateNames,
+  extractBalance,
+  findRuleForNames,
   extractAccountRef,
   isTransferStatusOnly,
   notATransaction,
@@ -23,7 +25,12 @@ import {
   trailingDigits,
 } from './smsParser';
 import {ParsedSMS} from './smsTypes';
-import {getChannelRules, getMerchantChannels, getMerchantRules} from './merchantMemory';
+import {
+  getAllMerchantRules,
+  getChannelRules,
+  getMerchantChannels,
+  getMerchantRules,
+} from './merchantMemory';
 import {ignoredSmsId, rowExists, smsAlreadyRecorded, smsTransactionId} from './txnId';
 import {isUsablePattern, normalizeMerchant} from '../../shared/merchantNormalize';
 import {syncAccountBalance} from './balance';
@@ -485,6 +492,118 @@ export async function promoteAutoRecord(
 
   await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
   return {txType, accountId};
+}
+
+/** What a re-check filed, so the review screen can say so and offer Undo. */
+export interface RecheckResult {
+  /** The auto_records rows as they were, for undoRecheck. */
+  promoted: any[];
+  /** Accounts whose balance was recomputed. */
+  accountIds: string[];
+}
+
+/**
+ * Re-run the learned rules over the whole review queue and file every record
+ * that now has an exact answer.
+ *
+ * WHY: confirming or fixing a record taught a rule (recordConfirmation /
+ * recordCorrection) but nothing went back over the queue, so the other 30
+ * messages from that same merchant sat there until the next NEW SMS — the
+ * queue grew faster than anyone would clear it, and confirming felt like it
+ * taught nothing.
+ *
+ * The decision is the ingest prefilter's, not a new heuristic: an EXACT rule
+ * match on a deterministic name from the SMS (candidateNames) or on the name
+ * the record already carries — the same evidence that files a NEW message at
+ * 0.95 without a model call. A fuzzy match files nothing; it stays for review,
+ * exactly as it would at ingest. So the queue and fresh SMS cannot disagree
+ * about what a rule means.
+ *
+ * Local only: no network, no model, no cost.
+ */
+export async function recheckPending(db: any, ownerId: string): Promise<RecheckResult> {
+  const rules = await getAllMerchantRules(db, ownerId);
+  if (!rules.length) {
+    return {promoted: [], accountIds: []};
+  }
+  const {rows} = await db.execute('SELECT * FROM auto_records WHERE owner_id = ?', [ownerId]);
+  const pending: any[] = rows?._array ?? [];
+
+  const promoted: any[] = [];
+  const accounts = new Set<string>();
+  for (const record of pending) {
+    const sms = String(record.sms ?? '');
+    if (!sms || notATransaction(sms)) {
+      continue; // purgeNonTransactions' job, not this one's
+    }
+    const facts = regexExtract(sms);
+    const rule = findRuleForNames(rules, [
+      ...candidateNames(sms, facts, record.sender ?? ''),
+      record.merchant,
+      record.payee,
+    ]);
+    if (!rule?.exact) {
+      continue;
+    }
+
+    // A 'transfer' rule files it as a transfer; any other rule says it is NOT
+    // one, so a record the parser had typed as a transfer takes its type from
+    // the money's direction instead.
+    const isTransfer = rule.category === 'transfer';
+    const type: 'expense' | 'income' | 'transfer' = isTransfer
+      ? 'transfer'
+      : facts.direction === 'credit'
+      ? 'income'
+      : 'expense';
+    try {
+      const {accountId} = await promoteAutoRecord(db, {
+        record,
+        ownerId,
+        direction: facts.direction,
+        balanceAfter: extractBalance(sms),
+        overrides: {
+          type,
+          category: isTransfer ? undefined : rule.category,
+          subcategory: isTransfer ? undefined : rule.subcategory ?? '',
+          merchant: rule.display_name?.trim() || record.merchant,
+        },
+      });
+      promoted.push(record);
+      if (accountId) {
+        accounts.add(accountId);
+      }
+    } catch (e) {
+      console.warn('[Recheck] could not file', record.id, e);
+    }
+  }
+
+  // Once per account, after every insert: replay reads the rows.
+  for (const id of accounts) {
+    await syncAccountBalance(db, id);
+  }
+  if (promoted.length) {
+    console.log(`[Recheck] filed ${promoted.length} pending records by learned rules`);
+  }
+  return {promoted, accountIds: [...accounts]};
+}
+
+/**
+ * Put a re-check back: remove the transactions it wrote and restore the review
+ * records exactly as they were. Promotion keeps the record's id as the
+ * transaction id, so the pairing is exact.
+ */
+export async function undoRecheck(db: any, result: RecheckResult): Promise<void> {
+  for (const record of result.promoted) {
+    await db.execute('DELETE FROM transactions WHERE id = ?', [record.id]);
+    const cols = Object.keys(record).filter(k => record[k] !== undefined);
+    await db.execute(
+      `INSERT INTO auto_records (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
+      cols.map(k => record[k]),
+    );
+  }
+  for (const id of result.accountIds) {
+    await syncAccountBalance(db, id);
+  }
 }
 
 export type ReclassifyOutcome =

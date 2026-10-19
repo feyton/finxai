@@ -106,6 +106,23 @@ export async function getMerchantChannels(): Promise<Record<string, MerchantChan
   }
 }
 
+const RULE_SELECT = `SELECT pattern, category, subcategory, display_name,
+       correction_count, confirmation_count
+     FROM merchant_rules`;
+
+// Every rule this user has, for the review-queue re-check (smsIngest
+// recheckPending). getMerchantRules below is budgeted for a model prompt; the
+// re-check is a local exact-match lookup and must see all of them, or a pending
+// record whose counterparty's rule ranks 16th never gets filed.
+export async function getAllMerchantRules(db: any, userId: string): Promise<MerchantRule[]> {
+  try {
+    const {rows} = await db.execute(`${RULE_SELECT} WHERE owner_id = ?`, [userId]);
+    return (rows?._array ?? []) as MerchantRule[];
+  } catch {
+    return [];
+  }
+}
+
 // ── Retrieve rules relevant to a merchant name ─────────────────
 //
 // `merchant` used to be accepted and then ignored entirely — the query only
@@ -121,8 +138,10 @@ export async function getMerchantRules(
   userId: string,
   limit = 15,
 ): Promise<MerchantRule[]> {
-  const SELECT = `SELECT pattern, category, display_name, correction_count, confirmation_count
-       FROM merchant_rules`;
+  // `subcategory` was missing from this list, so every learned subcategory was
+  // dropped on load: a fix to "Groceries › Household" re-applied as plain
+  // Groceries forever after — one reason confirming felt like it taught nothing.
+  const SELECT = RULE_SELECT;
   try {
     const key = merchant ? normalizeMerchant(merchant).key : '';
     const targeted: MerchantRule[] = [];
