@@ -437,6 +437,41 @@ export async function promoteAutoRecord(
   const accountId = o.accountId || record.account_id;
   const isTransfer = txType === 'transfer';
 
+  // Already filed. Ids are deterministic, so a pending row can share its id with
+  // a transaction that already exists — typically a confirm whose INSERT
+  // uploaded but whose DELETE of the pending row did not (the connector drops a
+  // permanently-failing batch rather than retry forever), so the pending copy
+  // synced back down beside its own transaction. Inserting again threw a UNIQUE
+  // error that the review screen swallowed: Confirm did nothing, visibly.
+  //
+  // The pending copy is stale either way. A plain Confirm just clears it — it
+  // must not overwrite the filed row, which may hold a later edit. A Fix applies
+  // what the user chose there, because that is a decision about this payment.
+  if (await rowExists(db, 'transactions', record.id)) {
+    if (args.overrides) {
+      await db.execute(
+        `UPDATE transactions
+            SET category = ?, subcategory = ?, merchant = ?, transaction_type = ?,
+                account_id = ?, note = COALESCE(?, note), channel = ?, pay_code = ?,
+                confirmed = 1
+          WHERE id = ?`,
+        [
+          isTransfer ? record.category : o.category ?? record.category,
+          isTransfer ? '' : o.subcategory ?? record.subcategory ?? '',
+          o.merchant || record.merchant,
+          txType,
+          accountId,
+          o.note || null,
+          o.channel ?? record.channel ?? null,
+          o.payCode ?? record.pay_code ?? null,
+          record.id,
+        ],
+      );
+    }
+    await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
+    return {txType, accountId};
+  }
+
   await db.execute(
     `INSERT INTO transactions
        (id, amount, account_id, category, subcategory, date_time, sms, sender,
@@ -700,6 +735,37 @@ export async function reclassifySms(
   );
 
   return {ok: true, merchant: parsed.merchant};
+}
+
+/**
+ * Drop review records that are already filed as transactions (same id).
+ *
+ * See promoteAutoRecord: a pending copy can outlive its own promotion through
+ * sync. It is never a second payment — the ids are deterministic per SMS — so
+ * it only inflates the queue and fails when confirmed.
+ *
+ * Returns the number cleared, for logging.
+ */
+export async function purgeAlreadyFiled(db: any, ownerId: string): Promise<number> {
+  try {
+    const {rows} = await db.execute(
+      `SELECT a.id FROM auto_records a
+         JOIN transactions t ON t.id = a.id
+        WHERE a.owner_id = ?`,
+      [ownerId],
+    );
+    const ids: string[] = ((rows?._array ?? []) as any[]).map(r => r.id);
+    for (const id of ids) {
+      await db.execute('DELETE FROM auto_records WHERE id = ?', [id]);
+    }
+    if (ids.length) {
+      console.log(`[Backfill] cleared ${ids.length} review records already filed`);
+    }
+    return ids.length;
+  } catch (e) {
+    console.warn('[Backfill] already-filed purge failed:', e);
+    return 0;
+  }
 }
 
 /**

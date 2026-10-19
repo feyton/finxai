@@ -768,8 +768,10 @@ export default function SMSReviewScreen({navigation}: any) {
       if (thenRecheck) {
         await recheck();
       }
-    } catch (e) {
+    } catch (e: any) {
+      // Never silent: a swallowed error here looked like a dead Confirm button.
       console.warn('[SMSReview] confirm error:', e);
+      toast.show(`Could not confirm: ${e?.message ?? 'unknown error'}`, {type: 'danger', duration: 5000});
     }
   };
 
@@ -885,8 +887,10 @@ export default function SMSReviewScreen({navigation}: any) {
         }
       }
       await recheck();
-    } catch (e) {
+    } catch (e: any) {
+      // Never silent: a swallowed error here looked like a dead Confirm button.
       console.warn('[SMSReview] fix error:', e);
+      toast.show(`Could not save the fix: ${e?.message ?? 'unknown error'}`, {type: 'danger', duration: 5000});
     }
   };
 

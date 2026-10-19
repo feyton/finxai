@@ -47,6 +47,7 @@ import {ignoredSmsId} from '../tools/txnId';
 import {
   backfillMerchantLocations,
   backfillPayCodes,
+  purgeAlreadyFiled,
   purgeNonTransactions,
   findAccountForSms,
   persistParsedSms,
@@ -201,6 +202,8 @@ const SMSRetriever: React.FC = () => {
 
       // Ads/notices queued before the notATransaction gate existed.
       await purgeNonTransactions(db, userId!);
+      // Pending copies of transactions that are already filed (sync leftovers).
+      await purgeAlreadyFiled(db, userId!);
 
       // Tier 2: give past money-out rows the place their merchant is known
       // for. Local lookup against positions already captured — no GPS, no

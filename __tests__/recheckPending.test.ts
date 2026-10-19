@@ -5,7 +5,7 @@
  * the ingest prefilter's and no lower: an EXACT rule match files, a fuzzy one
  * stays for review. Invented data only (public repo).
  */
-import {recheckPending, undoRecheck} from '../src/tools/smsIngest';
+import {promoteAutoRecord, recheckPending, undoRecheck} from '../src/tools/smsIngest';
 import {normalizeMerchant} from '../shared/merchantNormalize';
 import {findRuleForNames} from '../src/tools/smsParser';
 
@@ -137,5 +137,47 @@ describe('undoRecheck', () => {
       expect(back.sql).toContain(col);
       expect(back.params).toContain(val);
     }
+  });
+});
+
+describe('promoteAutoRecord when the transaction is already filed', () => {
+  // A pending copy that synced back beside its own transaction. Confirming it
+  // used to throw UNIQUE and the screen swallowed it — a dead Confirm button.
+  function filedDb() {
+    const calls: {sql: string; params: any[]}[] = [];
+    return {
+      calls,
+      execute: jest.fn(async (sql: string, params: any[] = []) => {
+        calls.push({sql, params});
+        if (/SELECT 1 FROM transactions WHERE id/.test(sql)) {
+          return {rows: {_array: [{1: 1}]}};
+        }
+        return {rows: {_array: []}};
+      }),
+    };
+  }
+  const rec = pending('dup', 'Hope Bread');
+
+  it('Confirm clears the stale pending copy and leaves the filed row alone', async () => {
+    const db = filedDb();
+    await promoteAutoRecord(db, {record: rec, ownerId: OWNER, direction: 'debit', balanceAfter: null});
+    expect(db.calls.some(c => c.sql.includes('INSERT INTO transactions'))).toBe(false);
+    expect(db.calls.some(c => c.sql.includes('UPDATE transactions'))).toBe(false);
+    expect(db.calls.find(c => c.sql.startsWith('DELETE FROM auto_records'))!.params).toEqual(['dup']);
+  });
+
+  it('Fix applies the user\'s choice to the filed row instead of inserting again', async () => {
+    const db = filedDb();
+    await promoteAutoRecord(db, {
+      record: rec,
+      ownerId: OWNER,
+      direction: 'debit',
+      balanceAfter: null,
+      overrides: {category: 'food', subcategory: 'Bakery', merchant: 'Hope Bread'},
+    });
+    expect(db.calls.some(c => c.sql.includes('INSERT INTO transactions'))).toBe(false);
+    const upd = db.calls.find(c => c.sql.includes('UPDATE transactions'))!;
+    expect(upd.params).toEqual(expect.arrayContaining(['food', 'Bakery', 'Hope Bread', 'dup']));
+    expect(db.calls.some(c => c.sql.startsWith('DELETE FROM auto_records'))).toBe(true);
   });
 });
