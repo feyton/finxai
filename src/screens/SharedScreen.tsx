@@ -10,7 +10,7 @@ import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {appAlert} from '../Components/AppDialog';
 import {reconnect} from '../tools/database';
-import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
+import {FONTS, R, T, accountIcon, accountTint, fmtAmount, fmtBalance} from '../theme';
 
 export default function SharedScreen({navigation}: any) {
   const db = usePowerSync();
@@ -134,7 +134,7 @@ export default function SharedScreen({navigation}: any) {
                     </Text>
                   </View>
                   <View style={{alignItems: 'flex-end', gap: 2}}>
-                    <Text style={styles.rowAmt}>RWF {fmtAmount(a.available_balance ?? 0)}</Text>
+                    <Text style={styles.rowAmt}>RWF {fmtBalance(a.available_balance ?? 0)}</Text>
                     <Icon name="ChevronRight" size={14} color={T.text3} strokeWidth={2} />
                   </View>
                 </Pressable>

@@ -1,6 +1,6 @@
 import React from 'react';
 import {FlexWidget, ListWidget, TextWidget} from 'react-native-android-widget';
-import {T, accountTint, fmtAmount} from '../theme';
+import {T, accountTint, fmtAmount, fmtBalance} from '../theme';
 import type {WidgetAccountsData} from './widgetData';
 
 // Special clickAction (not a library reserved word) — widgetTaskHandler.tsx
@@ -33,7 +33,7 @@ export function BalanceWidget({totalBalance, accounts}: WidgetAccountsData) {
         <FlexWidget style={{flexDirection: 'column'}}>
           <TextWidget text="Total balance" style={{fontSize: 12, color: hex(T.text2)}} />
           <TextWidget
-            text={`RWF ${fmtAmount(totalBalance)}`}
+            text={`RWF ${fmtBalance(totalBalance)}`}
             style={{fontSize: 20, fontWeight: 'bold', color: hex(T.text)}}
           />
         </FlexWidget>
@@ -86,7 +86,7 @@ export function BalanceWidget({totalBalance, accounts}: WidgetAccountsData) {
               />
             </FlexWidget>
             <TextWidget
-              text={fmtAmount(account.available_balance ?? 0)}
+              text={fmtBalance(account.available_balance ?? 0)}
               style={{fontSize: 13, color: hex(T.text), fontWeight: '600'}}
             />
           </FlexWidget>

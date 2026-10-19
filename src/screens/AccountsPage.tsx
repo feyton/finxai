@@ -14,7 +14,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {reconnect} from '../tools/database';
-import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
+import {FONTS, R, T, accountIcon, accountTint, fmtAmount, fmtBalance} from '../theme';
 import {refreshBalanceWidget} from '../widgets/refreshWidget';
 
 function AccountCard({
@@ -53,7 +53,7 @@ function AccountCard({
       </View>
       <View style={styles.accountRight}>
         <Text style={styles.accountBalance}>
-          RWF {fmtAmount(account.available_balance ?? 0)}
+          RWF {fmtBalance(account.available_balance ?? 0)}
         </Text>
         {account.number ? (
           <Text style={styles.accountNumber}>{account.number}</Text>
@@ -129,7 +129,7 @@ export default function AccountsPage({navigation}: any) {
       {(accounts as any[]).length > 0 && (
         <View style={styles.totalCard}>
           <Text style={styles.totalLabel}>Total balance</Text>
-          <Text style={styles.totalBalance}>RWF {fmtAmount(totalBalance)}</Text>
+          <Text style={styles.totalBalance}>RWF {fmtBalance(totalBalance)}</Text>
           <Text style={styles.totalSub}>{(accounts as any[]).length} account{(accounts as any[]).length !== 1 ? 's' : ''}</Text>
         </View>
       )}

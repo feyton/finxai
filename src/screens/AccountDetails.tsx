@@ -23,7 +23,7 @@ import {useCurrentUser} from '../hooks/useCurrentUser';
 import {useKeyboardHeight} from '../hooks/useKeyboardHeight';
 import {sendInviteEmail} from '../tools/invites';
 import {syncAccountBalance} from '../tools/balance';
-import {FONTS, R, T, accountIcon, accountTint, fmtAmount} from '../theme';
+import {FONTS, R, T, accountIcon, accountTint, fmtAmount, fmtBalance} from '../theme';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -419,7 +419,7 @@ export default function AccountDetails({route, navigation}: any) {
                 )}
               </View>
               <Text style={styles.balanceValue}>
-                RWF {fmtAmount(account.available_balance ?? 0)}
+                RWF {fmtBalance(account.available_balance ?? 0)}
               </Text>
               <View style={styles.statsRow}>
                 <View style={styles.stat}>

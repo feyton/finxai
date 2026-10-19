@@ -107,3 +107,14 @@ export function accountIcon(name: string, type: string): string {
 export function fmtAmount(n: number): string {
   return Math.abs(Math.round(n)).toLocaleString('en-US');
 }
+
+/**
+ * A BALANCE, sign kept. fmtAmount drops the sign on purpose — callers put their
+ * own +/− on a movement — but a balance has no caller-supplied sign, so through
+ * fmtAmount an overdrawn account read as money you have: a −256,015 MoKash
+ * balance (an ad filed as an expense) showed as 256,015 and lifted the total.
+ */
+export function fmtBalance(n: number): string {
+  const r = Math.round(n);
+  return (r < 0 ? '−' : '') + fmtAmount(r);
+}

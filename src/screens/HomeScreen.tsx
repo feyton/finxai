@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
-import {T, FONTS, R, resolveCat, accountTint, accountIcon, fmtAmount} from '../theme';
+import {T, FONTS, R, resolveCat, accountTint, accountIcon, fmtAmount, fmtBalance} from '../theme';
 import {Avatar, Card, CatChip, Icon, Money, Pill, SectionHeader} from '../Components/ui';
 import SMSRetriever from '../Components/SMSRetriever';
 import {useCurrentUser} from '../hooks/useCurrentUser';
@@ -456,7 +456,7 @@ export default function HomeScreen({navigation}: any) {
               )}
             </View>
             <Text style={styles.heroAmount}>
-              {fmtAmount(totalBalance)}
+              {fmtBalance(totalBalance)}
               <Text style={styles.heroRwf}> RWF</Text>
             </Text>
             <View style={styles.heroTiles}>
@@ -512,7 +512,7 @@ export default function HomeScreen({navigation}: any) {
                     </View>
                     <Text style={styles.acctName} numberOfLines={1}>{acc.name}</Text>
                     <Text style={styles.acctBalance}>
-                      {fmtAmount(acc.available_balance ?? 0)}
+                      {fmtBalance(acc.available_balance ?? 0)}
                       <Text style={styles.acctRwf}> RWF</Text>
                     </Text>
                   </Pressable>

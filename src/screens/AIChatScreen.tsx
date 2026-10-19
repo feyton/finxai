@@ -16,7 +16,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {appAlert} from '../Components/AppDialog';
-import {T, FONTS, R, fmtAmount} from '../theme';
+import {T, FONTS, R, fmtAmount, fmtBalance} from '../theme';
 import {ToolMessage, chatTools} from '../tools/aiProxyClient';
 import {supabase} from '../tools/supabase';
 import {AiAction, anthropicToolSchemas, findAction} from '../tools/aiActions';
@@ -162,7 +162,7 @@ export default function AIChatScreen({navigation}: any) {
     const monthLabel = now.toLocaleString('en-US', {month: 'long', year: 'numeric'});
 
     const accountLines = (accounts as any[])
-      .map(a => `  • ${a.name} (${a.type}): RWF ${fmtAmount(a.available_balance ?? 0)}`)
+      .map(a => `  • ${a.name} (${a.type}): RWF ${fmtBalance(a.available_balance ?? 0)}`)
       .join('\n') || '  None yet';
 
     const recentLines = (recentTxns as any[])
@@ -192,7 +192,7 @@ TODAY: ${now.toDateString()}
 
 ## Accounts (${(accounts as any[]).length})
 ${accountLines}
-Total balance: RWF ${fmtAmount(totalBalance)}
+Total balance: RWF ${fmtBalance(totalBalance)}
 
 ## ${monthLabel} Summary
 Income:   RWF ${fmtAmount(monthlyIncome)}
