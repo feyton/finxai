@@ -61,10 +61,17 @@ const Stack = createNativeStackNavigator();
 //
 // Guarded by the auth check below it: when signed out the navigator is not
 // mounted at all, so the link resolves once the user reaches the app proper.
+//
+// initialRouteName puts Home UNDER the linked screen. Without it the stack built
+// from finxai://pay held PayMerchant alone: the back arrow's goBack() had nowhere
+// to go, hardware back backgrounded the app, and reopening it landed right back
+// on Pay again — a loop only killing the app escaped.
 const LINKING = {
   prefixes: ['finxai://'],
   config: {
+    initialRouteName: 'Home' as const,
     screens: {
+      Home: '',
       PayMerchant: 'pay',
     },
   },

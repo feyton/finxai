@@ -33,8 +33,12 @@ function monthStart() {
 }
 
 const QUICK_ACTIONS = [
+  // First because it is the one errand done several times a week. It used to be
+  // reachable only from a small icon in the Records header or the launcher
+  // long-press shortcut, which is no way to find a feature meant to save steps.
+  {id: 'PayMerchant', label: 'Pay again', icon: 'Phone', tint: '#22C55E'},
   {id: 'Debt', label: 'Debt', icon: 'Coins', tint: '#34D399'},
-  {id: 'Shopping', label: 'Shopping', icon: 'ShoppingCart', tint: '#22C55E'},
+  {id: 'Shopping', label: 'Shopping', icon: 'ShoppingCart', tint: '#A78BFA'},
   {id: 'Shared', label: 'Shared', icon: 'Users', tint: '#60A5FA'},
   {id: 'Schedule', label: 'Schedule', icon: 'Calendar', tint: '#FBBF24'},
 ];

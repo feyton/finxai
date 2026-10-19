@@ -29,14 +29,15 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import {SafeAreaView} from 'react-native-safe-area-context';
+import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {formatDistanceToNowStrict} from 'date-fns';
 
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
+import {useKeyboardHeight} from '../hooks/useKeyboardHeight';
 import {normalizeMerchant} from '../tools/merchantNormalize';
-import {buildUssd, ussdTelUrl} from '../tools/ussd';
-import {FONTS, R, T} from '../theme';
+import {buildUssd, railFor, ussdTelUrl} from '../tools/ussd';
+import {FONTS, R, T, fmtAmount} from '../theme';
 import {appAlert} from '../Components/AppDialog';
 
 // How many payments make someone a "regular" worth suggesting unprompted.
@@ -44,7 +45,7 @@ import {appAlert} from '../Components/AppDialog';
 const REGULAR_MIN = 5;
 
 /**
- * "…, last 3 days ago", or nothing at all.
+ * "3 days ago", or nothing at all.
  *
  * date-fns THROWS a RangeError on an invalid date rather than returning a
  * placeholder, and this runs inside a list row — one malformed date_time (a
@@ -59,8 +60,12 @@ function lastSeen(at: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) {
     return '';
   }
-  return `, last ${formatDistanceToNowStrict(d, {addSuffix: true})}`;
+  return formatDistanceToNowStrict(d, {addSuffix: true});
 }
+
+const digits = (s: string) => parseInt(s.replace(/\D/g, ''), 10) || 0;
+
+const isPerson = (channel?: string | null) => railFor(channel) === 'sendmoney';
 
 interface Payee {
   key: string;
@@ -74,21 +79,25 @@ interface Payee {
 
 export default function PayMerchant({navigation}: any) {
   const {userId} = useCurrentUser();
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<Payee | null>(null);
   const [amount, setAmount] = useState('');
 
-  // Newest first, so the first row seen for a merchant is the most recent way
-  // they were paid — if a merchant's code ever changes, the latest wins without
-  // needing a second query to work that out.
-  const {data: rows} = useQuery(
-    `SELECT merchant, channel, pay_code, amount, date_time
+  // Aggregated in SQL, one row per (merchant, channel, code). This replaced a
+  // LIMIT 500 over raw rows, which silently undercounted anyone paid long ago
+  // and dropped them from the regulars once newer spending pushed them out of
+  // the window. `amount` relies on SQLite's bare-column rule for MAX(): it comes
+  // from the same row as MAX(date_time), i.e. the group's most recent payment.
+  const {data: groups} = useQuery(
+    `SELECT merchant, channel, pay_code, amount,
+            MAX(date_time) AS last_at, COUNT(*) AS n
        FROM transactions
       WHERE owner_id = ?
         AND pay_code IS NOT NULL AND pay_code != ''
         AND channel IS NOT NULL
-      ORDER BY date_time DESC
-      LIMIT 500`,
+      GROUP BY merchant, channel, pay_code`,
     [userId ?? ''],
   );
 
@@ -100,53 +109,70 @@ export default function PayMerchant({navigation}: any) {
     [userId ?? ''],
   );
 
+  // What this payee is usually paid, most frequent first. For a recurring
+  // payment the amount is the only thing left to type, and it is usually one
+  // of a handful of figures — so offer those as one tap each.
+  const {data: amountRows} = useQuery(
+    `SELECT amount, COUNT(*) AS n
+       FROM transactions
+      WHERE owner_id = ? AND pay_code = ? AND amount > 0
+      GROUP BY amount
+      ORDER BY n DESC, MAX(date_time) DESC
+      LIMIT 4`,
+    [userId ?? '', selected?.payCode ?? ''],
+  );
+  const usualAmounts = useMemo(
+    () => ((amountRows as any[]) ?? []).map(r => Math.round(r.amount)),
+    [amountRows],
+  );
+
   const payees = useMemo(() => {
     const rules = new Map<string, any>();
     for (const r of (ruleRows as any[]) ?? []) {
       rules.set(r.pattern, r);
     }
 
-    // Counted across ALL rows for a payee, then built once. Doing both in a
-    // single pass got this wrong: the count started from whichever row first
-    // produced a dialable entry, so a merchant whose latest payment used a rail
-    // we cannot rebuild lost its history along with it.
-    const byKey = new Map<string, {rowsSeen: any[]}>();
-    for (const r of (rows as any[]) ?? []) {
-      // Grouping on the normalised key, not the raw name, so "THRIVE G Ltd" and
-      // "Thrive G" are one payee rather than two rows that pay the same code.
-      const key = normalizeMerchant(r.merchant ?? '').key;
+    // Grouping on the normalised key, not the raw name, so "THRIVE G Ltd" and
+    // "Thrive G" are one payee rather than two rows that pay the same code.
+    const byKey = new Map<string, any[]>();
+    for (const g of (groups as any[]) ?? []) {
+      const key = normalizeMerchant(g.merchant ?? '').key;
       if (!key) {
         continue;
       }
-      const bucket = byKey.get(key) ?? {rowsSeen: []};
-      bucket.rowsSeen.push(r);
-      byKey.set(key, bucket);
+      byKey.set(key, [...(byKey.get(key) ?? []), g]);
     }
 
     const out: Payee[] = [];
-    for (const [key, {rowsSeen}] of byKey) {
+    for (const [key, gs] of byKey) {
       const rule = rules.get(key);
-      // rowsSeen is newest-first (the query orders by date), so the first row
-      // we can actually dial is the most recent usable way to pay them.
-      const usable = rowsSeen.find(r =>
+      // Counted across ALL groups, then built from the newest one we can dial:
+      // a payee whose latest payment used a rail we cannot rebuild keeps its
+      // history rather than losing it along with that payment.
+      gs.sort((a, b) => String(b.last_at).localeCompare(String(a.last_at)));
+      const usable = gs.find(g =>
         buildUssd({
-          channel: rule?.channel ?? r.channel,
-          payCode: rule?.pay_code ?? r.pay_code,
+          channel: rule?.channel ?? g.channel,
+          payCode: rule?.pay_code ?? g.pay_code,
         }),
       );
       // Omit rather than show a dead row.
       if (!usable) {
         continue;
       }
-      const norm = normalizeMerchant(usable.merchant ?? '');
       out.push({
         key,
-        name: (rule?.display_name || usable.merchant || norm.display || '').trim(),
+        name: (
+          rule?.display_name ||
+          usable.merchant ||
+          normalizeMerchant(usable.merchant ?? '').display ||
+          ''
+        ).trim(),
         channel: rule?.channel ?? usable.channel,
         payCode: rule?.pay_code ?? usable.pay_code,
         lastAmount: Math.round(usable.amount ?? 0),
-        lastAt: usable.date_time,
-        times: rowsSeen.length,
+        lastAt: usable.last_at,
+        times: gs.reduce((s, g) => s + (g.n ?? 0), 0),
       });
     }
     // Habit first, recency second: the person you pay weekly should be at the
@@ -154,7 +180,7 @@ export default function PayMerchant({navigation}: any) {
     return out.sort(
       (a, b) => b.times - a.times || String(b.lastAt).localeCompare(String(a.lastAt)),
     );
-  }, [rows, ruleRows]);
+  }, [groups, ruleRows]);
 
   const regulars = useMemo(() => payees.filter(p => p.times >= REGULAR_MIN), [payees]);
 
@@ -174,6 +200,18 @@ export default function PayMerchant({navigation}: any) {
     );
   }, [payees, regulars, q]);
 
+  // Reached from the launcher shortcut there may be nothing beneath this
+  // screen (App.tsx's LINKING now puts Home there, but a stack Android restores
+  // can still lack it). goBack() on an empty stack is a silent no-op, which is
+  // how this screen used to trap people until they killed the app.
+  const leave = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.reset({index: 0, routes: [{name: 'Home'}]});
+    }
+  };
+
   const open = (p: Payee) => {
     setSelected(p);
     // Prefilled with what you last paid them, because for most recurring payees
@@ -181,16 +219,12 @@ export default function PayMerchant({navigation}: any) {
     setAmount(p.lastAmount > 0 ? String(p.lastAmount) : '');
   };
 
+  const value = digits(amount);
+  const ussd = selected
+    ? buildUssd({channel: selected.channel, payCode: selected.payCode, amount: value})
+    : null;
+
   const dial = async () => {
-    if (!selected) {
-      return;
-    }
-    const value = parseInt(amount.replace(/\D/g, ''), 10) || 0;
-    const ussd = buildUssd({
-      channel: selected.channel,
-      payCode: selected.payCode,
-      amount: value,
-    });
     if (!ussd) {
       appAlert('Cannot build the payment', 'This payee is missing a usable code.');
       return;
@@ -199,10 +233,7 @@ export default function PayMerchant({navigation}: any) {
       await Linking.openURL(ussdTelUrl(ussd));
       setSelected(null);
     } catch {
-      appAlert(
-        'Could not open the dialer',
-        `Dial this yourself:\n\n${ussd}`,
-      );
+      appAlert('Could not open the dialer', `Dial this yourself:\n\n${ussd}`);
     }
   };
 
@@ -210,30 +241,47 @@ export default function PayMerchant({navigation}: any) {
     <Pressable
       onPress={() => open(item)}
       style={({pressed}) => [styles.row, {opacity: pressed ? 0.7 : 1}]}>
-      <View style={styles.rowIcon}>
-        <Icon name="ShoppingBag" size={17} color={T.accent} strokeWidth={2.2} />
+      <View style={styles.avatar}>
+        <Icon
+          name={isPerson(item.channel) ? 'User' : 'ShoppingBag'}
+          size={17}
+          color={T.accent}
+          strokeWidth={2.2}
+        />
       </View>
       <View style={{flex: 1}}>
         <Text style={styles.rowName} numberOfLines={1}>
           {item.name}
         </Text>
         <Text style={styles.rowMeta} numberOfLines={1}>
-          {item.channel} · {item.payCode} · paid {item.times}×{lastSeen(item.lastAt)}
+          {isPerson(item.channel) ? 'Send money' : 'MoMoPay'} · {item.payCode}
         </Text>
       </View>
-      <Icon name="Phone" size={16} color={T.text3} strokeWidth={2.2} />
+      <View style={styles.rowRight}>
+        {item.lastAmount > 0 && (
+          <Text style={styles.rowAmt}>{fmtAmount(item.lastAmount)}</Text>
+        )}
+        <Text style={styles.rowMeta} numberOfLines={1}>
+          {item.times}× · {lastSeen(item.lastAt)}
+        </Text>
+      </View>
     </Pressable>
   );
+
+  const searching = q.trim().length > 0;
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
         <Pressable
-          onPress={() => navigation.goBack()}
+          onPress={leave}
           style={({pressed}) => [styles.iconBtn, {opacity: pressed ? 0.7 : 1}]}>
           <Icon name="ArrowLeft" size={18} color={T.text} strokeWidth={2.2} />
         </Pressable>
-        <Text style={styles.title}>Pay again</Text>
+        <View>
+          <Text style={styles.title}>Pay again</Text>
+          <Text style={styles.subtitle}>Pick who, confirm the amount, press call.</Text>
+        </View>
       </View>
 
       <View style={styles.searchWrap}>
@@ -241,30 +289,38 @@ export default function PayMerchant({navigation}: any) {
         <TextInput
           value={q}
           onChangeText={setQ}
-          placeholder="Search a merchant or code"
+          placeholder="Search any payee by name or code"
           placeholderTextColor={T.text3}
           style={styles.search}
           autoCorrect={false}
         />
-        {q.length > 0 && (
+        {searching && (
           <Pressable onPress={() => setQ('')} hitSlop={8}>
             <Icon name="X" size={16} color={T.text3} strokeWidth={2.2} />
           </Pressable>
         )}
       </View>
 
+      {filtered.length > 0 && (
+        <Text style={styles.section}>
+          {searching
+            ? `${filtered.length} ${filtered.length === 1 ? 'match' : 'matches'}`
+            : 'Your regulars'}
+        </Text>
+      )}
+
       <FlatList
         data={filtered}
         keyExtractor={p => p.key}
         renderItem={renderItem}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, {paddingBottom: 16 + insets.bottom}]}
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
               {payees.length === 0
                 ? 'No payees yet. Once you pay someone by MoMo, the confirmation SMS teaches FinXAI their code and they appear here.'
-                : q.trim()
+                : searching
                 ? 'No match.'
                 : // Regulars are empty but payees exist: say so, or the ones we
                   // are hiding look like data the app lost.
@@ -274,52 +330,91 @@ export default function PayMerchant({navigation}: any) {
         }
       />
 
+      {/* A bottom sheet rather than a centred dialog: the thumb is already at
+          the bottom, and the keyboard pushes the sheet up instead of covering
+          the pay button. */}
       <Modal
         visible={!!selected}
         transparent
-        animationType="fade"
+        statusBarTranslucent
+        animationType="slide"
         onRequestClose={() => setSelected(null)}>
-        <Pressable style={styles.backdrop} onPress={() => setSelected(null)}>
-          <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
-            <Text style={styles.sheetName} numberOfLines={1}>
-              {selected?.name}
-            </Text>
-            <Text style={styles.sheetMeta}>
-              {selected?.channel} · {selected?.payCode}
-            </Text>
+        <View style={{flex: 1, paddingBottom: keyboardHeight}}>
+          <Pressable style={styles.backdrop} onPress={() => setSelected(null)} />
+          <View style={[styles.sheet, {paddingBottom: 20 + (keyboardHeight ? 0 : insets.bottom)}]}>
+            <View style={styles.handle} />
+            <View style={styles.sheetHead}>
+              <View style={styles.avatar}>
+                <Icon
+                  name={isPerson(selected?.channel) ? 'User' : 'ShoppingBag'}
+                  size={17}
+                  color={T.accent}
+                  strokeWidth={2.2}
+                />
+              </View>
+              <View style={{flex: 1}}>
+                <Text style={styles.sheetName} numberOfLines={1}>
+                  {selected?.name}
+                </Text>
+                <Text style={styles.rowMeta}>
+                  {isPerson(selected?.channel) ? 'Send money' : 'MoMoPay'} · {selected?.payCode}
+                </Text>
+              </View>
+            </View>
 
-            <Text style={styles.label}>Amount (RWF)</Text>
-            <TextInput
-              value={amount}
-              onChangeText={setAmount}
-              keyboardType="number-pad"
-              placeholder="Leave blank to be asked"
-              placeholderTextColor={T.text3}
-              style={styles.amountInput}
-              autoFocus
-            />
+            <View style={styles.amountWrap}>
+              <Text style={styles.amountCur}>RWF</Text>
+              <TextInput
+                value={value > 0 ? fmtAmount(value) : ''}
+                onChangeText={t => setAmount(String(digits(t) || ''))}
+                keyboardType="number-pad"
+                placeholder="Enter on the call"
+                placeholderTextColor={T.text3}
+                style={styles.amountInput}
+                selectTextOnFocus
+              />
+            </View>
+
+            {usualAmounts.length > 0 && (
+              <View style={styles.chips}>
+                {usualAmounts.map(a => {
+                  const on = a === value;
+                  return (
+                    <Pressable
+                      key={a}
+                      onPress={() => setAmount(String(a))}
+                      style={[styles.chip, on && styles.chipOn]}>
+                      <Text style={[styles.chipText, on && {color: T.accent}]}>
+                        {fmtAmount(a)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
 
             {/* Showing the exact string is the honesty check: the user sees
                 what will be dialled before the dialer opens. */}
-            <Text style={styles.preview} numberOfLines={1}>
-              {buildUssd({
-                channel: selected?.channel,
-                payCode: selected?.payCode,
-                amount: parseInt(amount.replace(/\D/g, ''), 10) || 0,
-              })}
-            </Text>
+            <View style={styles.preview}>
+              <Text style={styles.previewLabel}>Will dial</Text>
+              <Text style={styles.previewCode} numberOfLines={1}>
+                {ussd}
+              </Text>
+            </View>
 
             <Pressable
               onPress={dial}
               style={({pressed}) => [styles.dialBtn, {opacity: pressed ? 0.85 : 1}]}>
               <Icon name="Phone" size={17} color={T.accentInk} strokeWidth={2.4} />
-              <Text style={styles.dialText}>Open dialer</Text>
+              <Text style={styles.dialText}>
+                {value > 0 ? `Pay RWF ${fmtAmount(value)}` : 'Open dialer'}
+              </Text>
             </Pressable>
             <Text style={styles.footnote}>
-              You still press call — FinXAI never places the call itself.
+              Opens your dialer pre-filled. You still press call.
             </Text>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -327,16 +422,17 @@ export default function PayMerchant({navigation}: any) {
 
 const styles = StyleSheet.create({
   root: {flex: 1, backgroundColor: T.bg},
-  header: {flexDirection: 'row', alignItems: 'center', gap: 10, padding: 16},
+  header: {flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16},
   iconBtn: {
     width: 36,
     height: 36,
-    borderRadius: R.small,
+    borderRadius: R.iconBtn,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: T.surface,
   },
   title: {fontFamily: FONTS.semibold, fontSize: 17, color: T.text},
+  subtitle: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3},
   searchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -346,27 +442,40 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: R.small,
     backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: T.border,
   },
   search: {flex: 1, fontFamily: FONTS.regular, fontSize: 14, color: T.text, padding: 0},
-  list: {padding: 16, gap: 8},
+  section: {
+    fontFamily: FONTS.medium,
+    fontSize: 12,
+    color: T.text3,
+    marginHorizontal: 16,
+    marginTop: 18,
+  },
+  list: {padding: 16, paddingTop: 10, gap: 8},
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     padding: 12,
-    borderRadius: R.small,
+    borderRadius: R.card,
     backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: T.border,
   },
-  rowIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: R.small,
+  avatar: {
+    width: 38,
+    height: 38,
+    borderRadius: R.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: T.bg,
+    backgroundColor: T.accentSoft,
   },
   rowName: {fontFamily: FONTS.semibold, fontSize: 14.5, color: T.text},
   rowMeta: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3, marginTop: 2},
+  rowRight: {alignItems: 'flex-end', maxWidth: '40%'},
+  rowAmt: {fontFamily: FONTS.semibold, fontSize: 14, color: T.text2},
   empty: {padding: 24},
   emptyText: {
     fontFamily: FONTS.regular,
@@ -375,45 +484,69 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center',
-    padding: 24,
+  backdrop: {flex: 1, backgroundColor: 'rgba(0,0,0,0.55)'},
+  sheet: {
+    backgroundColor: T.surface,
+    borderTopLeftRadius: R.large,
+    borderTopRightRadius: R.large,
+    paddingHorizontal: 20,
+    paddingTop: 10,
   },
-  sheet: {backgroundColor: T.surface, borderRadius: R.card, padding: 20},
+  handle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: R.pill,
+    backgroundColor: T.border2,
+    marginBottom: 16,
+  },
+  sheetHead: {flexDirection: 'row', alignItems: 'center', gap: 12},
   sheetName: {fontFamily: FONTS.semibold, fontSize: 17, color: T.text},
-  sheetMeta: {fontFamily: FONTS.regular, fontSize: 12.5, color: T.text3, marginTop: 3},
-  label: {
-    fontFamily: FONTS.medium,
-    fontSize: 12,
-    color: T.text3,
-    marginTop: 18,
-    marginBottom: 6,
+  amountWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 20,
+    height: 60,
+    paddingHorizontal: 16,
+    borderRadius: R.card,
+    backgroundColor: T.bg,
+    borderWidth: 1,
+    borderColor: T.border2,
   },
-  amountInput: {
-    height: 48,
+  amountCur: {fontFamily: FONTS.medium, fontSize: 14, color: T.text3},
+  amountInput: {flex: 1, padding: 0, fontFamily: FONTS.bold, fontSize: 24, color: T.text},
+  chips: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12},
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: R.pill,
+    backgroundColor: T.surface2,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  chipOn: {borderColor: T.accent, backgroundColor: T.accentSoft},
+  chipText: {fontFamily: FONTS.medium, fontSize: 13, color: T.text2},
+  preview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderRadius: R.small,
     backgroundColor: T.bg,
-    paddingHorizontal: 14,
-    fontFamily: FONTS.semibold,
-    fontSize: 18,
-    color: T.text,
   },
-  preview: {
-    fontFamily: FONTS.regular,
-    fontSize: 12.5,
-    color: T.accent,
-    marginTop: 10,
-    textAlign: 'center',
-  },
+  previewLabel: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3},
+  previewCode: {fontFamily: FONTS.semibold, fontSize: 13, color: T.accent, flexShrink: 1},
   dialBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    height: 50,
-    borderRadius: R.small,
+    height: 52,
+    borderRadius: R.card,
     backgroundColor: T.accent,
     marginTop: 16,
   },
