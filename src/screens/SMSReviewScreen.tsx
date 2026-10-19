@@ -2,7 +2,9 @@ import {usePowerSync, useQuery} from '@powersync/react-native';
 import React, {useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
+  AppState,
   FlatList,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -37,6 +39,12 @@ import {
   undoRecheck,
 } from '../tools/smsIngest';
 import {isUsablePattern, normalizeMerchant} from '../../shared/merchantNormalize';
+import {pendingNoteFor, withdrawQuestions} from '../tools/reviewNotify';
+import {
+  type LocationState,
+  getLocationState,
+  requestLocationAlways,
+} from '../tools/locationPermission';
 import {buildUssd, railFor} from '../tools/ussd';
 
 function uuid(): string {
@@ -112,6 +120,11 @@ function FixSheet({
       // so this is always blank today — read it anyway so the sheet keeps
       // working unchanged if that column is ever added.
       setNote(record.note ?? '');
+      // A description typed into the review notification while the AI was
+      // unreachable is kept on the device (see reviewNotify) — offer it here.
+      if (!record.note) {
+        pendingNoteFor(record.id).then(n => n && setNote(cur => cur || n));
+      }
       setAccountId(record.account_id ?? '');
       setFixType(
         record.transaction_type === 'income'
@@ -665,7 +678,9 @@ function GroupHeader({
 }
 
 // ── Screen ─────────────────────────────────────────────────────
-export default function SMSReviewScreen({navigation}: any) {
+export default function SMSReviewScreen({navigation, route}: any) {
+  // finxai://review/<id> — a review-question notification was tapped.
+  const focusId: string | undefined = route?.params?.focusId;
   const db = usePowerSync();
   const {userId, name} = useCurrentUser();
   const toast = useToast();
@@ -683,6 +698,7 @@ export default function SMSReviewScreen({navigation}: any) {
   // ignored_sms keeps the raw body so the retriever never re-parses it.
   const handleIgnore = async (record: any) => {
     try {
+      withdrawQuestions([record.id]);
       await db.execute(
         'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         [
@@ -707,6 +723,7 @@ export default function SMSReviewScreen({navigation}: any) {
     let res: RecheckResult;
     try {
       res = await recheckPending(db, userId!);
+      withdrawQuestions(res.promoted.map(r => r.id));
     } catch (e) {
       console.warn('[SMSReview] recheck error:', e);
       return;
@@ -739,6 +756,7 @@ export default function SMSReviewScreen({navigation}: any) {
 
   const handleConfirm = async (record: any, {thenRecheck = true} = {}) => {
     try {
+      withdrawQuestions([record.id]);
       // One shared promotion path (tools/smsIngest) rather than a hand-written INSERT
       // here — four copies of this column list is what silently dropped the location.
       const {txType} = await promoteAutoRecord(db, {
@@ -831,6 +849,7 @@ export default function SMSReviewScreen({navigation}: any) {
 
   const handleFix = async (record: any, fix: Fix) => {
     try {
+      withdrawQuestions([record.id]);
       // The USER's chosen type wins — this is where "set as transfer" during
       // review happens (and trains the AI below).
       const txType = fix.type;
@@ -912,13 +931,48 @@ export default function SMSReviewScreen({navigation}: any) {
     }
     return [...by.values()].sort((a, b) => b.length - a.length);
   }, [records]);
-  const rows = useMemo(
-    () =>
-      groups.flatMap(g =>
-        g.map((r, i) => ({record: r, group: i === 0 && g.length > 1 ? g : null})),
+  const rows = useMemo(() => {
+    const all = groups.flatMap(g =>
+      g.map((r, i) => ({
+        record: r,
+        group: i === 0 && g.length > 1 ? g : null,
+        focused: false,
+      })),
+    );
+    // The record a notification was about goes first, outlined, out of its
+    // group: you came for that one, so it should not be 30 cards down.
+    const hit = focusId ? all.find(x => x.record.id === focusId) : undefined;
+    if (!hit) {
+      return all;
+    }
+    return [
+      {record: hit.record, group: null, focused: true},
+      ...all.filter(x => x !== hit).map(x =>
+        // Its group header moved with it only if it led the group; re-attach.
+        x.group?.some((r: any) => r.id === focusId) ? {...x, group: null} : x,
       ),
-    [groups],
-  );
+    ];
+  }, [groups, focusId]);
+
+  // Location tagging was opt-in from a corner of AI Settings, so on a real phone
+  // it had simply never been turned on — every payment arrived without a place.
+  // Offered here instead, where the cost of not having it is visible.
+  const [locState, setLocState] = useState<LocationState>('always');
+  useEffect(() => {
+    const check = () => getLocationState().then(setLocState);
+    check();
+    // "Allow all the time" is granted in system settings, not a dialog; re-check
+    // when the user comes back from there.
+    const sub = AppState.addEventListener('change', st => st === 'active' && check());
+    return () => sub.remove();
+  }, []);
+  const enableLocation = async () => {
+    const next = await requestLocationAlways();
+    setLocState(next);
+    if (next === 'foreground') {
+      Linking.openSettings().catch(() => {});
+    }
+  };
 
   return (
     <SafeAreaView style={styles.root}>
@@ -978,8 +1032,28 @@ export default function SMSReviewScreen({navigation}: any) {
           keyExtractor={item => item.record.id}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
-          renderItem={({item: {record: item, group}}) => (
-            <>
+          ListHeaderComponent={
+            locState === 'denied' || locState === 'foreground' ? (
+              <View style={styles.locCard}>
+                <Icon name="MapPin" size={18} color={T.accent} strokeWidth={2.2} />
+                <View style={{flex: 1}}>
+                  <Text style={styles.locTitle}>Know where you paid</Text>
+                  <Text style={styles.locText}>
+                    {locState === 'foreground'
+                      ? 'Almost: set location to "Allow all the time" so payments are tagged while FinXAI is closed.'
+                      : 'Tag each payment with where it happened — including when you answer a question from a notification.'}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={enableLocation}
+                  style={({pressed}) => [styles.locBtn, {opacity: pressed ? 0.8 : 1}]}>
+                  <Text style={styles.locBtnText}>Turn on</Text>
+                </Pressable>
+              </View>
+            ) : null
+          }
+          renderItem={({item: {record: item, group, focused}}) => (
+            <View style={focused ? styles.focusRing : undefined}>
               {group && <GroupHeader group={group} onConfirmAll={handleConfirmAll} />}
               <SmsCard
                 record={item}
@@ -989,7 +1063,7 @@ export default function SMSReviewScreen({navigation}: any) {
                 onIgnore={() => handleIgnore(item)}
                 onRetry={() => handleRetry(item)}
               />
-            </>
+            </View>
           )}
         />
       )}
@@ -1054,6 +1128,22 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   list: {paddingHorizontal: 16, paddingBottom: 32, gap: 12},
+  focusRing: {borderRadius: R.card + 4, borderWidth: 2, borderColor: T.accent, padding: 2},
+  locCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    marginBottom: 4,
+    borderRadius: R.card,
+    backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  locTitle: {fontFamily: FONTS.semibold, fontSize: 14, color: T.text},
+  locText: {fontFamily: FONTS.regular, fontSize: 12, color: T.text3, marginTop: 2, lineHeight: 17},
+  locBtn: {paddingHorizontal: 14, height: 34, borderRadius: R.pill, backgroundColor: T.accent, justifyContent: 'center'},
+  locBtnText: {fontFamily: FONTS.semibold, fontSize: 12.5, color: T.accentInk},
   groupHead: {
     flexDirection: 'row',
     alignItems: 'center',

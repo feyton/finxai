@@ -24,6 +24,13 @@ class SmsHeadlessTaskService : HeadlessJsTaskService() {
 
     companion object {
         private const val TAG = "FinxaiSmsService"
+        /**
+         * Which JS task to run. Absent means 'FinxaiSmsTask' (an SMS to ingest);
+         * ReviewReplyReceiver sets 'FinxaiReviewTask' (an answer to a review
+         * question). One service for both, because the foreground-promotion and
+         * wake-lock handling here is subtle and must not exist twice.
+         */
+        const val EXTRA_TASK = "task"
         private const val CHANNEL_ID = "finxai_sms_ingest"
         private const val NOTIFICATION_ID = 4711
     }
@@ -91,9 +98,11 @@ class SmsHeadlessTaskService : HeadlessJsTaskService() {
             Log.w(TAG, "no extras on intent — nothing to ingest")
             return null
         }
-        Log.i(TAG, "starting FinxaiSmsTask")
+        val task = extras.getString(EXTRA_TASK) ?: "FinxaiSmsTask"
+        extras.remove(EXTRA_TASK)
+        Log.i(TAG, "starting $task")
         return HeadlessJsTaskConfig(
-            "FinxaiSmsTask",
+            task,
             Arguments.fromBundle(extras),
             // Generous but bounded: the task may wait on a model round-trip
             // (12s client timeout plus one retry) before writing.

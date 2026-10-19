@@ -12,6 +12,7 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
 import com.feyton.finxai.appupdate.AppUpdatePackage
+import com.feyton.finxai.review.ReviewNotifierPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -21,6 +22,7 @@ class MainApplication : Application(), ReactApplication {
             PackageList(this).packages.apply {
               // Not autolinked — this module lives in the app itself, not a library.
               add(AppUpdatePackage())
+              add(ReviewNotifierPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

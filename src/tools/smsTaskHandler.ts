@@ -11,6 +11,7 @@ import {db} from './database';
 import {supabase} from './supabase';
 import {ingestLiveSms, SmsLocation} from './smsIngest';
 import {refreshBalanceWidget} from '../widgets/refreshWidget';
+import {askAboutNewRecord} from './reviewNotify';
 
 export interface SmsTaskPayload {
   body?: string;
@@ -76,6 +77,11 @@ export async function smsTaskHandler(payload: SmsTaskPayload): Promise<void> {
     // visible there without waiting for the app to be opened.
     if (outcome === 'saved') {
       refreshBalanceWidget();
+    }
+    // Unsure what it was: ask now, while the payment is still in memory,
+    // instead of leaving it for the review queue.
+    if (outcome === 'review') {
+      await askAboutNewRecord(db, ownerId, body);
     }
   } catch (e) {
     // Never rethrow: an unhandled rejection here surfaces as a crash for an SMS

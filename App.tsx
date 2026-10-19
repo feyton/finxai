@@ -71,8 +71,16 @@ const LINKING = {
   config: {
     initialRouteName: 'Home' as const,
     screens: {
-      Home: '',
+      Home: {
+        path: '',
+        screens: {
+          // A filed review question's notification opens the transaction.
+          Transactions: 'txn/:openTxId',
+        },
+      },
       PayMerchant: 'pay',
+      // A review question's notification opens that pending record.
+      SMSReview: 'review/:focusId?',
     },
   },
 };
@@ -89,6 +97,11 @@ function App(): React.JSX.Element {
       await PermissionsAndroid.requestMultiple([
         PermissionsAndroid.PERMISSIONS.READ_SMS,
         PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
+        // Review questions arrive as notifications (src/tools/reviewNotify.ts).
+        // Declared in the manifest since the ingest service needed it, but from
+        // Android 13 it must also be ASKED for — it never was, so every
+        // notification the app posted was silently dropped.
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
       ]);
     } catch (err) {
       console.log(err);

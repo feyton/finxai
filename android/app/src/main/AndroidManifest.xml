@@ -76,6 +76,13 @@
         </intent-filter>
       </receiver>
 
+      <!-- Answers to a review question, from the notification's buttons/reply
+           box. NOT exported: only FinXAI's own PendingIntents may reach it, or
+           any app could confirm or rewrite pending transactions. -->
+      <receiver
+        android:name=".review.ReviewReplyReceiver"
+        android:exported="false" />
+
       <service
         android:name=".sms.SmsHeadlessTaskService"
         android:exported="false"

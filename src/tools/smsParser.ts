@@ -101,6 +101,17 @@ export interface ParseContext {
   // SMS sender address (e.g. 'M-Money', 'BK BANK'), used to select the
   // provider-specific prompt/extractor in ./smsFormats.
   sender?: string;
+  // What the account holder said this payment was, in their own words — typed
+  // into the review notification's reply box ("bread and milk for the house").
+  // The strongest evidence there is about THIS payment, so it outranks a
+  // merchant-wide learned rule: the shop you usually buy groceries at can still
+  // sell you a phone charger.
+  userNote?: string;
+}
+
+/** A user note, made safe to quote inside a prompt. */
+function promptNote(note: string | undefined): string {
+  return (note ?? '').replace(/["\r\n]+/g, ' ').trim().slice(0, 280);
 }
 
 // Find the learned rule for a merchant name.
@@ -943,7 +954,7 @@ export function buildClassification(
     deterministic?.name,
     ...candidateNames(raw, f, ctx?.sender ?? ''),
   ]);
-  if (preRule?.exact) {
+  if (preRule?.exact && !promptNote(ctx?.userNote)) {
     const name =
       preRule.display_name?.trim() ||
       normalizeMerchant(deterministic?.name ?? preRule.pattern).display;
@@ -1024,7 +1035,11 @@ ${format.guidance}`;
 ${ctx?.userName ? `\nAccount holder (the user): ${ctx.userName}` : ''}
 Deterministic facts (already extracted — do not change): ${factLines}
 ${ruleLines ? `\nLearned category rules:\n${ruleLines}` : ''}
-${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}`;
+${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}${
+    promptNote(ctx?.userNote)
+      ? `\n\nThe account holder described this payment in their own words: "${promptNote(ctx?.userNote)}". Trust it for category and subcategory. The merchant still comes from the SMS.`
+      : ''
+  }`;
 
   return {system, user, facts: f, formatId: format.id, deterministic};
 }
@@ -1096,7 +1111,10 @@ export function applyClassification(
       ...candidateNames(raw, f, ctx?.sender ?? ''),
     ]);
     const ruleCeiling = rule?.exact ? 0.95 : 0.9;
-    if (rule && rule.category !== 'transfer') {
+    // The user's own description of this payment beats a merchant-wide rule
+    // (see ParseContext.userNote); the rule still supplies the display name.
+    const described = !!promptNote(ctx?.userNote);
+    if (rule && rule.category !== 'transfer' && !described) {
       category = rule.category as CategoryId;
       confidence = Math.max(confidence, ruleCeiling);
     }
