@@ -336,6 +336,39 @@ export function isTransferStatusOnly(raw: string): boolean {
   );
 }
 
+// ── Messages that are not transactions at all ───────────────────
+// Every other gate asks "is this transaction failed / a duplicate restatement?";
+// nothing asked "is this a transaction?", so any message with an RWF figure in
+// it got through. MTN's "borrow up to Rwf 258000 with MoKash" ad was filed as a
+// 258,000 RWF expense on MoKash — the balance replayed to −256,015 and a month's
+// spending jumped by exactly that. A bank's "new device sign-in" alert landed in
+// the review queue as a "-0 RWF" record the same way.
+//
+// So a message must carry EVIDENCE of a completed movement: a stated balance, a
+// transaction reference, or a past-tense money verb. Ads and security notices
+// are written in the future/imperative ("borrow up to", "Kanda *182#", "contact
+// us") and carry none of the three. Requiring evidence rather than listing ad
+// phrasings means next month's campaign wording does not need a new rule.
+//
+// The verbs were checked against the whole of a real inbox, not just the eval
+// corpus: MTN writes many receipts in Kinyarwanda only — woherereje (you sent),
+// wohererejwe (you were sent), wakiriye (you received), umaze kwishyura (you
+// have paid), byagenze neza / byakunze (it went through) — and Equity's card spend is a bare "Auth for card … Amt: RWF".
+const MONEY_VERB_RE =
+  /\b(?:received|sent|paid|transferred|deposited|withdrawn|withdrew|debited|credited|deducted|charged|repaid|completed|purchased|bought|activated|recharged|topped\s+up|successful(?:ly)?|payment\s+of|transaction\s+of|deposit\s+of|auth(?:ori[sz]ation)?\s+for\s+card|woherereje|wohererejwe|wakiriye|umaze\s+kwishyura|wishyuye|byagenze\s+neza|byakunze)\b/i;
+// No leading \b: Cogebanque writes "BankRef: 2302…" as one word.
+const TXN_REF_RE =
+  /(?:\b|bank)(?:ref(?:erence)?|txn\s*id|transaction\s*id|ft\s*id|financial\s+transaction\s+id)\b\s*(?:no\.?|number)?\s*[:#.]?\s*[A-Z0-9]{4,}/i;
+
+export function notATransaction(raw: string): boolean {
+  // "Rwf. 4651" (MTN's loan-repayment template) puts a full stop after the currency.
+  const hasAmount = /(?:RWF|FRW)\.?\s*\d|\d[\d,]*\s*(?:RWF|FRW)/i.test(raw);
+  if (!hasAmount) {
+    return true;
+  }
+  return !(extractBalance(raw) != null || TXN_REF_RE.test(raw) || MONEY_VERB_RE.test(raw));
+}
+
 export interface TransferHint {
   amount: number;
   dateKey: string; // 'YYYY-MM-DD', from the confirmation message's own date

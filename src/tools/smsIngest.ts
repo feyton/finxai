@@ -15,6 +15,7 @@ import {
   candidateNames,
   extractAccountRef,
   isTransferStatusOnly,
+  notATransaction,
   maskedSuffixMatches,
   normalizeAccountNumber,
   parseSmsWithAI,
@@ -303,15 +304,21 @@ export async function ingestLiveSms(
   }
 
   // BPR-style "…is Completed" confirmations restate a transfer that its own
-  // debit alert already recorded; on their own they are not transactions.
-  if (isTransferStatusOnly(body)) {
+  // debit alert already recorded; on their own they are not transactions. Nor
+  // are ads and security notices (see notATransaction).
+  const skipReason = isTransferStatusOnly(body)
+    ? 'status'
+    : notATransaction(body)
+    ? 'not_txn'
+    : null;
+  if (skipReason) {
     await db.execute(
       'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       [
         ignoredSmsId({ownerId, sms: body, sender}),
         body,
         sender,
-        'status',
+        skipReason,
         ownerId,
         new Date().toISOString(),
       ],
@@ -574,6 +581,61 @@ export async function reclassifySms(
   );
 
   return {ok: true, merchant: parsed.merchant};
+}
+
+/**
+ * Clear ads and security notices out of the review queue.
+ *
+ * The notATransaction gate only stops NEW ones; records already queued before it
+ * existed (a bank's "new device sign-in" alert sat there as "-0 RWF") would
+ * otherwise wait for a human to Ignore each one. Moved to ignored_sms exactly as
+ * the Ignore button does, so the poller never re-parses them.
+ *
+ * Pending records only. A notice that was auto-SAVED as a transaction moved a
+ * balance, and deleting that is the user's call, not a startup sweep's.
+ *
+ * Returns the number of records cleared, for logging.
+ */
+export async function purgeNonTransactions(db: any, ownerId: string): Promise<number> {
+  try {
+    const {rows} = await db.execute(
+      'SELECT id, sms, sender FROM auto_records WHERE owner_id = ?',
+      [ownerId],
+    );
+    const junk = ((rows?._array ?? []) as any[]).filter(r =>
+      notATransaction(String(r.sms ?? '')),
+    );
+    const now = new Date().toISOString();
+    for (const r of junk) {
+      // Deterministic id, so the same body may already be ignored. Checked rather
+      // than INSERT OR IGNORE: PowerSync tables are views with INSTEAD OF
+      // triggers, where a conflict clause is not something to rely on.
+      const ignoredId = ignoredSmsId({ownerId, sms: r.sms ?? '', sender: r.sender ?? ''});
+      if (await rowExists(db, 'ignored_sms', ignoredId)) {
+        await db.execute('DELETE FROM auto_records WHERE id = ?', [r.id]);
+        continue;
+      }
+      await db.execute(
+        'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          ignoredId,
+          r.sms ?? '',
+          r.sender ?? '',
+          'not_txn',
+          ownerId,
+          now,
+        ],
+      );
+      await db.execute('DELETE FROM auto_records WHERE id = ?', [r.id]);
+    }
+    if (junk.length) {
+      console.log(`[Backfill] cleared ${junk.length} non-transaction records from review`);
+    }
+    return junk.length;
+  } catch (e) {
+    console.warn('[Backfill] non-transaction purge failed:', e);
+    return 0;
+  }
 }
 
 /**

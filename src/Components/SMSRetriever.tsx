@@ -29,6 +29,7 @@ import {
   dateKeyFromIso,
   extractTransferHint,
   isTransferStatusOnly,
+  notATransaction,
   maskedSuffixMatches,
   normalizeAccountNumber,
   parseSmsWithAI,
@@ -46,6 +47,7 @@ import {ignoredSmsId} from '../tools/txnId';
 import {
   backfillMerchantLocations,
   backfillPayCodes,
+  purgeNonTransactions,
   findAccountForSms,
   persistParsedSms,
 } from '../tools/smsIngest';
@@ -197,6 +199,9 @@ const SMSRetriever: React.FC = () => {
       // people with the most history to pay from.
       await backfillPayCodes(db, userId!);
 
+      // Ads/notices queued before the notATransaction gate existed.
+      await purgeNonTransactions(db, userId!);
+
       // Tier 2: give past money-out rows the place their merchant is known
       // for. Local lookup against positions already captured — no GPS, no
       // radio, no permission prompt.
@@ -324,10 +329,17 @@ const SMSRetriever: React.FC = () => {
 
         // Transfer status/confirmation-only message — never a transaction on
         // its own (its facts were already folded into transferHints above).
-        if (isTransferStatusOnly(sms.body)) {
+        // Ads and security notices from the same sender are not transactions
+        // either (see notATransaction — one ad was filed as a 258,000 expense).
+        const skipReason = isTransferStatusOnly(sms.body)
+          ? 'status'
+          : notATransaction(sms.body)
+          ? 'not_txn'
+          : null;
+        if (skipReason) {
           await db.execute(
             'INSERT INTO ignored_sms (id, sms, sender, reason, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-            [ignoredSmsId({ownerId: userId!, sms: sms.body, sender: account.name}), sms.body, account.name, 'status', userId, new Date().toISOString()],
+            [ignoredSmsId({ownerId: userId!, sms: sms.body, sender: account.name}), sms.body, account.name, skipReason, userId, new Date().toISOString()],
           );
           existingSmsSet.add(sms.body);
           noteProcessed(account.id, smsDate);
