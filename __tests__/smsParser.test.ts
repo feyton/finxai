@@ -533,7 +533,8 @@ describe('findRule matching', () => {
       'TxId: 1. Your payment of 1,000 RWF to Cafe Rwanda has been completed. Fee was 0 RWF.',
       {rules: [rule('cafe')]},
     );
-    expect(parsed.category).toBe('food');
+    // The rule stores the v1 id 'food'; taxonomy v2 reads it as Eating Out.
+    expect(parsed.category).toBe('eating_out');
     expect(parsed.confidence).toBeLessThan(THRESHOLD_AUTO_SAVE);
   });
 });

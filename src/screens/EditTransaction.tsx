@@ -28,6 +28,9 @@ import {
   accountIcon,
   accountTint,
   fmtAmount,
+  categoriesForDirection,
+  categoriesForType,
+  coerceForType,
   resolveCat,
 } from '../theme';
 
@@ -73,7 +76,9 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
   const [txType, setTxType] = useState<string>(tx.transaction_type ?? 'expense');
   const [amount, setAmount] = useState(String(Math.round(tx.amount ?? 0)));
   const [merchant, setMerchant] = useState<string>(tx.merchant || tx.payee || '');
-  const [category, setCategory] = useState<CategoryId>(resolveCat(tx.category ?? ''));
+  const [category, setCategory] = useState<CategoryId>(
+    resolveCat(tx.category ?? '', tx.transaction_type, tx.transfer_direction),
+  );
   const [subcategory, setSubcategory] = useState<string>(tx.subcategory ?? '');
   const [accountId, setAccountId] = useState<string>(tx.account_id ?? '');
   const [note, setNote] = useState<string>(tx.note ?? '');
@@ -94,6 +99,26 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
 
   const isTransfer = txType === 'transfer';
   const subcats = subcatsFor(category);
+  // Which way the money moves: fixed by the record (the amount's sign does not
+  // change when it is re-typed), so a transfer can only take in- or out-going
+  // transfer/loan categories.
+  const inbound =
+    tx.transaction_type === 'income' || (tx.transaction_type === 'transfer' && tx.transfer_direction === 'in');
+  const catChoices = categoriesForType(txType).filter(id =>
+    txType === 'transfer' ? categoriesForDirection(inbound ? 'in' : 'out').includes(id) : true,
+  );
+  // Re-typing keeps the IDEA where one exists (Family Support ↔ Money from
+  // Family, savings in ↔ out) and never leaves a category invalid for the type.
+  const changeType = (next: string) => {
+    setTxType(next);
+    setCategory(c => {
+      const moved = coerceForType(c, next, inbound ? 'in' : 'out');
+      if (moved !== c) {
+        setSubcategory('');
+      }
+      return moved;
+    });
+  };
   const numericAmount = Math.abs(parseInt(amount, 10) || 0);
   const partsTotal = parts.reduce((s, p) => s + p.amount, 0);
   const remaining = numericAmount - partsTotal;
@@ -173,8 +198,9 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
         [
           numericAmount,
           newAccountId,
-          isTransfer ? tx.category ?? '' : CATS[category]?.label ?? category,
-          isTransfer ? '' : subcategory,
+          // Stored as the v2 id, checked against the final type once more.
+          coerceForType(category, txType, transferDirection ?? (inbound ? 'in' : 'out')),
+          subcategory,
           merchant,
           note,
           txType,
@@ -241,7 +267,7 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
             return (
               <Pressable
                 key={t.id}
-                onPress={() => setTxType(t.id)}
+                onPress={() => changeType(t.id)}
                 style={[styles.typeChoice, on && styles.typeChoiceActive]}>
                 <Text style={[styles.typeChoiceText, on && {color: T.accent}]}>
                   {t.label}
@@ -287,12 +313,14 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
           placeholderTextColor={T.text3}
         />
 
-        {/* Category grid (vertical wrap — no horizontal scrolling) */}
-        {!isTransfer && (
+        {/* Category grid (vertical wrap — no horizontal scrolling). Only the
+            categories valid for this type: there is no income called Groceries,
+            and a transfer picks own account / savings / loan. */}
+        {(
           <>
             <Text style={styles.label}>Category</Text>
             <View style={styles.catGrid}>
-              {(Object.values(CATS) as {id: CategoryId; label: string; color: string}[]).map(c => {
+              {catChoices.map(id => CATS[id]).map(c => {
                 const on = category === c.id;
                 return (
                   <Pressable
@@ -432,7 +460,7 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
             ))}
 
             <View style={styles.wrapRow}>
-              {(Object.values(CATS) as {id: CategoryId; label: string; color: string}[]).map(c => {
+              {catChoices.map(id => CATS[id]).map(c => {
                 const on = partCat === c.id;
                 return (
                   <Pressable

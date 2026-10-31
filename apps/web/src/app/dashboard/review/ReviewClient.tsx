@@ -3,7 +3,16 @@
 import {format} from 'date-fns';
 import {useCallback, useMemo, useState} from 'react';
 import {createClient} from '@/lib/supabase/client';
-import {CATS, type CategoryId, builtinSubcats, resolveCat} from '@/lib/theme';
+import {
+  CATS,
+  type CategoryId,
+  builtinSubcats,
+  categoriesForDirection,
+  categoriesForType,
+  coerceForType,
+  resolveCat,
+} from '@/lib/theme';
+import {resolveDirection} from '@/lib/shared/smsDirection';
 import {
   ignoreAutoRecord,
   promoteAutoRecord,
@@ -81,15 +90,17 @@ export function ReviewClient({
       setBusyId(record.id);
       setErr(null);
       try {
-        const {txType} = await promoteAutoRecord(supabase, {record, ownerId, accounts});
+        const filed = await promoteAutoRecord(supabase, {record, ownerId, accounts});
         await syncAccountBalance(supabase, record.account_id ?? '');
         if (record.merchant) {
           // Confirming a transfer reinforces the transfer rule for this counterparty;
           // otherwise the category rule, exactly as the phone does it.
           await recordMerchantRule(supabase, {
             merchant: record.merchant,
-            category: txType === 'transfer' ? 'transfer' : record.category ?? '',
-            subcategory: txType === 'transfer' ? '' : record.subcategory ?? '',
+            // What was filed: a v2 id valid for the direction — transfer and loan
+            // categories included, never the generic 'transfer'.
+            category: filed.category,
+            subcategory: filed.subcategory,
             ownerId,
             kind: 'confirmation',
           });
@@ -111,7 +122,7 @@ export function ReviewClient({
       setErr(null);
       try {
         const merchant = fix.merchant || record.merchant || record.payee || '';
-        const {accountId} = await promoteAutoRecord(supabase, {
+        const {accountId, category: filedCat, subcategory: filedSub} = await promoteAutoRecord(supabase, {
           record,
           ownerId,
           accounts,
@@ -134,8 +145,8 @@ export function ReviewClient({
           // a badly-extracted counterparty is renamed on future messages too.
           await recordMerchantRule(supabase, {
             merchant,
-            category: fix.type === 'transfer' ? 'transfer' : fix.category,
-            subcategory: fix.type === 'transfer' ? '' : fix.subcategory,
+            category: filedCat,
+            subcategory: filedSub,
             ownerId,
             kind: 'correction',
             displayName: merchant,
@@ -350,7 +361,12 @@ function FixModal({
   onSave: (fix: Fix) => void;
 }) {
   const [merchant, setMerchant] = useState(record.merchant || record.payee || '');
-  const [category, setCategory] = useState<CategoryId>(resolveCat(record.category ?? ''));
+  // Which way the money moved is fixed by the SMS; re-typing never flips it.
+  // Same shared rule promoteAutoRecord uses, read from the SMS itself.
+  const inbound = resolveDirection(record.sms ?? '', {}).direction === 'credit';
+  const [category, setCategory] = useState<CategoryId>(
+    resolveCat(record.category ?? '', record.transaction_type, inbound ? 'in' : 'out'),
+  );
   const [subcategory, setSubcategory] = useState(record.subcategory ?? '');
   const [accountId, setAccountId] = useState(record.account_id ?? '');
   const [note, setNote] = useState(record.note ?? '');
@@ -417,7 +433,13 @@ function FixModal({
                 key={t.id}
                 type="button"
                 aria-pressed={type === t.id}
-                onClick={() => setType(t.id)}>
+                onClick={() => {
+                  setType(t.id);
+                  // Keep the idea where one exists (Family Support ↔ Money from
+                  // Family); never leave a category the type cannot hold.
+                  setCategory(c => coerceForType(c, t.id, inbound ? 'in' : 'out'));
+                  setSubcategory('');
+                }}>
                 {t.label}
               </button>
             ))}
@@ -468,7 +490,7 @@ function FixModal({
 
         {/* Category is meaningless for a transfer — it is money moving between the
             user's own accounts, not spending. */}
-        {type !== 'transfer' && (
+        {(
           <>
             <div>
               <label className="lbl" htmlFor="fix-category">
@@ -484,11 +506,14 @@ function FixModal({
                   // file the record under a pair that does not exist.
                   setSubcategory('');
                 }}>
-                {CAT_LIST.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.emoji} {c.label}
-                  </option>
-                ))}
+                {categoriesForType(type)
+                  .filter(id => (type === 'transfer' ? categoriesForDirection(inbound ? 'in' : 'out').includes(id) : true))
+                  .map(id => CATS[id])
+                  .map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.emoji} {c.label}
+                    </option>
+                  ))}
               </select>
             </div>
 

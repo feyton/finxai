@@ -119,7 +119,7 @@ const account_shares = new Table({
   created_at: column.text,
 });
 
-// User-created subcategories, merged with the built-in ones from data.json
+// User-created subcategories, merged with the built-in ones from shared/categories.ts
 // in every picker (see src/hooks/useSubcategories.ts).
 const subcategories = new Table({
   category: column.text,      // CategoryId ('food', 'transport', …)

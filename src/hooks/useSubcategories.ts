@@ -1,13 +1,13 @@
 /**
- * Subcategories per category = built-ins from data.json ∪ the user's custom
+ * Subcategories per category = built-ins from the shared taxonomy (each
+ * category owns its list — shared/categories.ts) ∪ the user's custom
  * ones (synced `subcategories` table). Every picker (CreateRecord, Fix sheet,
  * EditTransaction, CreateBudget, Manage Categories) goes through this hook so
  * a subcategory created anywhere shows up everywhere.
  */
 import {useQuery} from '@powersync/react-native';
 import {useMemo} from 'react';
-import {CategoryId, resolveCat} from '../theme';
-import categoriesData from '../tools/data.json';
+import {CATEGORY_IDS, CategoryId, resolveCat, subcategoriesOf} from '../theme';
 import {useCurrentUser} from './useCurrentUser';
 
 export interface SubcatOption {
@@ -33,10 +33,9 @@ export function useSubcategories() {
       }
       map.set(cat, list);
     };
-    for (const c of categoriesData.categories as any[]) {
-      const cat = resolveCat(c.name);
-      for (const s of c.subcategories ?? []) {
-        push(cat, {name: s.name, icon: s.icon, custom: false});
+    for (const cat of CATEGORY_IDS) {
+      for (const s of subcategoriesOf(cat)) {
+        push(cat, {name: s.name, icon: s.emoji, custom: false});
       }
     }
     for (const s of (customRows as any[]) ?? []) {

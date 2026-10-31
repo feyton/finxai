@@ -39,10 +39,9 @@ const MAX_PER_HOUR = 6;
 const ASKED_KEY = 'finxai.reviewAskedAt';
 
 function categoryLabel(record: any): string {
-  if (record.transaction_type === 'transfer') {
-    return 'Transfer';
-  }
-  const id = resolveCat(record.category ?? '');
+  // Transfers name their real category too (taxonomy v2): "To Savings",
+  // "Loan Repayment" — not a generic "Transfer".
+  const id = resolveCat(record.category ?? '', record.transaction_type, record.transfer_direction);
   const label = (id && CATS[id]?.label) || record.category || 'Other';
   return record.subcategory ? `${label} › ${record.subcategory}` : label;
 }
@@ -224,7 +223,7 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
     const placed = record.lat != null && pendingRow.lat == null ? ' · place saved' : '';
 
     if (payload.kind === 'confirm') {
-      const {txType, accountId} = await promoteAutoRecord(db, {
+      const {accountId, category: filedCat, subcategory: filedSub} = await promoteAutoRecord(db, {
         record,
         ownerId,
         direction: facts.direction,
@@ -242,9 +241,9 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
         await recordConfirmation(
           db,
           record.merchant,
-          txType === 'transfer' ? 'transfer' : record.category,
+          filedCat,
           ownerId,
-          txType === 'transfer' ? '' : record.subcategory ?? '',
+          filedSub,
         );
       }
       step('learned');
@@ -298,7 +297,7 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
       : parsed.direction === 'credit'
       ? 'income'
       : 'expense';
-    const {accountId} = await promoteAutoRecord(db, {
+    const {accountId, category: filedCat, subcategory: filedSub} = await promoteAutoRecord(db, {
       record,
       ownerId,
       direction: facts.direction,
@@ -314,8 +313,8 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
     step('promoted');
     const filed = categoryLabel({
       transaction_type: type,
-      category: parsed.category,
-      subcategory: parsed.subcategory,
+      category: filedCat,
+      subcategory: filedSub,
     });
     // Same as the one-tap path: answer first, upkeep after.
     finish(`Filed as ${filed}${placed} · “${note.slice(0, 40)}”`, true);
@@ -328,9 +327,9 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
       await recordConfirmation(
         db,
         parsed.merchant,
-        type === 'transfer' ? 'transfer' : parsed.category,
+        filedCat,
         ownerId,
-        type === 'transfer' ? '' : parsed.subcategory ?? '',
+        filedSub,
       );
     }
     step('learned');

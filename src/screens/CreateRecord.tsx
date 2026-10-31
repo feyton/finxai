@@ -14,9 +14,8 @@ import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {CatChip, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {useSubcategories} from '../hooks/useSubcategories';
-import {CATS, CategoryId, FONTS, R, T, accountIcon, accountTint, fmtAmount, resolveCat} from '../theme';
+import {CATS, CategoryId, FONTS, R, T, accountIcon, accountTint, categoriesForType, fmtAmount} from '../theme';
 import {rebalanceAccount} from '../tools/balance';
-import categoriesData from '../tools/data.json';
 
 function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -80,7 +79,8 @@ export default function CreateRecord({navigation}: any) {
   const [amount, setAmount] = useState('0');
   const [accountId, setAccountId] = useState<string>('');
   const [toAccountId, setToAccountId] = useState<string>('');
-  const [category, setCategory] = useState<string>('');
+  // A v2 CategoryId; stored as its label (transactions.category holds labels).
+  const [category, setCategory] = useState<CategoryId | ''>('');
   const [subcategory, setSubcategory] = useState<string>('');
   // When it actually happened. Manual entries were always stamped with the moment you
   // pressed Save, so logging yesterday's cash expense filed it under today — wrong in
@@ -100,16 +100,15 @@ export default function CreateRecord({navigation}: any) {
   const activeAccount = accountId || accountList[0]?.id || '';
   const isTransfer = type === 'transfer';
 
+  // Only categories valid for the chosen type — "there is no income called
+  // Groceries". Changing the type clears the category (see the type toggle).
   const cats = useMemo(
-    () =>
-      categoriesData.categories.filter(c =>
-        type === 'income' ? c.type === 'income' : c.type === 'expense',
-      ),
+    () => categoriesForType(type === 'income' ? 'income' : 'expense'),
     [type],
   );
 
   const {subcatsFor} = useSubcategories();
-  const subcats = category ? subcatsFor(resolveCat(category)) : [];
+  const subcats = category ? subcatsFor(category) : [];
 
   const press = (k: string) => {
     setError('');
@@ -154,7 +153,8 @@ export default function CreateRecord({navigation}: any) {
             source, confidence, transfer_account_id, transfer_direction,
             owner_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?, 1, 'RWF', ?, ?, 'transfer', '', 0, NULL, 'manual', 1, ?, 'out', ?, ?)`,
-        [generateUUID(), numericAmount, from.id, '', '', when.toISOString(), to.name, `To ${to.name}`, to.id, userId ?? '', now],
+        // Both legs are your own money moving — taxonomy v2's own_transfer, not ''.
+        [generateUUID(), numericAmount, from.id, 'own_transfer', '', when.toISOString(), to.name, `To ${to.name}`, to.id, userId ?? '', now],
       );
       await db.execute(
         `INSERT INTO transactions
@@ -163,7 +163,7 @@ export default function CreateRecord({navigation}: any) {
             source, confidence, transfer_account_id, transfer_direction,
             owner_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?, 1, 'RWF', ?, ?, 'transfer', '', 0, NULL, 'manual', 1, ?, 'in', ?, ?)`,
-        [generateUUID(), numericAmount, to.id, '', '', when.toISOString(), from.name, `From ${from.name}`, from.id, userId ?? '', now],
+        [generateUUID(), numericAmount, to.id, 'own_transfer', '', when.toISOString(), from.name, `From ${from.name}`, from.id, userId ?? '', now],
       );
       // Replay where the account has a bank-reported balance, a delta only where
       // it has none. A raw increment here stacked on top of whatever replay last
@@ -203,7 +203,9 @@ export default function CreateRecord({navigation}: any) {
           generateUUID(),
           numericAmount,
           activeAccount,
-          category || '',
+          // The v2 id (stable across renames); never blank — an unpicked category
+          // is that type's visible Other, not an empty string resolveCat must guess.
+          category || (type === 'income' ? 'other_income' : 'other_spending'),
           subcategory || '',
           // The chosen moment, not the moment Save was pressed.
           when.toISOString(),
@@ -401,15 +403,15 @@ export default function CreateRecord({navigation}: any) {
             {/* Categories */}
             <Text style={styles.sectionLabel}>Category</Text>
             <View style={styles.catGrid}>
-              {cats.map(c => {
-                const id = resolveCat(c.name) as CategoryId;
+              {cats.map(id => {
+                const c = {name: CATS[id].label};
                 const meta = CATS[id];
-                const on = category === c.name;
+                const on = category === id;
                 return (
                   <Pressable
-                    key={c.name}
+                    key={id}
                     onPress={() => {
-                      setCategory(on ? '' : c.name);
+                      setCategory(on ? '' : id);
                       setSubcategory('');
                     }}
                     style={[styles.catCell, on && {borderColor: meta.color, backgroundColor: meta.color + '14'}]}>

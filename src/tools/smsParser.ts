@@ -30,57 +30,96 @@ import {
   normalizeAccountNumber,
   resolveDirection,
 } from '../../shared/smsDirection';
-import {CATS as CAT_MAP, CategoryId, resolveCat} from '../theme';
-import categoriesData from './data.json';
+import {
+  CATEGORY_META,
+  CategoryId,
+  categoriesForDirection,
+  coerceForType,
+  matchCategory,
+  subcategoriesOf,
+  typeForCategory,
+} from '../theme';
 
-// Derived from CATS rather than hand-maintained — this string drifted out of
-// sync with theme.ts before, so the model was never told some categories
-// existed and could not pick them.
-const CATS = Object.keys(CAT_MAP).join(', ');
 const CHANNELS =
   'MoMoPay, Send money, Receive, Bank transfer, Cash Power, Airtime, Bill, Other';
 
-// One line per genuinely ambiguous boundary. A bare list of category keys gives
-// the model no way to decide the cases that actually matter in Rwanda — most of
-// all person-to-person MoMo, which can legitimately read as family, transport,
-// food, or a service depending on who the counterparty is.
+// One line per genuinely ambiguous boundary. A bare list of categories gives the
+// model no way to decide the cases that actually matter in Rwanda — most of all
+// person-to-person MoMo, which can legitimately be family, transport, food or a
+// service depending on who the counterparty is. Ids are taxonomy v2
+// (shared/categories.ts); each category's own one-line definition is in the menu.
 const CATEGORY_HINTS = [
-  '  • food vs groceries: a prepared meal/restaurant/cafe is food; supermarket or market shopping to cook later is groceries.',
-  // Measured against 263 real labelled messages: the previous version of this
-  // line said "money to/from a PERSON is family", and the model obeyed it —
-  // which produced the single largest error cluster, because the user
-  // categorises person-to-person payments by PURPOSE (paying an individual for
-  // a meal is food, for a ride is transport, being paid by one is salary), not
-  // by who the counterparty is.
-  '  • paying an individual is NOT automatically family. Rwandan MoMo is used to pay people for ordinary goods and services, so judge by purpose when the message hints at one. Use family only for genuine support/remittance between relatives.',
-  '  • a person paying the USER is usually salary or a repayment, not family.',
-  '  • IMPORTANT: for a payment to a bare personal name with no clue to the purpose ("payment of 6,300 RWF to Lambert 005868"), the category is genuinely not knowable from the message. Give your best guess but set confidence LOW (≤ 0.5) so the user is asked — their answer is then remembered for that counterparty.',
-  '  • savings is only the user moving money into their own savings pocket (e.g. Mokash), never a payment to another person.',
-  '  • airtime vs utilities: phone credit and data bundles are airtime; electricity (Cash Power), water (WASAC) and similar household services are utilities.',
-  '  • housing vs rent: a monthly rent payment is rent; purchases for the home itself (furniture, repairs, fittings) are housing.',
-  '  • personal_care vs health: salon, barber, beauty and grooming are personal_care; clinic, pharmacy and hospital are health.',
-  '  • debt vs family: repaying a loan or credit facility is debt, even when paid to a person.',
-  '  • transport: moto, taxi, bus, fuel, and ride-hailing.',
-  "  • misc: use only when nothing else fits — prefer a real category when the merchant's business is identifiable.",
+  '  • eating_out vs groceries: a prepared meal/restaurant/cafe is eating_out; supermarket or market shopping to cook or use later is groceries.',
+  // Measured against 263 real labelled messages: an earlier version said "money
+  // to/from a PERSON is family", and the model obeyed — the single largest error
+  // cluster, because the user files person-to-person payments by PURPOSE.
+  '  • paying an individual is NOT automatically family. Rwandan MoMo is used to pay people for ordinary goods and services, so judge by purpose when the message hints at one. Use family only for genuine support between relatives.',
+  '  • IMPORTANT: for a payment to a bare personal name with no clue to the purpose, the category is genuinely not knowable from the message. Give your best guess but set confidence LOW (≤ 0.5) so the user is asked — their answer is then remembered.',
+  "  • own_transfer is ONLY the user's own money moving between the user's own accounts. A payment to another person is never own_transfer.",
+  '  • to_savings: MoKash deposits, Ejo Heza, savings groups (ibimina), SACCO contributions. It is not spending.',
+  '  • loan_repayment vs family: repaying a loan (MoKash, bank, a person) is loan_repayment, even when paid to a person. Money borrowed arriving is loan_received — never income.',
+  '  • airtime vs utilities: phone credit and data bundles are airtime; electricity (Cash Power), water (WASAC), internet and TV are utilities.',
+  '  • housing: rent and spending on the home itself (repairs, furniture, domestic help).',
+  '  • personal_care vs health: salon, barber, beauty are personal_care; clinic, pharmacy, hospital, Mutuelle are health.',
+  '  • a person paying the user with no other clue: other_income with LOW confidence, not salary.',
+  '  • other_spending / other_income: only when nothing else fits — prefer a real category when the purpose is identifiable.',
 ].join('\n');
 
-// Same grouping useSubcategories() computes for the pickers (built-ins only —
-// the AI has no visibility into a user's custom subcategories), so a guess
-// here is always one the user can actually see/select in the Fix sheet.
-const SUBCATS_BY_CAT: Partial<Record<CategoryId, string[]>> = (() => {
-  const map: Partial<Record<CategoryId, string[]>> = {};
-  for (const c of (categoriesData as any).categories as any[]) {
-    const cat = resolveCat(c.name);
-    const names = (c.subcategories ?? []).map((s: any) => s.name);
-    map[cat] = [...(map[cat] ?? []), ...names];
-  }
-  return map;
-})();
+// Subcategories per category, straight from the shared taxonomy — every category
+// owns its own list now, so a guess here is always one the user can see/select.
+const SUBCATS_BY_CAT: Partial<Record<CategoryId, string[]>> = Object.fromEntries(
+  (Object.keys(CATEGORY_META) as CategoryId[]).map(id => [id, subcategoriesOf(id).map(sc => sc.name)]),
+);
 
-const SUBCATS_PROMPT_BLOCK = Object.entries(SUBCATS_BY_CAT)
-  .filter(([, names]) => (names as string[]).length > 0)
-  .map(([cat, names]) => `- ${cat}: ${(names as string[]).join(', ')}`)
-  .join('\n');
+/**
+ * The categories this SMS may take, given which way the money moved — the model
+ * is never even offered an expense category for money coming IN. One line each,
+ * with its definition and its own subcategories.
+ */
+function categoryMenu(direction: 'debit' | 'credit'): string {
+  return categoriesForDirection(direction === 'credit' ? 'in' : 'out')
+    .map(id => {
+      const m = CATEGORY_META[id];
+      const subs = m.subcategories.map(sc => sc.name).join(', ');
+      return `- ${id} (${m.label}): ${m.description}${subs ? ` Subcategories: ${subs}.` : ''}`;
+    })
+    .join('\n');
+}
+
+/** A stored rule's category as a v2 id (rules may still hold v1 ids). */
+function ruleCat(rule: {category?: string | null} | undefined | null): CategoryId | null {
+  return rule ? matchCategory(rule.category) : null;
+}
+
+/** "This counterparty is a transfer/loan" — the rule moves money, it is not spending. */
+function ruleMeansTransfer(rule: {category?: string | null} | undefined | null): boolean {
+  const c = ruleCat(rule);
+  return !!c && typeForCategory(c) === 'transfer';
+}
+
+/**
+ * Make a classification valid for the money's direction. EVERY path converges on
+ * factsToParsed, so this one step guarantees "there is no income called
+ * Groceries":
+ *  - a category that is itself a transfer/loan makes the record a transfer;
+ *  - a proven/learned transfer gets a transfer-kind category;
+ *  - a category invalid for the direction becomes its counterpart (Family Support
+ *    in → Money from Family) or that type's visible "Other";
+ *  - a subcategory that does not belong to the final category is dropped.
+ */
+function enforceDirection(
+  direction: 'debit' | 'credit',
+  category: CategoryId,
+  isTransfer: boolean,
+  subcategory: string,
+): {category: CategoryId; isTransfer: boolean; subcategory: string} {
+  const transferish = isTransfer || typeForCategory(category) === 'transfer';
+  const type = transferish ? 'transfer' : direction === 'credit' ? 'income' : 'expense';
+  const finalCat = coerceForType(category, type, direction === 'credit' ? 'in' : 'out');
+  const subs = SUBCATS_BY_CAT[finalCat] ?? [];
+  const sub = subs.find(x => x.toLowerCase() === (subcategory ?? '').toLowerCase()) ?? '';
+  return {category: finalCat, isTransfer: typeForCategory(finalCat) === 'transfer', subcategory: sub};
+}
 
 // ── Parse context: the user's own accounts, for direction + transfer match ──
 export interface OwnAccountRef {
@@ -207,7 +246,7 @@ function resolveTransfer(
     return true;
   }
   if (rule) {
-    return rule.category === 'transfer';
+    return ruleMeansTransfer(rule);
   }
   return modelSaysTransfer === true || detectTransfer(raw, userName);
 }
@@ -721,17 +760,18 @@ function regexClassify(
 
   const isCredit = facts.direction === 'credit';
   const hay = (merchant + ' ' + raw).toLowerCase();
-  let category: CategoryId = 'shopping';
-  if (facts.transferAccount) {category = 'savings';}
+  // Regex-only guesses are low-confidence by construction (they go to review), so
+  // an unknown purpose is the honest Other for the direction, never Shopping.
+  let category: CategoryId = isCredit ? 'other_income' : 'other_spending';
+  if (facts.transferAccount) {category = 'own_transfer';}
+  else if (/mokash/.test(hay)) {category = isCredit ? 'from_savings' : 'to_savings';}
   else if (/airtime|bundle|mtn(?!\s*mobile\s*money)|airtel/.test(hay)) {category = 'airtime';}
-  else if (/power|reg|electric|token|wasac|water/.test(hay)) {category = 'utilities';}
-  else if (/rent|house|apartment|kicukiro|nyamirambo/.test(hay)) {category = 'rent';}
+  else if (/power|electric|token|wasac|water/.test(hay)) {category = 'utilities';}
+  else if (/rent|house|apartment|kicukiro|nyamirambo/.test(hay)) {category = 'housing';}
   else if (/salary|payroll|wage/.test(hay)) {category = 'salary';}
   else if (/moto|yego|taxi|transport|fuel/.test(hay)) {category = 'transport';}
-  else if (/restaurant|caf|coffee|food|meze|inzora/.test(hay)) {category = 'food';}
+  else if (/restaurant|caf|coffee|food|meze|inzora/.test(hay)) {category = 'eating_out';}
   else if (/supermarket|simba|market|shop/.test(hay)) {category = 'groceries';}
-  else if (/mobile money|momo|transfer/.test(hay)) {category = 'family';}
-  else if (isCredit) {category = 'salary';}
   return {merchant, category};
 }
 
@@ -767,9 +807,15 @@ function extractJson(text: string): any {
 // prompt and the UI use, so the model cannot return an off-list category,
 // subcategory, or channel — which is what turns the downstream
 // `validSubcats.some(...)` check from a filter into an assertion.
-export function classificationSchema(): Record<string, unknown> {
+export function classificationSchema(
+  direction: 'debit' | 'credit' = 'debit',
+): Record<string, unknown> {
+  // Only the categories valid for which way the money moved, and only their
+  // subcategories. A JSON schema cannot tie a subcategory to the category chosen
+  // in the same reply, so enforceDirection drops any cross-category pair after.
+  const allowed = categoriesForDirection(direction === 'credit' ? 'in' : 'out');
   const allSubcats = Array.from(
-    new Set(Object.values(SUBCATS_BY_CAT).flatMap(v => v ?? [])),
+    new Set(allowed.flatMap(id => SUBCATS_BY_CAT[id] ?? [])),
   );
   return {
     type: 'object',
@@ -778,7 +824,7 @@ export function classificationSchema(): Record<string, unknown> {
         type: 'string',
         description: 'Clean title-case counterparty name, no codes or timestamps.',
       },
-      category: {type: 'string', enum: Object.keys(CAT_MAP)},
+      category: {type: 'string', enum: allowed},
       // "None fits" is expressed by OMITTING this field, not by an empty-string
       // enum member. Gemini rejects an empty enum value outright —
       // `response_schema.properties[subcategory].enum[0]: cannot be empty` — so
@@ -825,14 +871,15 @@ function factsToParsed(
   parseSource: 'ai' | 'regex' = 'regex',
   fallbackReason?: string,
 ): ParsedSMS {
+  const valid = enforceDirection(f.direction, category, isTransfer, subcategory);
   return {
     parseSource,
     fallbackReason,
     direction: f.direction,
     amount: f.amount,
     merchant,
-    category,
-    subcategory,
+    category: valid.category,
+    subcategory: valid.subcategory,
     confidence,
     fee: f.fee,
     balance_after: f.balance_after,
@@ -840,7 +887,7 @@ function factsToParsed(
     occurred_at: f.occurred_at,
     channel,
     payCode: f.payCode,
-    isTransfer,
+    isTransfer: valid.isTransfer,
     status: f.status ?? undefined,
     transferAccountId: f.transferAccount?.id ?? null,
   };
@@ -861,10 +908,9 @@ export function parseWithRegex(
     classified.merchant,
     deterministic?.name,
   ]);
-  const category =
-    rule && rule.category !== 'transfer'
-      ? (rule.category as CategoryId)
-      : classified.category;
+  // A learned rule's category wins, including transfer/loan rules — those now
+  // carry a real category (own_transfer, to_savings, loan_repayment…).
+  const category = ruleCat(rule) ?? classified.category;
   const isTransfer = resolveTransfer(f, rule, raw, ctx?.userName);
   // A learned display name applies on this path too — otherwise a rename only
   // sticks while the AI is reachable.
@@ -881,7 +927,7 @@ export function parseWithRegex(
   const confidence =
     f.status === 'failed' ? 1 : rule ? (rule.exact ? 0.9 : 0.7) : 0.45;
   const subcategory =
-    rule?.subcategory && rule.category === category ? rule.subcategory : '';
+    rule?.subcategory && ruleCat(rule) === category ? rule.subcategory : '';
   return factsToParsed(
     f,
     merchant,
@@ -951,7 +997,7 @@ export function buildClassification(
         ? `To ${f.transferAccount.name}`
         : `From ${f.transferAccount.name}`;
     return asPlan(
-      factsToParsed(f, merchant, 'savings', 0.97, f.channelHint, true, '', 'ai'),
+      factsToParsed(f, merchant, 'own_transfer', 0.97, f.channelHint, true, '', 'ai'),
     );
   }
   const preRule = findRuleForNames(rules, [
@@ -962,12 +1008,13 @@ export function buildClassification(
     const name =
       preRule.display_name?.trim() ||
       normalizeMerchant(deterministic?.name ?? preRule.pattern).display;
-    const isTransfer = preRule.category === 'transfer';
+    const preCat = ruleCat(preRule) ?? 'other_spending';
+    const isTransfer = ruleMeansTransfer(preRule);
     return asPlan(
       factsToParsed(
         f,
         name,
-        isTransfer ? 'savings' : (preRule.category as CategoryId),
+        preCat,
         0.95,
         f.channelHint,
         isTransfer,
@@ -1012,12 +1059,14 @@ export function buildClassification(
   const system = `You classify a single Rwandan mobile-money / bank SMS.
 - merchant: the shop or person, cleaned (e.g. "SAWA CITI LTD" → "Sawa Citi Ltd").
   Never include reference numbers, subscriber codes, or timestamps.
-- category: best fit. Boundary guidance for the ambiguous cases:
+- category: the PURPOSE of the money, from this list only (it already matches
+  which way the money moved — ${f.direction === 'credit' ? 'money IN' : 'money OUT'}):
+${categoryMenu(f.direction)}
+  Boundary guidance for the ambiguous cases:
 ${CATEGORY_HINTS}
-- subcategory: only when one clearly fits the category you picked. If none does,
-  OMIT the field entirely rather than sending an empty value.
-  Valid options per category:
-${SUBCATS_PROMPT_BLOCK}
+- subcategory: only one listed under the category you picked, and only when it
+  clearly fits. If none does, OMIT the field entirely rather than sending an
+  empty value.
 - channel: the payment rail used.
 - confidence: how sure you are of merchant + category. Be honest — a low number
   sends the record to the user for review, which is the right outcome for a
@@ -1129,11 +1178,9 @@ export function applyClassification(
     // The user's own description of this payment beats a merchant-wide rule
     // (see ParseContext.userNote); the rule still supplies the display name.
     const described = !!promptNote(ctx?.userNote);
-    if (rule && rule.category !== 'transfer' && !described) {
-      category = rule.category as CategoryId;
-      confidence = Math.max(confidence, ruleCeiling);
-    }
-    if (rule?.category === 'transfer') {
+    if (rule && !described) {
+      // Transfer/loan rules included: they carry a real v2 category now.
+      category = ruleCat(rule) ?? category;
       confidence = Math.max(confidence, ruleCeiling);
     }
     // Reapply the name the user chose for this counterparty. Without this a
@@ -1150,7 +1197,7 @@ export function applyClassification(
       }
       // The learned subcategory only applies if the category still matches
       // the one it was learned under.
-      if (rule?.subcategory && rule.category === category && !subcategory) {
+      if (rule?.subcategory && ruleCat(rule) === category && !subcategory) {
         subcategory = rule.subcategory;
       }
     }
@@ -1162,16 +1209,7 @@ export function applyClassification(
     // Account numbers prove it > the user's learned rule > AI/heuristics.
     const isTransfer = resolveTransfer(f, rule, raw, ctx?.userName, j.is_transfer === true);
 
-    // A rule (or the transfer/account-match overrides above) may have swapped
-    // `category` out from under the AI's subcategory guess — only keep it if
-    // it's still a real option under the FINAL category.
-    const validSubcats = SUBCATS_BY_CAT[category] ?? [];
-    if (isTransfer || !validSubcats.some(s => s.toLowerCase() === subcategory.toLowerCase())) {
-      subcategory = '';
-    } else {
-      subcategory = validSubcats.find(s => s.toLowerCase() === subcategory.toLowerCase())!;
-    }
-
+    // Subcategory validity (and direction) is enforced in factsToParsed.
     return factsToParsed(
       f,
       merchant,
@@ -1205,7 +1243,7 @@ export async function parseSmsWithAI(
       planned.system,
       planned.user,
       authToken,
-      classificationSchema(),
+      classificationSchema(planned.facts.direction),
     );
     return applyClassification(reply, planned, raw, rules, ctx);
   } catch (e: any) {

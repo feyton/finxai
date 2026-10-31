@@ -537,9 +537,7 @@ describe('promoteAutoRecord', () => {
     expect(p).toContain('work trip');
   });
 
-  it('keeps the original category when the type is switched to transfer', async () => {
-    // The Fix sheet hides the category picker for transfers, so an override would be a
-    // stale value from before the switch.
+  it('a record re-typed as a transfer gets a transfer category, not its stale spending one (taxonomy v2)', async () => {
     const db = fakeDb();
     await promoteAutoRecord(db, {
       record,
@@ -549,7 +547,10 @@ describe('promoteAutoRecord', () => {
       overrides: {type: 'transfer', category: 'groceries'},
     });
     const p = insert(db).params;
-    expect(p).toContain('food');
+    // v1 kept 'food' here — the exact "transfer labelled Shopping/Transport"
+    // mismatch found in the real corpus. A transfer now carries a transfer category.
+    expect(p).toContain('own_transfer');
+    expect(p).not.toContain('food');
     expect(p).not.toContain('groceries');
   });
 

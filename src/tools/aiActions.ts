@@ -190,11 +190,14 @@ export const AI_ACTIONS: AiAction[] = [
       }
       const amt = Math.abs(input.amount);
       const {label} = categoryLabel(input.category ?? '');
+      // Valid for the type the coach chose: "Groceries" said about money coming
+      // in becomes Other Income rather than an income called Groceries.
+      const catId = resolveCat(input.category ?? '', input.type);
       const now = new Date().toISOString();
       await ctx.db.execute(
         'INSERT INTO transactions (id, amount, account_id, category, subcategory, date_time, confirmed, currency, payee, merchant, transaction_type, note, fees, budget_id, source, confidence, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
-          uuid(), amt, account.id, label, '', now, 1, 'RWF',
+          uuid(), amt, account.id, catId, '', now, 1, 'RWF',
           input.merchant ?? '', input.merchant ?? '', input.type,
           input.note ?? '', 0, null, 'ai', 1, ctx.userId, now,
         ],
@@ -224,15 +227,18 @@ export const AI_ACTIONS: AiAction[] = [
       const match = (
         await rows(
           ctx,
-          'SELECT id, merchant, payee FROM transactions WHERE owner_id = ? AND (LOWER(merchant) LIKE ? OR LOWER(payee) LIKE ?) ORDER BY date_time DESC LIMIT 1',
+          'SELECT id, merchant, payee, transaction_type, transfer_direction FROM transactions WHERE owner_id = ? AND (LOWER(merchant) LIKE ? OR LOWER(payee) LIKE ?) ORDER BY date_time DESC LIMIT 1',
           [ctx.userId, q, q],
         )
       )[0];
       if (!match) {
         return `No transaction found matching "${input.merchant}".`;
       }
-      const {label} = categoryLabel(input.new_category);
-      await ctx.db.execute('UPDATE transactions SET category = ? WHERE id = ?', [label, match.id]);
+      // Checked against the transaction's own direction: the coach cannot file
+      // a salary payment as Groceries.
+      const catId = resolveCat(input.new_category, match.transaction_type, match.transfer_direction);
+      const label = CATS[catId].label;
+      await ctx.db.execute('UPDATE transactions SET category = ? WHERE id = ?', [catId, match.id]);
       return `Recategorized ${match.merchant || match.payee} to ${label}.`;
     },
   },

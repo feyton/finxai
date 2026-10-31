@@ -268,10 +268,12 @@ function scoreOne(parsed: any, expected: any) {
     // Legacy rows store a display name ("Family & Transfers", "Entertainment")
     // rather than a CategoryId, so both sides go through the same resolver the
     // app uses instead of being compared as raw strings.
+    // Direction-aware since taxonomy v2: a v1 label is read with the row's own
+    // type, so "family" on income compares as Money from Family.
     category: wantTransfer
       ? null
-      : resolveCat(String(parsed.category ?? '')) ===
-        resolveCat(String(expected.category ?? '')),
+      : resolveCat(String(parsed.category ?? ''), parsed.isTransfer ? 'transfer' : parsed.direction === 'credit' ? 'income' : 'expense') ===
+        resolveCat(String(expected.category ?? ''), expected.transaction_type),
     isTransfer: !!parsed.isTransfer === wantTransfer,
     amount: Number(parsed.amount) === Number(expected.amount ?? 0),
     fee: Number(parsed.fee) === Number(expected.fees ?? 0),
@@ -487,7 +489,7 @@ async function run() {
       tokens: {input: inTok, output: outTok},
       costUsd: Number(cost.toFixed(6)),
       confidences,
-      failures: failures.slice(0, 40),
+      failures: failures.slice(0, Number(process.env.EVAL_MAX_FAILURES ?? 40)),
     };
   }
 

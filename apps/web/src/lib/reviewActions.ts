@@ -14,6 +14,7 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import {extractBalance, replayBalance} from '@/lib/shared/balanceReplay';
 import {isUsablePattern, normalizeMerchant} from '@/lib/shared/merchantNormalize';
 import {resolveDirection} from '@/lib/shared/smsDirection';
+import {resolveCat, subcategoriesOf} from '@/lib/shared/categories';
 import {ignoredSmsId} from '@/lib/shared/smsIds';
 import type {Account, AutoRecord} from '@/lib/types';
 
@@ -133,7 +134,7 @@ export async function promoteAutoRecord(
     accounts: Account[];
     overrides?: PromoteOverrides;
   },
-): Promise<{txType: string; accountId: string}> {
+): Promise<{txType: string; accountId: string; category: string; subcategory: string}> {
   const {record, ownerId, accounts} = args;
   const o = args.overrides ?? {};
   const now = new Date().toISOString();
@@ -156,15 +157,24 @@ export async function promoteAutoRecord(
     currentAccountId: record.account_id ?? undefined,
   }).direction;
 
+  // The category as a v2 id VALID for the final type and direction — the same
+  // rule as the phone's promoteAutoRecord. Under taxonomy v2 a transfer has a
+  // real category too (own account, savings, loan), so it is no longer "kept".
+  const transferDirection = direction === 'credit' ? 'in' : 'out';
+  const category = resolveCat(o.category ?? record.category, txType, isTransfer ? transferDirection : null);
+  const subIn = o.subcategory ?? record.subcategory ?? '';
+  const subcategory =
+    subcategoriesOf(category).some(sc => sc.name === subIn) ||
+    (o.subcategory && o.category && resolveCat(o.category) === category)
+      ? subIn
+      : '';
+
   const {error} = await supabase.from('transactions').insert({
     id: record.id,
     amount: record.amount,
     account_id: accountId,
-    // A transfer keeps whatever category it had: the fix form hides the category
-    // picker for transfers, so an override would be a stale value from before the
-    // type was switched.
-    category: isTransfer ? record.category : o.category ?? record.category,
-    subcategory: isTransfer ? '' : o.subcategory ?? record.subcategory ?? '',
+    category,
+    subcategory,
     date_time: record.date_time,
     sms: record.sms,
     sender: record.sender,
@@ -177,7 +187,7 @@ export async function promoteAutoRecord(
     source: 'sms',
     confidence: record.confidence ?? 0,
     transfer_account_id: isTransfer ? record.transfer_account_id ?? null : null,
-    transfer_direction: isTransfer ? (direction === 'credit' ? 'in' : 'out') : null,
+    transfer_direction: isTransfer ? transferDirection : null,
     balance_after: record.balance_after ?? extractBalance(record.sms ?? ''),
     txn_ref: record.txn_ref ?? null,
     parse_source: record.parse_source ?? null,
@@ -203,7 +213,8 @@ export async function promoteAutoRecord(
 
   await deleteAutoRecord(supabase, record.id);
 
-  return {txType, accountId};
+  // The validated category is returned so callers teach rules what was FILED.
+  return {txType, accountId, category, subcategory};
 }
 
 /**

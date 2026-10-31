@@ -14,7 +14,19 @@ import {
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
-import {CATS, CategoryId, FONTS, R, T, accountIcon, accountTint, resolveCat} from '../theme';
+import {
+  CATS,
+  CategoryId,
+  FONTS,
+  R,
+  T,
+  accountIcon,
+  accountTint,
+  categoriesForDirection,
+  categoriesForType,
+  coerceForType,
+  resolveCat,
+} from '../theme';
 import {CatChip, ConfPill, Icon, LocationChip} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {useSubcategories} from '../hooks/useSubcategories';
@@ -54,7 +66,6 @@ function uuid(): string {
   });
 }
 
-const ALL_CATS = Object.values(CATS);
 
 export interface Fix {
   merchant: string;
@@ -109,12 +120,20 @@ function FixSheet({
   const {subcatsFor} = useSubcategories();
   const keyboardHeight = useKeyboardHeight();
   const subcats = subcatsFor(cat);
+  // Fixed by the SMS: re-typing a record never flips which way the money moved.
+  const inbound = regexExtract(record?.sms ?? '').direction === 'credit';
 
   // Re-seed local state each time the sheet opens for a record
   useEffect(() => {
     if (visible) {
       setMerchant(record.merchant || record.payee || '');
-      setCat((resolveCat(record.category ?? '') as CategoryId) ?? 'shopping');
+      setCat(
+        resolveCat(
+          record.category ?? '',
+          record.transaction_type,
+          regexExtract(record.sms ?? '').direction === 'credit' ? 'in' : 'out',
+        ),
+      );
       setSubcategory(record.subcategory ?? '');
       // auto_records has no `note` column in Postgres (only transactions does),
       // so this is always blank today — read it anyway so the sheet keeps
@@ -191,7 +210,19 @@ function FixSheet({
               return (
                 <Pressable
                   key={t.id}
-                  onPress={() => setFixType(t.id)}
+                  onPress={() => {
+                    setFixType(t.id);
+                    // Re-typing keeps the idea where one exists (Family Support ↔
+                    // Money from Family) and never leaves a category the type
+                    // cannot hold — that pairing is what the AI learns from.
+                    setCat(c => {
+                      const moved = coerceForType(c, t.id, inbound ? 'in' : 'out');
+                      if (moved !== c) {
+                        setSubcategory('');
+                      }
+                      return moved;
+                    });
+                  }}
                   style={[styles.typeChoice, on && styles.typeChoiceActive]}>
                   <Text style={[styles.typeChoiceText, on && {color: T.accent}]}>
                     {t.label}
@@ -202,8 +233,9 @@ function FixSheet({
           </View>
           {fixType === 'transfer' && (
             <Text style={styles.typeHint}>
-              Between your own accounts — excluded from income & spending. The
-              AI will remember this counterparty as a transfer.
+              Your own money moving — between your accounts, into or out of
+              savings, or a loan. Excluded from income & spending; the AI will
+              remember this counterparty.
             </Text>
           )}
 
@@ -308,12 +340,20 @@ function FixSheet({
             </>
           )}
 
-          {/* Category — irrelevant for transfers */}
-          {fixType !== 'transfer' && (
+          {/* Category — only those valid for this type and direction. A transfer
+              has real categories too in taxonomy v2 (own account, savings, loan). */}
+          {(
           <>
           <Text style={styles.fixLabel}>Category</Text>
           <View style={styles.sheetGrid}>
-            {ALL_CATS.map(c => {
+            {categoriesForType(fixType)
+              .filter(id =>
+                fixType === 'transfer'
+                  ? categoriesForDirection(inbound ? 'in' : 'out').includes(id)
+                  : true,
+              )
+              .map(id => CATS[id])
+              .map(c => {
               const active = c.id === cat;
               return (
                 <Pressable
@@ -431,7 +471,7 @@ function SmsCard({
   const [busy, setBusy] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [fixSheet, setFixSheet] = useState(false);
-  const localCat = (resolveCat(record.category ?? '') as CategoryId) ?? 'shopping';
+  const localCat = resolveCat(record.category ?? '', record.transaction_type);
   const isExpense = record.transaction_type === 'expense';
   const isTransfer = record.transaction_type === 'transfer';
   const sign = isTransfer ? '' : isExpense ? '-' : '+';
@@ -759,7 +799,7 @@ export default function SMSReviewScreen({navigation, route}: any) {
       withdrawQuestions([record.id]);
       // One shared promotion path (tools/smsIngest) rather than a hand-written INSERT
       // here — four copies of this column list is what silently dropped the location.
-      const {txType} = await promoteAutoRecord(db, {
+      const {category: filedCat, subcategory: filedSub} = await promoteAutoRecord(db, {
         record,
         ownerId: userId!,
         direction: regexExtract(record.sms ?? '').direction,
@@ -778,9 +818,11 @@ export default function SMSReviewScreen({navigation, route}: any) {
         await recordConfirmation(
           db,
           record.merchant,
-          txType === 'transfer' ? 'transfer' : record.category,
+          // What was actually filed: a v2 id valid for the direction, transfer
+          // and loan categories included — never the generic 'transfer'.
+          filedCat,
           userId!,
-          txType === 'transfer' ? '' : record.subcategory ?? '',
+          filedSub,
         );
       }
       if (thenRecheck) {
@@ -856,7 +898,7 @@ export default function SMSReviewScreen({navigation, route}: any) {
       const merchant = fix.merchant || record.merchant || record.payee || '';
       // Same shared promotion path as handleConfirm; the Fix sheet's changes go in as
       // overrides so there is still only one column list in the codebase.
-      const {accountId} = await promoteAutoRecord(db, {
+      const {accountId, category: filedCat, subcategory: filedSub} = await promoteAutoRecord(db, {
         record,
         ownerId: userId!,
         direction: regexExtract(record.sms ?? '').direction,
@@ -889,9 +931,9 @@ export default function SMSReviewScreen({navigation, route}: any) {
         await recordCorrection(
           db,
           merchant,
-          txType === 'transfer' ? 'transfer' : fix.category,
+          filedCat,
           userId!,
-          txType === 'transfer' ? '' : fix.subcategory ?? '',
+          filedSub,
           merchant,
           // Teach how to PAY them, not just how to file them. Undefined rather
           // than null when the user left it blank, so a correction about a

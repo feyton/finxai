@@ -37,45 +37,64 @@ export const T = {
 // Freelance all collapsed into Shopping). Roughly 423,000 RWF in one month was reported
 // under the wrong headings while the phone showed the right answer. Sharing the module
 // removes the failure mode rather than re-fixing it.
-export type {CategoryId} from './shared/categories';
-export {resolveCat, CATEGORY_IDS} from './shared/categories';
+export type {CategoryId, CategoryKind, TxType} from './shared/categories';
+export {
+  resolveCat,
+  CATEGORY_IDS,
+  CATEGORY_META,
+  categoriesForDirection,
+  categoriesForType,
+  coerceForType,
+  matchCategory,
+  subcategoriesOf,
+  typeForCategory,
+  validForType,
+} from './shared/categories';
 
-import {CATEGORY_META, resolveCat as resolveCatShared, type CategoryId as Cat} from './shared/categories';
+import {CATEGORY_META, subcategoriesOf, type CategoryId as Cat, type CategoryMeta} from './shared/categories';
 
 // Emoji per category — the web's presentation choice. The mobile app maps the same ids
 // onto lucide icon names instead, which is why only this part stays local.
 const CAT_EMOJI: Record<Cat, string> = {
-  food: '\u{1F37D}\u{FE0F}',
-  groceries: '\u{1F6D2}',
-  transport: '\u{1F697}',
-  utilities: '\u{26A1}',
-  airtime: '\u{1F4F1}',
-  rent: '\u{1F3E0}',
-  health: '\u{2764}\u{FE0F}',
-  shopping: '\u{1F6CD}\u{FE0F}',
-  salary: '\u{1FA99}',
-  family: '\u{1F46A}',
-  fun: '\u{1F525}',
-  savings: '\u{1F3AF}',
-  education: '\u{2B50}',
-  personal_care: '\u{2702}\u{FE0F}',
-  housing: '\u{1F3E2}',
-  technology: '\u{1F4BB}',
-  debt: '\u{1F4B3}',
-  gifts: '\u{1F381}',
-  misc: '\u{1F3F7}\u{FE0F}',
-  freelance: '\u{1F91D}',
+  // spending
+  groceries: '🛒',
+  eating_out: '🍽️',
+  transport: '🚗',
+  housing: '🏠',
+  utilities: '⚡',
+  airtime: '📱',
+  health: '❤️',
+  education: '🎓',
+  family: '👨‍👩‍👧',
+  giving: '🎁',
+  shopping: '🛍️',
+  personal_care: '💇',
+  fun: '🎬',
+  government: '🏛️',
+  other_spending: '🏷️',
+  // income
+  salary: '💼',
+  business: '🤝',
+  family_in: '👨‍👩‍👧',
+  refunds: '↩️',
+  interest: '📈',
+  other_income: '💰',
+  // transfers
+  own_transfer: '🔁',
+  to_savings: '🐷',
+  from_savings: '🐷',
+  cash_withdrawal: '💵',
+  // loans
+  loan_received: '🏦',
+  loan_repayment: '💳',
+  lent_out: '🤝',
+  repaid_to_me: '🤝',
 };
 
-export const CATS: Record<
-  Cat,
-  {id: Cat; label: string; emoji: string; color: string}
-> = Object.fromEntries(
-  (Object.keys(CATEGORY_META) as Cat[]).map(id => [
-    id,
-    {...CATEGORY_META[id], emoji: CAT_EMOJI[id]},
-  ]),
-) as Record<Cat, {id: Cat; label: string; emoji: string; color: string}>;
+export type CatInfo = CategoryMeta & {emoji: string};
+export const CATS: Record<Cat, CatInfo> = Object.fromEntries(
+  (Object.keys(CATEGORY_META) as Cat[]).map(id => [id, {...CATEGORY_META[id], emoji: CAT_EMOJI[id]}]),
+) as Record<Cat, CatInfo>;
 
 export function accountTint(name: string): string {
   const n = (name ?? '').toLowerCase();
@@ -88,20 +107,13 @@ export function accountTint(name: string): string {
   return '#22C55E';
 }
 
-// Built-in subcategories per CategoryId (from the mobile app's data.json —
-// keep apps/web/src/lib/subcategories.json in lockstep). Custom ones come
-// from the `subcategories` table and are merged by the caller.
-import subcatData from './subcategories.json';
-
+// Built-in subcategories now come straight from the shared taxonomy — each
+// category owns its list (taxonomy v2). They used to be matched to categories BY
+// NAME from a byte-copy of the phone's data.json, which is how Shopping came to
+// hold "Charity" and "Personal Loans". Custom ones come from the `subcategories`
+// table and are merged by the caller.
 export function builtinSubcats(cat: Cat): {name: string; icon: string}[] {
-  const out: {name: string; icon: string}[] = [];
-  for (const c of (subcatData as any).categories as any[]) {
-    if (resolveCatShared(c.name) !== cat) continue;
-    for (const s of c.subcategories ?? []) {
-      if (!out.some(x => x.name === s.name)) out.push({name: s.name, icon: s.icon});
-    }
-  }
-  return out;
+  return subcategoriesOf(cat).map(sc => ({name: sc.name, icon: sc.emoji}));
 }
 
 export function fmtAmount(n: number): string {

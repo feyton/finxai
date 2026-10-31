@@ -37,10 +37,23 @@ export const R = {
 // The taxonomy and resolveCat now live in ../shared/categories, shared with the web
 // app. Re-exported here so the ~50 existing `from '../theme'` imports keep working.
 export type {CategoryId} from '../shared/categories';
-export {resolveCat, CATEGORY_IDS} from '../shared/categories';
+export {
+  resolveCat,
+  CATEGORY_IDS,
+  CATEGORY_META,
+  categoriesForDirection,
+  categoriesForType,
+  coerceForType,
+  matchCategory,
+  subcategoriesOf,
+  typeForCategory,
+  validForType,
+} from '../shared/categories';
+export type {CategoryKind, TxType} from '../shared/categories';
 
 import {
   CATEGORY_META,
+  type CategoryMeta,
   type CategoryId as SharedCategoryId,
 } from '../shared/categories';
 
@@ -48,39 +61,50 @@ import {
 // renders emoji instead, and these names must exist in Components/ui/Icon's whitelist
 // (it returns null for anything unregistered).
 const CAT_ICON: Record<SharedCategoryId, string> = {
-  food: 'UtensilsCrossed',
+  // spending
   groceries: 'ShoppingCart',
+  eating_out: 'UtensilsCrossed',
   transport: 'Car',
+  housing: 'Home',
   utilities: 'Zap',
   airtime: 'Phone',
-  rent: 'Home',
   health: 'Heart',
-  shopping: 'ShoppingBag',
-  salary: 'Coins',
-  family: 'Users',
-  fun: 'Flame',
-  savings: 'Target',
   education: 'Star',
+  family: 'Users',
+  giving: 'Gift',
+  shopping: 'ShoppingBag',
   personal_care: 'Scissors',
-  housing: 'Building2',
-  technology: 'Laptop',
-  debt: 'CreditCard',
-  gifts: 'Gift',
-  misc: 'Tag',
-  freelance: 'Handshake',
+  fun: 'Flame',
+  government: 'Landmark',
+  other_spending: 'Tag',
+  // income
+  salary: 'Coins',
+  business: 'Handshake',
+  family_in: 'Users',
+  refunds: 'RefreshCcw',
+  interest: 'TrendingUp',
+  other_income: 'Plus',
+  // transfers
+  own_transfer: 'ArrowLeftRight',
+  to_savings: 'Target',
+  from_savings: 'Target',
+  cash_withdrawal: 'Wallet',
+  // loans
+  loan_received: 'ArrowDownLeft',
+  loan_repayment: 'CreditCard',
+  lent_out: 'ArrowUpRight',
+  repaid_to_me: 'ArrowDownLeft',
 };
 
 // Built from the shared metadata, so adding a category in one place reaches both apps.
-// Typed exactly as before so every consumer is unaffected.
-export const CATS: Record<
-  SharedCategoryId,
-  {id: SharedCategoryId; label: string; icon: string; color: string}
-> = Object.fromEntries(
+// Carries kind/description/subcategories too (v2), so pickers can filter by direction.
+export type CatInfo = CategoryMeta & {icon: string};
+export const CATS: Record<SharedCategoryId, CatInfo> = Object.fromEntries(
   (Object.keys(CATEGORY_META) as SharedCategoryId[]).map(id => [
     id,
     {...CATEGORY_META[id], icon: CAT_ICON[id]},
   ]),
-) as Record<SharedCategoryId, {id: SharedCategoryId; label: string; icon: string; color: string}>;
+) as Record<SharedCategoryId, CatInfo>;
 
 
 // Account brand helpers

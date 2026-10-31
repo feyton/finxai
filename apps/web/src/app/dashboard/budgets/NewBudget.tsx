@@ -6,7 +6,7 @@ import {createClient} from '@/lib/supabase/client';
 import {Modal} from '@/components/Modal';
 import {Icon} from '@/components/Icon';
 import {CatChip} from '@/components/ui';
-import {CATS, type CategoryId, fmtAmount} from '@/lib/theme';
+import {CATS, type CategoryId, categoriesForType, fmtAmount} from '@/lib/theme';
 
 /**
  * Create a budget, with its category lines, from the web.
@@ -20,28 +20,11 @@ import {CATS, type CategoryId, fmtAmount} from '@/lib/theme';
  * without this component having to own the list.
  */
 
-// Expense categories only — a budget caps spending, so offering 'Salary' as a
-// line would be nonsense.
-const BUDGETABLE: CategoryId[] = [
-  'groceries',
-  'food',
-  'transport',
-  'utilities',
-  'airtime',
-  'rent',
-  'housing',
-  'personal_care',
-  'health',
-  'education',
-  'shopping',
-  'technology',
-  'fun',
-  'family',
-  'gifts',
-  'debt',
-  'savings',
-  'misc',
-];
+// Spending categories only — a budget caps spending, and budgets match only
+// expense-type transactions. From the shared taxonomy rather than a local list,
+// which is how this list once offered Savings and Debt: under taxonomy v2 those
+// are transfers and loans, so a cap on them could never fill.
+const BUDGETABLE: CategoryId[] = categoriesForType('expense');
 
 const EVENTS: {id: string; label: string; hint: string}[] = [
   {id: 'category', label: 'Monthly caps', hint: 'Limits per category. Spending is matched automatically.'},
@@ -63,7 +46,7 @@ const newLine = (category: CategoryId): Line => ({
 
 function firstUnused(lines: Line[]): CategoryId {
   const used = new Set(lines.map(l => l.category));
-  return BUDGETABLE.find(c => !used.has(c)) ?? 'misc';
+  return BUDGETABLE.find(c => !used.has(c)) ?? 'other_spending';
 }
 
 function monthBounds() {

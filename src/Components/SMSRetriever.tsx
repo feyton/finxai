@@ -496,7 +496,8 @@ const SMSRetriever: React.FC = () => {
                 parsed.isTransfer = true;
                 parsed.transferAccountId = dest.id;
                 parsed.merchant = `To ${dest.name}`;
-                parsed.category = 'savings';
+                // Proven own-account destination (taxonomy v2: own money moving).
+                parsed.category = 'own_transfer';
                 // A proven own-account destination is the strongest transfer
                 // evidence there is — it used to cap at 0.9, below
                 // THRESHOLD_AUTO_SAVE (0.92), so the best-evidenced transfers

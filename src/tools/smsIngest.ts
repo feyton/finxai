@@ -35,6 +35,7 @@ import {ignoredSmsId, rowExists, smsAlreadyRecorded, smsTransactionId} from './t
 import {isUsablePattern, normalizeMerchant} from '../../shared/merchantNormalize';
 import {syncAccountBalance} from './balance';
 import {loadMemories} from './memory';
+import {resolveCat, subcategoriesOf} from '../theme';
 import {takePendingNote} from './pendingNotes';
 
 export interface AccountLike {
@@ -424,7 +425,7 @@ export async function promoteAutoRecord(
       payCode?: string | null;
     };
   },
-): Promise<{txType: string; accountId: string}> {
+): Promise<{txType: string; accountId: string; category: string; subcategory: string}> {
   const {record, ownerId, direction, balanceAfter} = args;
   const o = args.overrides ?? {};
   const now = new Date().toISOString();
@@ -438,6 +439,23 @@ export async function promoteAutoRecord(
       : 'expense');
   const accountId = o.accountId || record.account_id;
   const isTransfer = txType === 'transfer';
+  // The category, as a v2 id that is VALID for the final type — whatever the Fix
+  // sheet, the classifier or a v1 row handed over. A category chosen for an
+  // expense cannot survive the record being re-typed as income: Family Support
+  // becomes Money from Family, anything without a counterpart that type's Other.
+  const transferDirection = direction === 'credit' ? 'in' : 'out';
+  const category = resolveCat(
+    o.category ?? record.category,
+    txType,
+    isTransfer ? transferDirection : null,
+  );
+  const subcategoryIn = o.subcategory ?? record.subcategory ?? '';
+  const subcategory = subcategoriesOf(category).some(sc => sc.name === subcategoryIn)
+    ? subcategoryIn
+    : // A custom subcategory the user made under this category is kept as typed.
+      o.subcategory && o.category && resolveCat(o.category) === category
+      ? o.subcategory
+      : '';
   // A description typed into a notification while offline waits on the device
   // (see pendingNotes). Taken on EVERY promotion path — Confirm, Fix, re-check,
   // a later notification answer — because reading it only in the Fix sheet let
@@ -470,8 +488,8 @@ export async function promoteAutoRecord(
                 confirmed = 1
           WHERE id = ?`,
         [
-          isTransfer ? record.category : o.category ?? record.category,
-          isTransfer ? '' : o.subcategory ?? record.subcategory ?? '',
+          category,
+          subcategory,
           o.merchant || record.merchant,
           txType,
           accountId,
@@ -483,7 +501,7 @@ export async function promoteAutoRecord(
       );
     }
     await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
-    return {txType, accountId};
+    return {txType, accountId, category, subcategory};
   }
 
   await db.execute(
@@ -499,11 +517,10 @@ export async function promoteAutoRecord(
       record.id,
       record.amount,
       accountId,
-      // A transfer keeps whatever category it had: the Fix sheet hides the category
-      // picker for transfers, so an override would be a stale value from before the
-      // type was switched.
-      isTransfer ? record.category : o.category ?? record.category,
-      isTransfer ? '' : o.subcategory ?? record.subcategory ?? '',
+      // Validated above: a v2 id that fits the type (transfers included — under
+      // taxonomy v2 a transfer has a real category: own account, savings, loan).
+      category,
+      subcategory,
       record.date_time,
       record.sms,
       record.sender,
@@ -513,7 +530,7 @@ export async function promoteAutoRecord(
       record.fees ?? 0,
       record.confidence ?? 0,
       isTransfer ? record.transfer_account_id ?? null : null,
-      isTransfer ? (direction === 'credit' ? 'in' : 'out') : null,
+      isTransfer ? transferDirection : null,
       balanceAfter,
       record.txn_ref ?? null,
       record.parse_source ?? null,
@@ -540,7 +557,8 @@ export async function promoteAutoRecord(
   );
 
   await db.execute('DELETE FROM auto_records WHERE id = ?', [record.id]);
-  return {txType, accountId};
+  // The validated category is returned so callers teach rules what was FILED.
+  return {txType, accountId, category, subcategory};
 }
 
 /** What a re-check filed, so the review screen can say so and offer Undo. */

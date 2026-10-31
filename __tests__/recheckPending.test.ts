@@ -177,7 +177,8 @@ describe('promoteAutoRecord when the transaction is already filed', () => {
     });
     expect(db.calls.some(c => c.sql.includes('INSERT INTO transactions'))).toBe(false);
     const upd = db.calls.find(c => c.sql.includes('UPDATE transactions'))!;
-    expect(upd.params).toEqual(expect.arrayContaining(['food', 'Bakery', 'Hope Bread', 'dup']));
+    // 'food' is a v1 id: stored as its v2 id; the custom subcategory is kept.
+    expect(upd.params).toEqual(expect.arrayContaining(['eating_out', 'Bakery', 'Hope Bread', 'dup']));
     expect(db.calls.some(c => c.sql.startsWith('DELETE FROM auto_records'))).toBe(true);
   });
 });

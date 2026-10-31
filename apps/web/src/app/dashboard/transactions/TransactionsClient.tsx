@@ -3,7 +3,17 @@
 import {endOfMonth, format, startOfMonth, subDays, subMonths} from 'date-fns';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {createClient} from '@/lib/supabase/client';
-import {CATS, type CategoryId, builtinSubcats, fmtAmount, resolveCat} from '@/lib/theme';
+import {
+  CATS,
+  type CategoryId,
+  builtinSubcats,
+  categoriesForDirection,
+  categoriesForType,
+  coerceForType,
+  fmtAmount,
+  resolveCat,
+  validForType,
+} from '@/lib/theme';
 import type {Account, Subcategory, Tag, Transaction} from '@/lib/types';
 import {Icon} from '@/components/Icon';
 import {Card, CatChip, Conf, LocationLink, Money, Pill, WEmpty} from '@/components/ui';
@@ -169,7 +179,25 @@ function uuid(): string {
 }
 
 // ── Inline category pill dropdown (design: InlineCatSelect) ─────────────────
-function InlineCatSelect({value, onChange}: {value: CategoryId; onChange: (c: CategoryId) => void}) {
+// `type`, when given, limits the menu to categories valid for it — there is no
+// income called Groceries (taxonomy v2). Omitted only where every category is a
+// legitimate answer (a merchant rule applies in either direction).
+function InlineCatSelect({
+  value,
+  onChange,
+  type,
+  direction,
+}: {
+  value: CategoryId;
+  onChange: (c: CategoryId) => void;
+  type?: string | null;
+  direction?: 'in' | 'out';
+}) {
+  const choices = type
+    ? categoriesForType(type)
+        .filter(id => (type === 'transfer' && direction ? categoriesForDirection(direction).includes(id) : true))
+        .map(id => CATS[id])
+    : CAT_LIST;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const c = CATS[value];
@@ -197,7 +225,7 @@ function InlineCatSelect({value, onChange}: {value: CategoryId; onChange: (c: Ca
         <div
           className="absolute left-0 top-[110%] z-30 max-h-[260px] min-w-[190px] overflow-y-auto rounded-[10px] p-1.5"
           style={{background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)'}}>
-          {CAT_LIST.map(ct => (
+          {choices.map(ct => (
             <div
               key={ct.id}
               onClick={e => {
@@ -490,15 +518,17 @@ export function TransactionsClient({
 
   const applyCategory = useCallback(
     async (id: string, catId: CategoryId) => {
-      const label = CATS[catId].label;
-      patchLocal(id, {category: label, subcategory: null});
+      // Stored as the v2 id, checked against the row's own type and direction.
+      const row = tx.find(t => t.id === id);
+      const stored = coerceForType(catId, row?.transaction_type, row?.transfer_direction);
+      patchLocal(id, {category: stored, subcategory: null});
       const {error} = await supabase
         .from('transactions')
-        .update({category: label, subcategory: null})
+        .update({category: stored, subcategory: null})
         .eq('id', id);
       if (error) setErr(error.message);
     },
-    [supabase, patchLocal],
+    [supabase, patchLocal, tx],
   );
 
   // One wrapper for every bulk action: busy flag, error banner, a short confirmation
@@ -522,21 +552,22 @@ export function TransactionsClient({
   const bulkRecategorize = (catId: CategoryId) =>
     runBulk(async () => {
       const label = CATS[catId].label;
-      // Transfers have no category on screen (they render as a Transfer pill), so
-      // silently relabelling them would change reports with nothing visible to show it.
-      const rows = selRows.filter(t => t.transaction_type !== 'transfer');
+      // Only rows the category is valid for (taxonomy v2): "Salary" cannot be
+      // bulk-applied to money going out, nor "Groceries" to money coming in.
+      const rows = selRows.filter(t => validForType(catId, t.transaction_type));
+      const misfit = selRows.length - rows.length;
       const ids = rows.map(t => t.id);
       for (const part of chunk(ids)) {
         // Subcategory cleared, same as the inline picker: subcategories belong to one
         // category, and the old code left "Produce and Vegetables" under Shopping.
         const {error} = await supabase
           .from('transactions')
-          .update({category: label, subcategory: null})
+          .update({category: catId, subcategory: null})
           .in('id', part);
         if (error) throw error;
       }
       const idSet = new Set(ids);
-      setTx(prev => prev.map(t => (idSet.has(t.id) ? {...t, category: label, subcategory: null} : t)));
+      setTx(prev => prev.map(t => (idSet.has(t.id) ? {...t, category: catId, subcategory: null} : t)));
 
       let learned = 0;
       if (teach) {
@@ -548,7 +579,7 @@ export function TransactionsClient({
           seen.add(key);
           await recordMerchantRule(supabase, {
             merchant: name,
-            category: label,
+            category: catId,
             ownerId: t.owner_id,
             kind: 'correction',
           });
@@ -564,7 +595,7 @@ export function TransactionsClient({
       return (
         `Moved ${ids.length} to ${label}` +
         (learned ? ` · learned ${learned} merchant rule${learned === 1 ? '' : 's'}` : '') +
-        skipped(selRows.length - ids.length, 'transfers')
+        skipped(misfit, `that ${CATS[catId].label} does not fit (money in vs out)`)
       );
     });
 
@@ -1163,7 +1194,12 @@ export function TransactionsClient({
                           Transfer
                         </Pill>
                       ) : (
-                        <InlineCatSelect value={resolveCat(t.category ?? '')} onChange={c => applyCategory(t.id, c)} />
+                        <InlineCatSelect
+                          value={resolveCat(t.category ?? '', t.transaction_type, t.transfer_direction)}
+                          type={t.transaction_type}
+                          direction={t.transfer_direction === 'in' ? 'in' : 'out'}
+                          onChange={c => applyCategory(t.id, c)}
+                        />
                       )}
                     </td>
                     <td className="td text-[12px]">{accName.get(t.account_id ?? '') ?? '—'}</td>
@@ -1270,9 +1306,10 @@ export function TransactionsClient({
                     <InlineCatSelect
                       value={resolveCat(r.category ?? '')}
                       onChange={async c => {
-                        const label = CATS[c].label;
-                        setRules(prev => prev.map(x => (x.id === r.id ? {...x, category: label} : x)));
-                        await supabase.from('merchant_rules').update({category: label}).eq('id', r.id);
+                        // The id: a rule is direction-free, and is resolved against each
+                        // transaction's own direction when it is applied.
+                        setRules(prev => prev.map(x => (x.id === r.id ? {...x, category: c} : x)));
+                        await supabase.from('merchant_rules').update({category: c}).eq('id', r.id);
                       }}
                     />
                     <span className="tabnum text-[11px] text-ink3">
@@ -1331,7 +1368,9 @@ function TxnDrawer({
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [merchant, setMerchant] = useState(txn.merchant || txn.payee || '');
-  const [catId, setCatId] = useState<CategoryId>(resolveCat(txn.category ?? ''));
+  const [catId, setCatId] = useState<CategoryId>(
+    resolveCat(txn.category ?? '', txn.transaction_type, txn.transfer_direction),
+  );
   const [subcategory, setSubcategory] = useState(txn.subcategory ?? '');
   const [txType, setTxType] = useState(txn.transaction_type ?? 'expense');
   const [amount, setAmount] = useState(String(Math.round(txn.amount ?? 0)));
@@ -1407,8 +1446,9 @@ function TxnDrawer({
       const patch: Partial<Transaction> = {
         amount: numericAmount,
         account_id: accountId || txn.account_id,
-        category: txType === 'transfer' ? txn.category : CATS[catId].label,
-        subcategory: txType === 'transfer' ? null : subcategory || null,
+        // The v2 id, valid for the final type (transfers have real categories too).
+        category: coerceForType(catId, txType, newDirection),
+        subcategory: subcategory || null,
         transaction_type: txType,
         transfer_direction: newDirection,
         note: note || null,
@@ -1579,11 +1619,13 @@ function TxnDrawer({
             </div>
           </FieldRow>
 
-          {txType !== 'transfer' && (
+          {(
             <>
               <FieldRow label="Category">
                 <InlineCatSelect
-                  value={catId}
+                  value={coerceForType(catId, txType, txn.transfer_direction)}
+                  type={txType}
+                  direction={txn.transfer_direction === 'in' ? 'in' : 'out'}
                   onChange={c => {
                     setCatId(c);
                     setSubcategory('');
@@ -1699,7 +1741,7 @@ function TxnDrawer({
                     onClick={() =>
                       setSplitRows([
                         {category: catId, subcategory, amount: Math.ceil(numericAmount / 2)},
-                        {category: 'shopping', subcategory: '', amount: Math.floor(numericAmount / 2)},
+                        {category: 'other_spending', subcategory: '', amount: Math.floor(numericAmount / 2)},
                       ])
                     }>
                     + Split

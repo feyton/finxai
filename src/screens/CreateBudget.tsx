@@ -14,7 +14,7 @@ import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {CatChip, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {useSubcategories} from '../hooks/useSubcategories';
-import {CATS, CategoryId, FONTS, R, T, fmtAmount} from '../theme';
+import {CATS, CategoryId, FONTS, R, T, categoriesForType, fmtAmount} from '../theme';
 
 function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -281,7 +281,9 @@ export default function CreateBudget({navigation}: any) {
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{gap: 8, paddingBottom: 10}}>
-                {(Object.values(CATS) as {id: CategoryId; label: string; color: string}[]).map(c => {
+                {/* Spending only: budgets match expense transactions, so a cap on
+                    Savings or a loan (transfers in taxonomy v2) could never fill. */}
+                {categoriesForType('expense').map(id => CATS[id]).map(c => {
                   const on = pickCat === c.id;
                   return (
                     <Pressable

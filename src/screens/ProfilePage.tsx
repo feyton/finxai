@@ -15,8 +15,7 @@ import {Avatar, Card, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {appAlert} from '../Components/AppDialog';
 import {APP_VERSION} from '../appVersion';
-import {FONTS, R, T} from '../theme';
-import categoriesData from '../tools/data.json';
+import {FONTS, R, T, categoriesForType} from '../theme';
 import {clearMyData, hasSeededData, seedDemoData} from '../tools/seed';
 import {supabase} from '../tools/supabase';
 import {checkForUpdate, UpdateInfo} from '../tools/updateChecker';
@@ -92,7 +91,7 @@ export default function ProfilePage({navigation}: any) {
     [accounts],
   );
   const categoryCount = useMemo(
-    () => categoriesData.categories.filter(c => c.type === 'expense').length,
+    () => categoriesForType('expense').length,
     [],
   );
   const upcoming = (scheduled as any[]).length + (subs as any[]).length;

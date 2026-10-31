@@ -30,12 +30,9 @@ const FILES = [
   // Tags: both clients total a tag, and a different rule for transfers on one side
   // would show the same errand as settled on the phone and owing on the web.
   ['shared/tags.ts', 'apps/web/src/lib/shared/tags.ts'],
-  // The category taxonomy itself, not just the code that resolves it. This was
-  // an unguarded hand-copy until 2026-08-30 — the exact shape of the bug the
-  // drift test above was written for, one directory over. A subcategory added
-  // on the phone and missing on the web silently re-buckets spending in every
-  // report the web renders.
-  ['src/tools/data.json', 'apps/web/src/lib/subcategories.json'],
+  // (src/tools/data.json → apps/web/src/lib/subcategories.json used to be copied
+  // here. Taxonomy v2 moved subcategories into shared/categories.ts, which the
+  // shared/ copy above already carries.)
 ];
 
 let changed = 0;

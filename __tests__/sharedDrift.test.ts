@@ -55,58 +55,24 @@ describe('shared/ copies in apps/web', () => {
     expect(copy).toBe(source);
   });
 
-  // The taxonomy DATA, not just the code that reads it. Both clients bucket
-  // spending by these ids, so a subcategory added on the phone and missing on
-  // the web re-files transactions in every web report — the same failure as the
-  // resolveCat drift above, with no code change to notice.
-  it('the category taxonomy is byte-identical too', () => {
-    const source = normalise(
-      readFileSync(join(__dirname, '..', 'src', 'tools', 'data.json'), 'utf8'),
-    );
-    const copy = normalise(
-      readFileSync(
-        join(__dirname, '..', 'apps', 'web', 'src', 'lib', 'subcategories.json'),
-        'utf8',
-      ),
-    );
-    if (source !== copy) {
-      throw new Error(
-        'apps/web/src/lib/subcategories.json has drifted from src/tools/data.json. ' +
-          'Run `npm run sync:shared`. Do NOT edit the copy — edit src/tools/data.json.',
-      );
-    }
-    expect(copy).toBe(source);
-  });
+  // The taxonomy DATA used to live in src/tools/data.json with a byte-copy in
+  // apps/web/src/lib/subcategories.json, guarded here. Since taxonomy v2
+  // (2026-10-31) every category's subcategories live inside shared/categories.ts,
+  // so the identity check above guards them too and the JSON pair is gone.
 
-  it('both sides agree on the set of category ids', () => {
-    // Parsed rather than textual, so this still fails usefully if the two files
-    // are ever legitimately formatted differently.
-    const ids = (raw: string) =>
-      JSON.parse(raw).categories.map((c: any) => c.id).sort();
-    expect(
-      ids(readFileSync(join(__dirname, '..', 'apps', 'web', 'src', 'lib', 'subcategories.json'), 'utf8')),
-    ).toEqual(ids(readFileSync(join(__dirname, '..', 'src', 'tools', 'data.json'), 'utf8')));
-  });
-
-  it('the copy still carries the branches whose absence caused the reporting bugs', () => {
-    // Belt-and-braces: even if the identity check were somehow bypassed, these are the
-    // specific behaviours that were wrong on the web.
-    const copy = readFileSync(copyOf('categories.ts'), 'utf8');
-    expect(copy).toContain("s.includes('housing')");
-    for (const id of [
-      'personal_care',
-      'housing',
-      'technology',
-      'debt',
-      'gifts',
-      'misc',
-      'freelance',
-    ]) {
-      expect(copy).toContain(`${id}:`);
-    }
-    // 'housing' must be tested BEFORE 'rent', because "Housing" contains "house".
-    expect(copy.indexOf("s.includes('housing')")).toBeLessThan(
-      copy.indexOf("s.includes('rent')"),
-    );
+  it('the web copy still answers the inputs that caused the reporting bugs', () => {
+    // Behaviour, not source text: v2 replaced the if-chain with a keyword table, so
+    // asserting on `s.includes(...)` strings would test the old implementation.
+    // These are the exact values the web once mis-filed (~423,000 RWF in a month).
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const web = require('../apps/web/src/lib/shared/categories');
+    expect(web.resolveCat('Housing')).toBe('housing');
+    expect(web.resolveCat('Personal Care')).toBe('personal_care');
+    // v1 ids that collapsed into Shopping on the web — each keeps a real v2 home.
+    expect(web.resolveCat('technology')).toBe('shopping');
+    expect(web.resolveCat('debt')).toBe('loan_repayment');
+    expect(web.resolveCat('gifts')).toBe('giving');
+    expect(web.resolveCat('misc')).toBe('other_spending');
+    expect(web.resolveCat('freelance')).toBe('business');
   });
 });
