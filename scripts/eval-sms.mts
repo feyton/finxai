@@ -270,7 +270,10 @@ function scoreOne(parsed: any, expected: any) {
     // app uses instead of being compared as raw strings.
     // Direction-aware since taxonomy v2: a v1 label is read with the row's own
     // type, so "family" on income compares as Money from Family.
-    category: wantTransfer
+    // Scored for transfers too since taxonomy v2: To Savings, Loan Repayment and
+    // Between My Accounts are real answers now, not a category-less "transfer".
+    // A label with no category (legacy) is still not scored.
+    category: !expected.category
       ? null
       : resolveCat(String(parsed.category ?? ''), parsed.isTransfer ? 'transfer' : parsed.direction === 'credit' ? 'income' : 'expense') ===
         resolveCat(String(expected.category ?? ''), expected.transaction_type),

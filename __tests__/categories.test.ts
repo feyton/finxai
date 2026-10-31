@@ -186,3 +186,13 @@ describe('BK eKash transfers name the person', () => {
     expect(parseWithRegex(ekash, {}).merchant).toBe('Jean Tester');
   });
 });
+
+describe('a "savings" rule cannot file a MoKash withdrawal as a deposit', () => {
+  const rule = {pattern: 'mokash', category: 'to_savings', subcategory: '', display_name: null, correction_count: 1, confirmation_count: 0} as any;
+  it('withdrawal → From Savings, deposit → To Savings, under the same rule', () => {
+    const out = "Y'ello. You have transferred RWF 5000 from your Mokash account on 01/01/2026 at 5:32 PM. Mokash balance is RWF 985. Ref 1000000002";
+    const dep = "Y'ello. You have deposited RWF 1000 into Mokash from your Mobile Money Account. Your new  Mokash balance is RWF 1500.Ref 1000000001";
+    expect(parseWithRegex(out, {rules: [rule]}).category).toBe('from_savings');
+    expect(parseWithRegex(dep, {rules: [rule]}).category).toBe('to_savings');
+  });
+});

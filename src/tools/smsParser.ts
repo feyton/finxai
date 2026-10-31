@@ -113,7 +113,13 @@ function enforceDirection(
   category: CategoryId,
   isTransfer: boolean,
   subcategory: string,
+  savingsMove?: 'into' | 'out' | null,
 ): {category: CategoryId; isTransfer: boolean; subcategory: string} {
+  // Into vs out of savings is a fact of the words, so it overrides a rule, the
+  // model or a person that only said "savings".
+  if (savingsMove && (category === 'to_savings' || category === 'from_savings')) {
+    category = savingsMove === 'into' ? 'to_savings' : 'from_savings';
+  }
   const transferish = isTransfer || typeForCategory(category) === 'transfer';
   const type = transferish ? 'transfer' : direction === 'credit' ? 'income' : 'expense';
   const finalCat = coerceForType(category, type, direction === 'credit' ? 'in' : 'out');
@@ -523,6 +529,18 @@ export interface RegexFacts {
   counterpartyNumber: string | null;
   // Set when the counterparty is one of the user's OWN accounts.
   transferAccount: OwnAccountRef | null;
+  // Which way the money moves relative to SAVINGS, read from the words — not
+  // the leg. 'into' = a deposit (either leg), 'out' = taken out of savings.
+  // A v1 "mokash → savings" rule became To Savings and was applied to every
+  // MoKash SMS, filing each withdrawal as a deposit; this is what corrects it.
+  savingsMove?: 'into' | 'out' | null;
+}
+
+/** Into or out of savings, from the SMS wording (English and Kinyarwanda). */
+export function savingsMoveOf(raw: string): 'into' | 'out' | null {
+  if (/from your mokash account|kuva kuri konti mokash/i.test(raw)) return 'out';
+  if (/into mokash|by mokash savings account|umaze kubitsa|ejo ?heza/i.test(raw)) return 'into';
+  return null;
 }
 
 export function regexExtract(raw: string, ctx?: ParseContext): RegexFacts {
@@ -577,6 +595,7 @@ export function regexExtract(raw: string, ctx?: ParseContext): RegexFacts {
     occurred_at: extractOccurredAt(raw) ?? extractBprDate(raw) ?? extractBkV2Date(raw),
     channelHint: detectChannel(raw, direction === 'credit'),
     payCode: extractPayCode(raw),
+    savingsMove: savingsMoveOf(raw),
     counterpartyNumber,
     transferAccount,
   };
@@ -913,7 +932,7 @@ function factsToParsed(
   parseSource: 'ai' | 'regex' = 'regex',
   fallbackReason?: string,
 ): ParsedSMS {
-  const valid = enforceDirection(f.direction, category, isTransfer, subcategory);
+  const valid = enforceDirection(f.direction, category, isTransfer, subcategory, f.savingsMove);
   return {
     parseSource,
     fallbackReason,

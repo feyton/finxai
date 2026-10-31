@@ -5,6 +5,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {Card, Icon, Progress} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {FONTS, R, T, fmtAmount} from '../theme';
+import {loanPosition} from '../tools/flows';
 
 export default function DebtScreen({navigation}: any) {
   const {userId} = useCurrentUser();
@@ -12,6 +13,19 @@ export default function DebtScreen({navigation}: any) {
     'SELECT * FROM debts WHERE owner_id = ? ORDER BY created_at DESC',
     [userId ?? ''],
   );
+
+  // Loans read straight from the SMS ledger (taxonomy v2 loan categories): a
+  // MoKash loan arriving, its repayments, money lent and paid back. Kept apart
+  // from the debts entered by hand above — those carry terms and rates; these
+  // are what actually moved.
+  const {data: loanRows} = useQuery(
+    `SELECT category, amount, transfer_direction, account_id, date_time, merchant
+       FROM transactions
+      WHERE owner_id = ? AND category IN ('loan_received', 'loan_repayment', 'lent_out', 'repaid_to_me')
+      ORDER BY date_time DESC`,
+    [userId ?? ''],
+  );
+  const fromSms = useMemo(() => loanPosition((loanRows as any[]) ?? []), [loanRows]);
 
   const {youOwe, owedToYou, insight} = useMemo(() => {
     const list = debts as any[];
@@ -76,6 +90,31 @@ export default function DebtScreen({navigation}: any) {
             <Text style={styles.summaryUnit}>RWF to collect</Text>
           </View>
         </View>
+
+        {/* From the SMS ledger */}
+        {(fromSms.borrowed > 0 || fromSms.lent > 0) && (
+          <View style={styles.smsCard}>
+            <View style={styles.smsHead}>
+              <Icon name="MessageSquare" size={15} color={T.accent} strokeWidth={2.2} />
+              <Text style={styles.smsTitle}>From your SMS</Text>
+            </View>
+            {fromSms.borrowed > 0 && (
+              <Text style={styles.smsLine}>
+                Borrowed {fmtAmount(fromSms.borrowed)} · repaid {fmtAmount(fromSms.repaid)}
+                {fromSms.owed > 0 ? ` · ≈ ${fmtAmount(fromSms.owed)} still to repay` : ' · repaid in full'}
+              </Text>
+            )}
+            {fromSms.lent > 0 && (
+              <Text style={styles.smsLine}>
+                Lent {fmtAmount(fromSms.lent)} · paid back {fmtAmount(fromSms.repaidToMe)}
+                {fromSms.owedToMe > 0 ? ` · ≈ ${fmtAmount(fromSms.owedToMe)} still owed to you` : ' · settled'}
+              </Text>
+            )}
+            <Text style={styles.smsNote}>
+              Approximate: interest and fees make repayments larger than the loan.
+            </Text>
+          </View>
+        )}
 
         {/* AI insight */}
         {insight && (
@@ -154,6 +193,18 @@ export default function DebtScreen({navigation}: any) {
 }
 
 const styles = StyleSheet.create({
+  smsCard: {
+    padding: 14,
+    gap: 6,
+    borderRadius: R.card,
+    backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  smsHead: {flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2},
+  smsTitle: {fontFamily: FONTS.semibold, fontSize: 13.5, color: T.text},
+  smsLine: {fontFamily: FONTS.regular, fontSize: 13, color: T.text2, lineHeight: 19},
+  smsNote: {fontFamily: FONTS.regular, fontSize: 11.5, color: T.text3, marginTop: 2},
   root: {flex: 1, backgroundColor: T.bg},
   header: {
     flexDirection: 'row',

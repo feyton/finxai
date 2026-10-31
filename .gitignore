@@ -82,6 +82,7 @@ keystore_base64.txt
 eval/golden.json
 eval/report.json
 eval/*.local.json
+eval/*.local.*.json
 eval/*.log
 eval/*.mts
 eval/*.sql

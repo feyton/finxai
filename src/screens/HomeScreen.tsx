@@ -26,6 +26,7 @@ import {format} from 'date-fns';
 import {reconnect} from '../tools/database';
 import {syncAccountBalance} from '../tools/balance';
 import {forceResync, pendingUploadGap, repairSync, syncHealth} from '../tools/syncRepair';
+import {loanPosition, netSaved} from '../tools/flows';
 
 function monthStart() {
   const d = new Date();
@@ -231,6 +232,18 @@ export default function HomeScreen({navigation}: any) {
     "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE owner_id = ? AND transaction_type = 'expense' AND date_time >= ?",
     [userId ?? '', ms],
   );
+  // Savings and loans are transfers under taxonomy v2 — out of Income and Spent,
+  // so they get their own line (src/tools/flows.ts handles MoKash's double legs).
+  const {data: savingsRows} = useQuery(
+    `SELECT category, amount, transfer_direction, account_id, sms FROM transactions
+      WHERE owner_id = ? AND category IN ('to_savings', 'from_savings') AND date_time >= ?`,
+    [userId ?? '', ms],
+  );
+  const {data: loanRows} = useQuery(
+    `SELECT category, amount, transfer_direction, account_id FROM transactions
+      WHERE owner_id = ? AND category IN ('loan_received', 'loan_repayment', 'lent_out', 'repaid_to_me')`,
+    [userId ?? ''],
+  );
   const {data: smsQueue} = useQuery(
     'SELECT COUNT(*) as cnt FROM auto_records WHERE owner_id = ?',
     [userId ?? ''],
@@ -244,6 +257,8 @@ export default function HomeScreen({navigation}: any) {
   const totalIncome = incomeRows?.[0]?.total ?? 0;
   const totalExpenses = expenseRows?.[0]?.total ?? 0;
   const pendingSms = (smsQueue?.[0] as any)?.cnt ?? 0;
+  const savedThisMonth = netSaved((savingsRows as any[]) ?? [], (accounts as any[]) ?? []);
+  const loans = loanPosition((loanRows as any[]) ?? []);
 
   // Month-over-month balance trend: the balance on the 1st is today's balance
   // minus this month's net flow (transfers are internal — net zero).
@@ -477,6 +492,30 @@ export default function HomeScreen({navigation}: any) {
                 </View>
               ))}
             </View>
+            {(savedThisMonth !== 0 || loans.owed > 0 || loans.owedToMe > 0) && (
+              <Pressable
+                onPress={() => navigate('Debt')}
+                style={({pressed}) => [styles.flowLine, {opacity: pressed ? 0.75 : 1}]}>
+                {savedThisMonth !== 0 && (
+                  <Text style={styles.flowText}>
+                    <Text style={{color: T.accent}}>{savedThisMonth > 0 ? 'Saved' : 'Took from savings'}</Text>
+                    {` this month · ${fmtAmount(Math.abs(savedThisMonth))}`}
+                  </Text>
+                )}
+                {loans.owed > 0 && (
+                  <Text style={styles.flowText}>
+                    <Text style={{color: T.expense}}>Loans to repay</Text>
+                    {` · ≈ ${fmtAmount(loans.owed)}`}
+                  </Text>
+                )}
+                {loans.owedToMe > 0 && (
+                  <Text style={styles.flowText}>
+                    <Text style={{color: T.income}}>Owed to you</Text>
+                    {` · ≈ ${fmtAmount(loans.owedToMe)}`}
+                  </Text>
+                )}
+              </Pressable>
+            )}
           </View>
 
           {/* Accounts rail */}
@@ -820,6 +859,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addAcctLabel: {fontFamily: FONTS.semibold, fontSize: 11, color: T.text2},
+  flowLine: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    columnGap: 14,
+    rowGap: 4,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: T.border,
+  },
+  flowText: {fontFamily: FONTS.medium, fontSize: 12.5, color: T.text2},
   quickGrid: {
     flexDirection: 'row',
     gap: 8,
