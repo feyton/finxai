@@ -3,6 +3,7 @@ import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {CATS, FONTS, R, T, fmtAmount, resolveCat} from '../theme';
 import {Icon} from './ui';
+import {colorForName} from '../../shared/tags';
 
 interface TxRowProps {
   tx: any;
@@ -56,6 +57,17 @@ function TxRowImpl({tx, onPress}: TxRowProps) {
           {catLabel && rest ? '  ·  ' : ''}
           {rest}
         </Text>
+        {/* `_tags` is resolved by the parent (RecordsPage) — names live in another
+            table, and a per-row lookup would defeat this component's memo. */}
+        {tx._tags?.length ? (
+          <Text style={styles.tags} numberOfLines={1}>
+            {tx._tags.map((tg: any, i: number) => (
+              <Text key={tg.id} style={{color: tg.color || colorForName(tg.name ?? '')}}>
+                {i ? '   ' : ''}# {tg.name}
+              </Text>
+            ))}
+          </Text>
+        ) : null}
       </View>
       <Text style={[styles.amount, {color: amountColor}]}>
         {sign}RWF {fmtAmount(tx.amount ?? 0)}
@@ -83,5 +95,6 @@ const styles = StyleSheet.create({
   mid: {flex: 1},
   label: {fontFamily: FONTS.medium, fontSize: 13.5, color: T.text},
   sub: {fontFamily: FONTS.regular, fontSize: 11.5, color: T.text3, marginTop: 1},
+  tags: {fontFamily: FONTS.medium, fontSize: 11, marginTop: 1},
   amount: {fontFamily: FONTS.semibold, fontSize: 13, flexShrink: 0},
 });

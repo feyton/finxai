@@ -26,6 +26,9 @@ import {reclassifySms} from '../tools/smsIngest';
 import {supabase} from '../tools/supabase';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {appAlert} from './AppDialog';
+import TagPicker, {TagPill} from './TagPicker';
+import {parseTagIds} from '../../shared/tags';
+import {ensureTag, setTransactionTags, type TagRow} from '../tools/tags';
 import {Icon, LocationChip} from './ui';
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -79,6 +82,13 @@ function TransactionDetailSheet(
 
   // Needed for the classifier's context: it matches counterparty account numbers
   // against the user's own accounts to decide whether a payment is really a transfer.
+  const {data: allTags} = useQuery<TagRow>(
+    'SELECT id, name, color, note, archived FROM tags WHERE owner_id = ?',
+    [userId ?? ''],
+  );
+  const tagById = useMemo(() => new Map(allTags.map(t => [t.id, t])), [allTags]);
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+
   const {data: myAccounts} = useQuery(
     'SELECT id, name, number FROM accounts WHERE owner_id = ?',
     [userId ?? ''],
@@ -135,6 +145,51 @@ function TransactionDetailSheet(
       setRetrying(false);
     }
   }, [selected, retrying, db, userId, name, myAccounts]);
+
+  // Tags are saved the moment they are toggled — there is no Save button on this
+  // sheet, and making tagging a trip through the Edit screen would mean nobody
+  // does it. `next` is always built from the row's FULL id list, so ids this
+  // device has no tag row for (a shared account owner's tags) survive an edit.
+  const writeTags = useCallback(
+    async (next: string[]) => {
+      if (!selected) {
+        return;
+      }
+      try {
+        const value = await setTransactionTags(db, selected.id, selected.tag_ids, next);
+        // The sheet renders from `selected`, not a live query — same reason as
+        // retrySelected above.
+        setSelected((prev: any) => (prev && prev.id === selected.id ? {...prev, tag_ids: value} : prev));
+      } catch (e) {
+        console.warn('[TxDetail] tag write failed:', e);
+        appAlert('Could not save tags', 'Try again in a moment.');
+      }
+    },
+    [db, selected],
+  );
+
+  const toggleTag = useCallback(
+    (tag: TagRow) => {
+      const cur = parseTagIds(selected?.tag_ids);
+      writeTags(cur.includes(tag.id) ? cur.filter(id => id !== tag.id) : [...cur, tag.id]);
+    },
+    [selected, writeTags],
+  );
+
+  const createAndAddTag = useCallback(
+    async (tagName: string) => {
+      try {
+        const tag = await ensureTag(db, tagName, userId ?? '');
+        const cur = parseTagIds(selected?.tag_ids);
+        if (!cur.includes(tag.id)) {
+          await writeTags([...cur, tag.id]);
+        }
+      } catch (e: any) {
+        appAlert('Could not create tag', e?.message ?? 'Try again in a moment.');
+      }
+    },
+    [db, userId, selected, writeTags],
+  );
 
   useImperativeHandle(
     ref,
@@ -214,6 +269,8 @@ function TransactionDetailSheet(
   const conf = tx?.confidence != null && tx.confidence < 1 ? ` · ${Math.round(tx.confidence * 100)}%` : '';
   const sourceStr = tx ? (SOURCE_LABEL[tx.source] ?? 'Manual entry') + conf : '';
   const splits = (selectedSplits as any[]) ?? [];
+  const txTagIds = parseTagIds(tx?.tag_ids);
+  const txTags = txTagIds.map(id => tagById.get(id)).filter((t): t is TagRow => !!t);
 
   return (
     <BottomSheet
@@ -381,6 +438,34 @@ function TransactionDetailSheet(
                 )}
               </View>
 
+              {/* Tags. Shown to anyone who can edit even when empty, so the feature
+                  is discoverable from the one place every transaction is opened. */}
+              {(canEdit || txTags.length > 0) && (
+                <View style={styles.infoCard}>
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Tags</Text>
+                    <View style={styles.tagWrap}>
+                      {txTags.map(t => (
+                        <TagPill
+                          key={t.id}
+                          tag={t}
+                          onRemove={canEdit ? () => toggleTag(t) : undefined}
+                        />
+                      ))}
+                      {canEdit && (
+                        <Pressable
+                          onPress={() => setTagPickerOpen(true)}
+                          hitSlop={8}
+                          style={({pressed}) => [styles.addTag, {opacity: pressed ? 0.6 : 1}]}>
+                          <Icon name="Tag" size={11} color={T.accent} strokeWidth={2.4} />
+                          <Text style={styles.retryText}>{txTags.length ? 'Edit' : 'Add tag'}</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  </View>
+                </View>
+              )}
+
               {tx.sms ? (
                 <View style={styles.infoCard}>
                   <View style={styles.infoRow}>
@@ -444,6 +529,14 @@ function TransactionDetailSheet(
           </GestureDetector>
         )}
       </BottomSheetScrollView>
+      <TagPicker
+        visible={tagPickerOpen}
+        ownerId={userId ?? ''}
+        selected={txTagIds}
+        onToggle={toggleTag}
+        onCreate={createAndAddTag}
+        onClose={() => setTagPickerOpen(false)}
+      />
     </BottomSheet>
   );
 }
@@ -509,6 +602,16 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   splitDot: {width: 8, height: 8, borderRadius: 4},
+  tagWrap: {flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6, flexShrink: 1},
+  addTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: R.small,
+    backgroundColor: T.accentSoft,
+  },
   detailBtns: {
     flexDirection: 'row',
     gap: 10,

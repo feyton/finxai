@@ -38,6 +38,7 @@ const TABLES = [
   'transactions',
   'accounts',
   'budgets',
+  'tags',
 ];
 
 let leaking = 0;

@@ -59,6 +59,9 @@ bucket_definitions:
 
       - SELECT * FROM merchant_rules WHERE owner_id::text = bucket.user_id
       - SELECT * FROM subcategories WHERE owner_id::text = bucket.user_id
+      # v21. Owner only: a shared editor sees tag_ids on shared transactions
+      # (the column rides on the row) but not the owner's tag names.
+      - SELECT * FROM tags WHERE owner_id::text = bucket.user_id
       - SELECT * FROM user_settings WHERE owner_id::text = bucket.user_id
       - SELECT * FROM shared_people WHERE owner_id::text = bucket.user_id
 

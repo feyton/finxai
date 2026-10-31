@@ -60,6 +60,8 @@ export interface Transaction {
   // a previous device-located payment to the same merchant (v17). Do not render
   // an inherited pin as though it were measured.
   location_source: string | null;
+  // JSON array of tags.id as text (v21). Read via lib/shared/tags parseTagIds.
+  tag_ids: string | null;
   owner_id: string;
   created_at: string | null;
 }
@@ -138,6 +140,17 @@ export interface AccountShare {
   shared_with_id: string | null;
   access: string; // 'view' | 'edit'
   status: string; // 'pending' | 'active'
+  created_at: string | null;
+}
+
+/** A label that cuts across categories — see supabase_migration_v21.sql. */
+export interface Tag {
+  id: string;
+  name: string;
+  color: string | null;
+  note: string | null;
+  archived: number | null;
+  owner_id: string;
   created_at: string | null;
 }
 

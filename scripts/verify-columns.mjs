@@ -30,6 +30,9 @@ const EXPECTED = [
   // v17 — merchant->place memory
   ['transactions', 'location_source'],
   ['auto_records', 'location_source'],
+  // v21 — tags
+  ['transactions', 'tag_ids'],
+  ['tags', 'name,color,note,archived'],
 ];
 
 let missing = 0;

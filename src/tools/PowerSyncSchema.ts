@@ -57,6 +57,9 @@ const transactions = new Table({
   // device-located payment to the same merchant (v17). Never inherit from an
   // inherited row — see merchantLocation in smsIngest.
   location_source: column.text,
+  // JSON array of tags.id as text (v21). Read/write ONLY via shared/tags.ts —
+  // NULL, '' and '[]' all mean untagged.
+  tag_ids: column.text,
   owner_id: column.text,
   created_at: column.text,
 });
@@ -319,6 +322,17 @@ const user_settings = new Table({
   updated_at: column.text,
 });
 
+// Labels that cut across categories — "bought for Aline", "Kigali trip".
+// See supabase_migration_v21.sql.
+const tags = new Table({
+  name: column.text,
+  color: column.text,
+  note: column.text,
+  archived: column.integer, // 0/1
+  owner_id: column.text,
+  created_at: column.text,
+});
+
 const shared_people = new Table({
   name: column.text,
   role: column.text,
@@ -354,4 +368,5 @@ export const AppSchema = new Schema({
   shared_people,
   merchant_rules,
   user_settings,
+  tags,
 });

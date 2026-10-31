@@ -19,6 +19,9 @@ import {TxRow} from '../Components/TxRow';
 import {Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {FONTS, R, T, fmtAmount} from '../theme';
+import {tagColor} from '../Components/TagPicker';
+import {parseTagIds, tagTotals} from '../../shared/tags';
+import type {TagRow} from '../tools/tags';
 
 type FilterType = 'all' | 'income' | 'expense' | 'transfer' | 'ai';
 
@@ -48,9 +51,39 @@ export default function RecordsPage({navigation, route}: any) {
     [userId ?? ''],
   );
 
+  const {data: tags} = useQuery<TagRow>(
+    'SELECT id, name, color, note, archived FROM tags WHERE owner_id = ? ORDER BY created_at DESC',
+    [userId ?? ''],
+  );
+  const tagById = useMemo(() => new Map(tags.map(t => [t.id, t])), [tags]);
+  // Tag names resolved once per data change, not per row render — TxRow is memoized
+  // on row identity, so this is also what makes a renamed tag repaint the list.
+  const rows = useMemo(
+    () =>
+      (txns as any[]).map(t => {
+        const ids = parseTagIds(t.tag_ids);
+        if (!ids.length) {
+          return t;
+        }
+        const tg = ids.map(id => tagById.get(id)).filter(Boolean) as TagRow[];
+        return tg.length ? {...t, _tags: tg} : t;
+      }),
+    [txns, tagById],
+  );
+
   const tabBarHeight = useBottomTabBarHeight();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
+  // Separate from the type filter so the two combine: "Spending" + "#Aline".
+  const [tagId, setTagId] = useState<string | null>(null);
+  const activeTag = tagId ? tagById.get(tagId) ?? null : null;
+  // The tag's whole history, not the current month and not the type filter: the
+  // question this answers is "where does this errand stand", which must not change
+  // because "Spending" happens to be selected.
+  const tagSummary = useMemo(
+    () => (tagId ? tagTotals((txns as any[]).filter(t => parseTagIds(t.tag_ids).includes(tagId))) : null),
+    [txns, tagId],
+  );
   const sheetRef = useRef<TransactionDetailSheetHandle>(null);
 
   const monthTotals = useMemo(() => {
@@ -76,7 +109,10 @@ export default function RecordsPage({navigation, route}: any) {
   // flatList = the filtered rows in display order — powers prev/next
   // navigation in the detail sheet.
   const {sections, flatList} = useMemo(() => {
-    let list = txns as any[];
+    let list = rows;
+    if (tagId) {
+      list = list.filter(t => parseTagIds(t.tag_ids).includes(tagId));
+    }
     if (filter === 'ai') {
       list = list.filter(t => t.source === 'sms' || t.source === 'ai');
     } else if (filter !== 'all') {
@@ -87,7 +123,8 @@ export default function RecordsPage({navigation, route}: any) {
       list = list.filter(
         t =>
           (t.merchant || t.payee || '').toLowerCase().includes(q) ||
-          (t.category || '').toLowerCase().includes(q),
+          (t.category || '').toLowerCase().includes(q) ||
+          (t._tags ?? []).some((tg: TagRow) => (tg.name ?? '').toLowerCase().includes(q)),
       );
     }
 
@@ -109,7 +146,7 @@ export default function RecordsPage({navigation, route}: any) {
         .reduce((s: number, t: any) => s + (t.amount ?? 0), 0),
     }));
     return {sections: secs, flatList: list};
-  }, [txns, filter, search]);
+  }, [rows, filter, search, tagId]);
 
   const openDetail = useCallback((tx: any) => {
     sheetRef.current?.open(tx);
@@ -168,7 +205,34 @@ export default function RecordsPage({navigation, route}: any) {
         </View>
       </View>
 
-      {/* Money in / out summary */}
+      {/* Money in / out summary — for the month, or for the active tag */}
+      {activeTag && tagSummary ? (
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Spent</Text>
+            <Text style={[styles.summaryValue, {color: T.expense}]}>{fmtAmount(tagSummary.out)}</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Got back</Text>
+            <Text style={[styles.summaryValue, {color: T.income}]}>{fmtAmount(tagSummary.in)}</Text>
+          </View>
+          <View style={[styles.summaryCard, tagSummary.settled && {borderColor: T.income}]}>
+            <Text style={styles.summaryLabel}>
+              {tagSummary.settled ? 'Balance' : tagSummary.net < 0 ? 'Still out' : 'Ahead'}
+            </Text>
+            {tagSummary.settled ? (
+              <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
+                <Icon name="Check" size={15} color={T.income} strokeWidth={2.6} />
+                <Text style={[styles.summaryValue, {color: T.income}]}>Settled</Text>
+              </View>
+            ) : (
+              <Text style={[styles.summaryValue, {color: tagSummary.net < 0 ? T.expense : T.income}]}>
+                {fmtAmount(Math.abs(tagSummary.net))}
+              </Text>
+            )}
+          </View>
+        </View>
+      ) : (
       <View style={styles.summaryRow}>
         <View style={styles.summaryCard}>
           <View style={styles.summaryHead}>
@@ -191,6 +255,7 @@ export default function RecordsPage({navigation, route}: any) {
           </Text>
         </View>
       </View>
+      )}
 
       {/* Search */}
       <View style={styles.searchRow}>
@@ -235,6 +300,24 @@ export default function RecordsPage({navigation, route}: any) {
             </Text>
           </Pressable>
         ))}
+        {tags.filter(t => !t.archived || t.id === tagId).length > 0 && <View style={styles.chipDivider} />}
+        {tags
+          .filter(t => !t.archived || t.id === tagId)
+          .map(t => {
+            const on = t.id === tagId;
+            const c = tagColor(t);
+            return (
+              <Pressable
+                key={t.id}
+                onPress={() => setTagId(on ? null : t.id)}
+                style={[styles.chip, on && {backgroundColor: c + '26', borderColor: c}]}>
+                <Text style={[styles.chipText, {color: on ? c : T.text2}]}>
+                  <Text style={{color: c}}># </Text>
+                  {t.name}
+                </Text>
+              </Pressable>
+            );
+          })}
       </ScrollView>
 
       {/* Transaction list */}
@@ -258,8 +341,12 @@ export default function RecordsPage({navigation, route}: any) {
         ListEmptyComponent={
           <View style={styles.empty}>
             <Icon name="Receipt" size={42} color={T.text3} strokeWidth={1.4} />
-            <Text style={styles.emptyText}>No transactions yet</Text>
-            <Text style={styles.emptyHint}>Add one with the + button above</Text>
+            <Text style={styles.emptyText}>
+              {activeTag ? `Nothing tagged “${activeTag.name}” yet` : 'No transactions yet'}
+            </Text>
+            <Text style={styles.emptyHint}>
+              {activeTag ? 'Open a transaction and tap Add tag' : 'Add one with the + button above'}
+            </Text>
           </View>
         }
         contentContainerStyle={[styles.list, {paddingBottom: tabBarHeight + 28}]}
@@ -360,6 +447,7 @@ const styles = StyleSheet.create({
   // from fontSize alone on Android, which clips glyphs inside a tight pill.
   chipText: {fontFamily: FONTS.medium, fontSize: 12.5, lineHeight: 17, color: T.text2},
   chipTextActive: {color: T.accent},
+  chipDivider: {width: 1, height: 18, backgroundColor: T.border2, marginHorizontal: 2},
   list: {paddingBottom: 100},
   sectionHeader: {
     flexDirection: 'row',

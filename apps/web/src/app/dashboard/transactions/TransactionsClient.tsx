@@ -1,16 +1,158 @@
 'use client';
 
-import {format} from 'date-fns';
+import {endOfMonth, format, startOfMonth, subDays, subMonths} from 'date-fns';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {createClient} from '@/lib/supabase/client';
 import {CATS, type CategoryId, builtinSubcats, fmtAmount, resolveCat} from '@/lib/theme';
-import type {Account, Subcategory, Transaction} from '@/lib/types';
+import type {Account, Subcategory, Tag, Transaction} from '@/lib/types';
 import {Icon} from '@/components/Icon';
 import {Card, CatChip, Conf, LocationLink, Money, Pill, WEmpty} from '@/components/ui';
-import {rebalanceAccount} from '@/lib/reviewActions';
+import {rebalanceAccount, recordMerchantRule} from '@/lib/reviewActions';
+import {normalizeMerchant} from '@/lib/shared/merchantNormalize';
+import {parseTagIds, serializeTagIds, tagTotals} from '@/lib/shared/tags';
+import {applyTag, ensureTag} from '@/lib/tagActions';
+import {TagChip, TagPickerList, tagColor as tagColorOf} from '@/components/TagChip';
 
 const CAT_LIST = Object.values(CATS);
 const TYPE_OPTIONS = ['expense', 'income', 'transfer'] as const;
+
+const PERIODS = {
+  all: 'Any time',
+  d7: 'Last 7 days',
+  d30: 'Last 30 days',
+  month: 'This month',
+  lastMonth: 'Last month',
+} as const;
+type Period = keyof typeof PERIODS;
+
+function periodRange(p: Period): [number, number] {
+  const now = new Date();
+  switch (p) {
+    case 'd7':
+      return [subDays(now, 7).getTime(), Infinity];
+    case 'd30':
+      return [subDays(now, 30).getTime(), Infinity];
+    case 'month':
+      return [startOfMonth(now).getTime(), Infinity];
+    case 'lastMonth': {
+      const m = subMonths(now, 1);
+      return [startOfMonth(m).getTime(), endOfMonth(m).getTime()];
+    }
+    default:
+      return [-Infinity, Infinity];
+  }
+}
+
+type SortKey = 'date' | 'amount';
+
+/** Money out / in / moved for a set of rows. Transfers are kept apart: counting
+ *  MoMo → savings as spending is how "you spent 2M this month" stops being true. */
+function totalsOf(rows: Transaction[]) {
+  let out = 0;
+  let inn = 0;
+  let moved = 0;
+  for (const t of rows) {
+    const a = Math.abs(t.amount ?? 0);
+    if (t.transaction_type === 'income') inn += a;
+    else if (t.transaction_type === 'transfer') moved += a;
+    else out += a;
+  }
+  return {out, inn, moved, net: inn - out};
+}
+
+// `.in('id', ids)` puts every id in the query string. 36 chars each, so a "select
+// all 600" bulk edit is a ~22KB URL — past what proxies reliably pass. Batches keep
+// each request small; 150 ids is ~5.5KB.
+function chunk<T>(xs: T[], n = 150): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
+  return out;
+}
+
+function merchantKey(t: Transaction): string {
+  return normalizeMerchant(t.merchant || t.payee || '').key;
+}
+
+function toCsv(rows: Transaction[], accName: Map<string, string>, tagName: Map<string, string> = new Map()): string {
+  const head = 'date,merchant,category,subcategory,type,account,amount,fees,note,tags';
+  const lines = rows.map(t =>
+    [
+      t.date_time ?? '',
+      JSON.stringify(t.merchant ?? t.payee ?? ''),
+      JSON.stringify(t.category ?? ''),
+      JSON.stringify(t.subcategory ?? ''),
+      t.transaction_type ?? '',
+      JSON.stringify(accName.get(t.account_id ?? '') ?? ''),
+      t.amount ?? 0,
+      t.fees ?? 0,
+      JSON.stringify(t.note ?? ''),
+      JSON.stringify(
+        parseTagIds(t.tag_ids)
+          .map(id => tagName.get(id))
+          .filter(Boolean)
+          .join('; '),
+      ),
+    ].join(','),
+  );
+  return [head, ...lines].join('\n');
+}
+
+function download(csv: string, name: string) {
+  const blob = new Blob([csv], {type: 'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** A dropdown panel that closes on an outside click. */
+function Menu({
+  open,
+  onClose,
+  button,
+  children,
+  align = 'left',
+}: {
+  open: boolean;
+  onClose: () => void;
+  button: React.ReactNode;
+  children: React.ReactNode;
+  align?: 'left' | 'right';
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open, onClose]);
+  return (
+    <div ref={ref} className="relative">
+      {button}
+      {open && (
+        <div
+          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-[110%] z-30 max-h-[320px] min-w-[210px] overflow-y-auto rounded-[10px] p-1.5`}
+          style={{background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)'}}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({onClick, children}: {onClick: () => void; children: React.ReactNode}) {
+  return (
+    <div
+      onClick={onClick}
+      className="press flex cursor-pointer items-center gap-2 rounded-[7px] px-2 py-[7px] text-[12.5px] hover:bg-surface2">
+      {children}
+    </div>
+  );
+}
 
 // Balance-movement sign as originally recorded — type flips re-classify only.
 function movementSign(type: string | null, transferDirection?: string | null): number {
@@ -87,13 +229,19 @@ export function TransactionsClient({
   accounts,
   initialSplits,
   initialRules,
+  initialTags,
+  ownerId,
   presetAccount = 'all',
+  presetTag = 'all',
 }: {
   initialTx: Transaction[];
   accounts: Account[];
   initialSplits: any[];
   initialRules: any[];
+  initialTags: Tag[];
+  ownerId: string;
   presetAccount?: string;
+  presetTag?: string;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [tx, setTx] = useState<Transaction[]>(initialTx);
@@ -105,8 +253,21 @@ export function TransactionsClient({
   const [source, setSource] = useState('all');
   const [type, setType] = useState('all');
   const [onlyReview, setOnlyReview] = useState(false);
+  const [period, setPeriod] = useState<Period>('all');
+  const [tags, setTags] = useState<Tag[]>(initialTags);
+  // 'all' | 'any' (has at least one tag) | 'none' | a tag id
+  const [tagFilter, setTagFilter] = useState(presetTag);
+  const [sort, setSort] = useState<{key: SortKey; dir: 'asc' | 'desc'}>({key: 'date', dir: 'desc'});
   const [sel, setSel] = useState<Set<string>>(new Set());
-  const [bulkCat, setBulkCat] = useState(false);
+  const [menu, setMenu] = useState<'cat' | 'type' | 'tag' | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  // Off by default: a bulk recategorize is often a one-off cleanup ("these were
+  // all a trip"), and a rule would keep filing that merchant there forever.
+  const [teach, setTeach] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  // Shift-click range selection needs the row the previous click landed on.
+  const anchor = useRef<number | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -122,7 +283,7 @@ export function TransactionsClient({
   // filter does not silently carry a huge limit into a broad one.
   useEffect(() => {
     setLimit(PAGE);
-  }, [q, acct, cat, source, type, onlyReview]);
+  }, [q, acct, cat, source, type, onlyReview, period, tagFilter]);
 
   useEffect(() => {
     supabase
@@ -133,6 +294,14 @@ export function TransactionsClient({
 
 
   const accName = useMemo(() => new Map(accounts.map(a => [a.id, a.name ?? 'Account'])), [accounts]);
+  const tagById = useMemo(() => new Map(tags.map(t => [t.id, t])), [tags]);
+  const tagName = useMemo(() => new Map(tags.map(t => [t.id, t.name])), [tags]);
+  // Ids with no tag row behind them (deleted, or a shared editor's own tag) are
+  // skipped rather than rendered as blank chips.
+  const tagsOf = useCallback(
+    (t: Transaction) => parseTagIds(t.tag_ids).map(id => tagById.get(id)).filter((x): x is Tag => !!x),
+    [tagById],
+  );
   const splitsByTx = useMemo(() => {
     const m = new Map<string, any[]>();
     for (const s of splits) {
@@ -148,22 +317,66 @@ export function TransactionsClient({
     [],
   );
 
-  const filtered = useMemo(
-    () =>
-      tx.filter(t => {
-        if (q) {
-          const hay = `${t.merchant ?? ''} ${t.payee ?? ''} ${t.note ?? ''}`.toLowerCase();
-          if (!hay.includes(q.toLowerCase())) return false;
+  const filtered = useMemo(() => {
+    const [from, to] = periodRange(period);
+    const needle = q.trim().toLowerCase();
+    const rows = tx.filter(t => {
+      if (needle) {
+        const hay = `${t.merchant ?? ''} ${t.payee ?? ''} ${t.note ?? ''} ${t.subcategory ?? ''}`.toLowerCase();
+        if (!hay.includes(needle)) return false;
+      }
+      if (acct !== 'all' && t.account_id !== acct) return false;
+      if (cat !== 'all' && resolveCat(t.category ?? '') !== cat) return false;
+      if (source !== 'all' && (t.source ?? 'manual') !== source) return false;
+      if (type !== 'all' && t.transaction_type !== type) return false;
+      if (onlyReview && !needsReview(t)) return false;
+      if (tagFilter !== 'all') {
+        const ids = parseTagIds(t.tag_ids).filter(id => tagById.has(id));
+        if (tagFilter === 'any' ? ids.length === 0 : tagFilter === 'none' ? ids.length > 0 : !ids.includes(tagFilter)) {
+          return false;
         }
-        if (acct !== 'all' && t.account_id !== acct) return false;
-        if (cat !== 'all' && resolveCat(t.category ?? '') !== cat) return false;
-        if (source !== 'all' && (t.source ?? 'manual') !== source) return false;
-        if (type !== 'all' && t.transaction_type !== type) return false;
-        if (onlyReview && !needsReview(t)) return false;
-        return true;
-      }),
-    [tx, q, acct, cat, source, type, onlyReview, needsReview],
-  );
+      }
+      if (period !== 'all') {
+        const ts = t.date_time ? new Date(t.date_time).getTime() : NaN;
+        if (!(ts >= from && ts <= to)) return false;
+      }
+      return true;
+    });
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    const when = (t: Transaction) => (t.date_time ? new Date(t.date_time).getTime() : 0);
+    rows.sort((a, b) =>
+      sort.key === 'amount'
+        ? dir * (Math.abs(a.amount ?? 0) - Math.abs(b.amount ?? 0)) || when(b) - when(a)
+        : dir * (when(a) - when(b)),
+    );
+    return rows;
+  }, [tx, q, acct, cat, source, type, onlyReview, needsReview, period, sort, tagFilter, tagById]);
+
+  const filtersActive =
+    q !== '' || acct !== 'all' || cat !== 'all' || source !== 'all' || type !== 'all' || onlyReview || period !== 'all' || tagFilter !== 'all';
+  const resetFilters = () => {
+    setQ('');
+    setAcct('all');
+    setCat('all');
+    setSource('all');
+    setType('all');
+    setOnlyReview(false);
+    setPeriod('all');
+    setTagFilter('all');
+  };
+  const reviewCount = useMemo(() => tx.filter(needsReview).length, [tx, needsReview]);
+  const filteredTotals = useMemo(() => totalsOf(filtered), [filtered]);
+
+  // Selection is kept by id across filter changes on purpose — narrowing a filter to
+  // find more rows to add is the normal way a selection is built. But that means some
+  // selected rows can be off screen, and a bulk action must never surprise anyone by
+  // touching rows they cannot see, so the bar says how many are hidden.
+  const selRows = useMemo(() => tx.filter(t => sel.has(t.id)), [tx, sel]);
+  const selTotals = useMemo(() => totalsOf(selRows), [selRows]);
+  const hiddenSel = useMemo(() => {
+    const vis = new Set(filtered.map(t => t.id));
+    return selRows.filter(t => !vis.has(t.id)).length;
+  }, [selRows, filtered]);
 
   // ── Keyboard review ──────────────────────────────────────────────────────
   // The reason to do this work at a desk rather than on the phone is speed, and
@@ -228,6 +441,10 @@ export function TransactionsClient({
       };
 
       switch (e.key) {
+        case '/':
+          e.preventDefault();
+          searchRef.current?.focus();
+          break;
         case 'j':
         case 'ArrowDown':
           move(1);
@@ -247,6 +464,7 @@ export function TransactionsClient({
           if (cursor >= 0 && visible[cursor]) {
             e.preventDefault();
             const id = visible[cursor].id;
+            anchor.current = cursor;
             setSel(s => {
               const n = new Set(s);
               if (n.has(id)) {
@@ -283,50 +501,253 @@ export function TransactionsClient({
     [supabase, patchLocal],
   );
 
-  const bulkRecategorize = useCallback(
-    async (catId: CategoryId) => {
-      const ids = [...sel];
+  // One wrapper for every bulk action: busy flag, error banner, a short confirmation
+  // of what actually happened (including what was skipped and why).
+  const runBulk = useCallback(async (fn: () => Promise<string>) => {
+    setBusy(true);
+    setErr(null);
+    setNotice(null);
+    setMenu(null);
+    try {
+      setNotice(await fn());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Bulk update failed');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const skipped = (n: number, why: string) => (n > 0 ? ` · skipped ${n} ${why}` : '');
+
+  const bulkRecategorize = (catId: CategoryId) =>
+    runBulk(async () => {
       const label = CATS[catId].label;
-      setBusy(true);
-      setErr(null);
-      try {
-        const {error} = await supabase.from('transactions').update({category: label}).in('id', ids);
+      // Transfers have no category on screen (they render as a Transfer pill), so
+      // silently relabelling them would change reports with nothing visible to show it.
+      const rows = selRows.filter(t => t.transaction_type !== 'transfer');
+      const ids = rows.map(t => t.id);
+      for (const part of chunk(ids)) {
+        // Subcategory cleared, same as the inline picker: subcategories belong to one
+        // category, and the old code left "Produce and Vegetables" under Shopping.
+        const {error} = await supabase
+          .from('transactions')
+          .update({category: label, subcategory: null})
+          .in('id', part);
         if (error) throw error;
-        setTx(prev => prev.map(t => (sel.has(t.id) ? {...t, category: label} : t)));
-        setSel(new Set());
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : 'Bulk update failed');
-      } finally {
-        setBusy(false);
-        setBulkCat(false);
       }
+      const idSet = new Set(ids);
+      setTx(prev => prev.map(t => (idSet.has(t.id) ? {...t, category: label, subcategory: null} : t)));
+
+      let learned = 0;
+      if (teach) {
+        const seen = new Set<string>();
+        for (const t of rows) {
+          const name = t.merchant || t.payee || '';
+          const key = normalizeMerchant(name).key;
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          await recordMerchantRule(supabase, {
+            merchant: name,
+            category: label,
+            ownerId: t.owner_id,
+            kind: 'correction',
+          });
+          learned++;
+        }
+        const {data} = await supabase
+          .from('merchant_rules')
+          .select('*')
+          .order('confirmation_count', {ascending: false});
+        if (data) setRules(data);
+      }
+      setSel(new Set());
+      return (
+        `Moved ${ids.length} to ${label}` +
+        (learned ? ` · learned ${learned} merchant rule${learned === 1 ? '' : 's'}` : '') +
+        skipped(selRows.length - ids.length, 'transfers')
+      );
+    });
+
+  const bulkSetType = (to: 'expense' | 'income') =>
+    runBulk(async () => {
+      // Transfers are left out: making one into income or expense needs a direction
+      // and usually a counterpart row, which is a per-row decision for the drawer.
+      const rows = selRows.filter(t => t.transaction_type !== 'transfer' && t.transaction_type !== to);
+      const ids = rows.map(t => t.id);
+      for (const part of chunk(ids)) {
+        const {error} = await supabase
+          .from('transactions')
+          .update({transaction_type: to, transfer_direction: null})
+          .in('id', part);
+        if (error) throw error;
+      }
+      // Same balance rule as the drawer: reverse the old movement, apply the new one,
+      // and only after the rows are written so replay reads the new history.
+      const deltas = new Map<string, number>();
+      for (const t of rows) {
+        if (!t.account_id) continue;
+        const dl = (movementSign(to) - movementSign(t.transaction_type)) * (t.amount ?? 0);
+        deltas.set(t.account_id, (deltas.get(t.account_id) ?? 0) + dl);
+      }
+      for (const [accId, dl] of deltas) await rebalanceAccount(supabase, accId, dl);
+
+      const idSet = new Set(ids);
+      setTx(prev =>
+        prev.map(t => (idSet.has(t.id) ? {...t, transaction_type: to, transfer_direction: null} : t)),
+      );
+      setSel(new Set());
+      return (
+        `Marked ${ids.length} as ${to}` +
+        skipped(selRows.filter(t => t.transaction_type === 'transfer').length, 'transfers') +
+        skipped(selRows.filter(t => t.transaction_type === to).length, `already ${to}`)
+      );
+    });
+
+  const bulkDelete = () => {
+    const t = selTotals;
+    const ok = window.confirm(
+      `Delete ${selRows.length} transaction${selRows.length === 1 ? '' : 's'}?\n\n` +
+        `Out ${fmtAmount(t.out)} · In ${fmtAmount(t.inn)}` +
+        (t.moved ? ` · Transfers ${fmtAmount(t.moved)}` : '') +
+        (hiddenSel ? `\n\n${hiddenSel} of them are hidden by the current filters.` : '') +
+        `\n\nThis also deletes them on the phone and cannot be undone.`,
+    );
+    if (!ok) return;
+    return runBulk(async () => {
+      const ids = selRows.map(r => r.id);
+      let deleted = 0;
+      for (const part of chunk(ids)) {
+        const {error: se} = await supabase.from('split_details').delete().in('transaction_id', part);
+        if (se) throw se;
+        // Ask for the ids back: RLS turns a forbidden delete into a silent no-op
+        // (see deleteAutoRecord), and the count below must be what really went.
+        const {data, error} = await supabase.from('transactions').delete().in('id', part).select('id');
+        if (error) throw error;
+        deleted += data?.length ?? 0;
+      }
+      const deltas = new Map<string, number>();
+      for (const r of selRows) {
+        if (!r.account_id) continue;
+        const dl = -movementSign(r.transaction_type, r.transfer_direction) * (r.amount ?? 0);
+        deltas.set(r.account_id, (deltas.get(r.account_id) ?? 0) + dl);
+      }
+      for (const [accId, dl] of deltas) await rebalanceAccount(supabase, accId, dl);
+
+      const idSet = new Set(ids);
+      setTx(prev => prev.filter(r => !idSet.has(r.id)));
+      setSplits(prev => prev.filter(s => !idSet.has(s.transaction_id)));
+      setSel(new Set());
+      if (deleted < ids.length) {
+        throw new Error(
+          `Deleted ${deleted} of ${ids.length} — the rest were not yours to delete (shared account?). Refresh to see them again.`,
+        );
+      }
+      return `Deleted ${deleted}`;
+    });
+  };
+
+  const createTag = useCallback(
+    async (name: string): Promise<Tag> => {
+      const {tag, created} = await ensureTag(supabase, tags, name, ownerId);
+      if (created) setTags(prev => [tag, ...prev]);
+      return tag;
     },
-    [sel, supabase],
+    [supabase, tags, ownerId],
   );
 
-  const exportCsv = useCallback(() => {
-    const head = 'date,merchant,category,subcategory,type,account,amount,fees,note';
-    const lines = filtered.map(t =>
-      [
-        t.date_time ?? '',
-        JSON.stringify(t.merchant ?? t.payee ?? ''),
-        JSON.stringify(t.category ?? ''),
-        JSON.stringify(t.subcategory ?? ''),
-        t.transaction_type ?? '',
-        JSON.stringify(accName.get(t.account_id ?? '') ?? ''),
-        t.amount ?? 0,
-        t.fees ?? 0,
-        JSON.stringify(t.note ?? ''),
-      ].join(','),
-    );
-    const blob = new Blob([[head, ...lines].join('\n')], {type: 'text/csv'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `finxai-transactions-${format(new Date(), 'yyyyMMdd')}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [filtered, accName]);
+  /** Ticked if every selected row has it, 'some' if only part of them do. */
+  const selTagState = (tag: Tag): boolean | 'some' => {
+    const n = selRows.filter(t => parseTagIds(t.tag_ids).includes(tag.id)).length;
+    return n === 0 ? false : n === selRows.length ? true : 'some';
+  };
+
+  // Clicking a fully-ticked tag removes it; anything else adds it to the rows that
+  // lack it. Same as a mail client's label menu — and the reason the 'some' state
+  // exists, so a click never strips a tag from rows the user didn't realise had it.
+  const bulkTag = (tag: Tag, mode?: 'add' | 'remove') =>
+    runBulk(async () => {
+      const m = mode ?? (selTagState(tag) === true ? 'remove' : 'add');
+      const changed = await applyTag(supabase, selRows, tag.id, m);
+      setTx(prev => prev.map(t => (changed.has(t.id) ? {...t, tag_ids: changed.get(t.id) ?? null} : t)));
+      // The selection is kept: tagging is usually one step of several on the same rows.
+      return m === 'add'
+        ? `Tagged ${changed.size} with “${tag.name}”` + skipped(selRows.length - changed.size, 'already tagged')
+        : `Removed “${tag.name}” from ${changed.size}`;
+    });
+
+  const bulkCreateTag = (name: string) =>
+    runBulk(async () => {
+      const tag = await createTag(name);
+      const changed = await applyTag(supabase, selRows, tag.id, 'add');
+      setTx(prev => prev.map(t => (changed.has(t.id) ? {...t, tag_ids: changed.get(t.id) ?? null} : t)));
+      return `Tagged ${changed.size} with “${tag.name}”`;
+    });
+
+  // The report for the tag being filtered on. Deliberately the tag's WHOLE history,
+  // not the filtered rows: "what is the balance on Aline's errands" must not change
+  // because the date filter happens to say "this month".
+  const activeTag = tagById.get(tagFilter) ?? null;
+  const activeTagTotals = useMemo(
+    () => (activeTag ? tagTotals(tx.filter(t => parseTagIds(t.tag_ids).includes(activeTag.id))) : null),
+    [tx, activeTag],
+  );
+
+  /** Grow the selection to every visible row with the same merchant as one already
+   *  selected — "fix all of these" in one click, instead of hunting them down. */
+  const selectSameMerchant = () => {
+    const keys = new Set(selRows.map(merchantKey).filter(Boolean));
+    setSel(prev => {
+      const n = new Set(prev);
+      for (const t of filtered) if (keys.has(merchantKey(t))) n.add(t.id);
+      return n;
+    });
+  };
+
+  const toggleRow = (i: number, shift: boolean) => {
+    const id = visible[i]?.id;
+    if (!id) return;
+    setSel(prev => {
+      const n = new Set(prev);
+      if (shift && anchor.current !== null && anchor.current < visible.length) {
+        // Range takes the state of the row being clicked, like every file manager.
+        const on = !prev.has(id);
+        const [a, b] = [Math.min(anchor.current, i), Math.max(anchor.current, i)];
+        for (let k = a; k <= b; k++) {
+          if (on) n.add(visible[k].id);
+          else n.delete(visible[k].id);
+        }
+      } else if (n.has(id)) {
+        n.delete(id);
+      } else {
+        n.add(id);
+      }
+      return n;
+    });
+    anchor.current = i;
+  };
+
+  const allVisibleSelected = visible.length > 0 && visible.every(t => sel.has(t.id));
+  const someVisibleSelected = visible.some(t => sel.has(t.id));
+  const headerBox = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerBox.current) headerBox.current.indeterminate = someVisibleSelected && !allVisibleSelected;
+  }, [someVisibleSelected, allVisibleSelected]);
+
+  const stamp = () => format(new Date(), 'yyyyMMdd');
+  const exportCsv = useCallback(
+    () =>
+      download(
+        toCsv(filtered, accName, tagName),
+        activeTag
+          ? `finxai-tag-${activeTag.name.replace(/[^\w-]+/g, '-').toLowerCase()}-${stamp()}.csv`
+          : `finxai-transactions-${stamp()}.csv`,
+      ),
+    [filtered, accName, tagName, activeTag],
+  );
+
+  const toggleSort = (key: SortKey) =>
+    setSort(s => (s.key === key ? {key, dir: s.dir === 'desc' ? 'asc' : 'desc'} : {key, dir: 'desc'}));
+  const sortMark = (key: SortKey) => (sort.key === key ? (sort.dir === 'desc' ? ' ↓' : ' ↑') : '');
 
   const openTxn = tx.find(t => t.id === openId) ?? null;
 
@@ -339,12 +760,31 @@ export function TransactionsClient({
         <div className="flex min-w-[220px] items-center gap-2 rounded-[9px] border border-line bg-surface px-3 py-2">
           <Icon name="search" size={15} color="var(--text-3)" />
           <input
+            ref={searchRef}
             value={q}
             onChange={e => setQ(e.target.value)}
-            placeholder="Search merchant, note…"
+            onKeyDown={e => {
+              if (e.key === 'Escape') {
+                setQ('');
+                e.currentTarget.blur();
+              }
+            }}
+            placeholder="Search merchant, note…  ( / )"
             className="w-full border-none bg-transparent text-[12.5px] outline-none placeholder:text-ink3"
           />
+          {q && (
+            <button className="press text-ink3" onClick={() => setQ('')} title="Clear search">
+              <Icon name="x" size={13} />
+            </button>
+          )}
         </div>
+        <select className="select" value={period} onChange={e => setPeriod(e.target.value as Period)}>
+          {(Object.keys(PERIODS) as Period[]).map(p => (
+            <option key={p} value={p}>
+              {PERIODS[p]}
+            </option>
+          ))}
+        </select>
         <select className="select" value={acct} onChange={e => setAcct(e.target.value)}>
           <option value="all">All accounts</option>
           {accounts.map(a => (
@@ -358,6 +798,16 @@ export function TransactionsClient({
           {CAT_LIST.map(c => (
             <option key={c.id} value={c.id}>
               {c.label}
+            </option>
+          ))}
+        </select>
+        <select className="select" value={tagFilter} onChange={e => setTagFilter(e.target.value)}>
+          <option value="all">Any tag</option>
+          <option value="any">Tagged</option>
+          <option value="none">Untagged</option>
+          {tags.filter(t => !t.archived || t.id === tagFilter).map(t => (
+            <option key={t.id} value={t.id}>
+              # {t.name}
             </option>
           ))}
         </select>
@@ -384,7 +834,13 @@ export function TransactionsClient({
           }}>
           <Icon name="alert" size={13} sw={2.2} />
           Low confidence
+          {reviewCount > 0 && <span className="tabnum opacity-70">{reviewCount}</span>}
         </button>
+        {filtersActive && (
+          <button className="press text-[12px] font-semibold text-ink2 underline-offset-2 hover:underline" onClick={resetFilters}>
+            Reset filters
+          </button>
+        )}
         <div className="flex-1" />
         <button className="btn" onClick={() => setRulesOpen(true)}>
           <Icon name="settings" size={13} />
@@ -396,36 +852,165 @@ export function TransactionsClient({
         </button>
       </div>
 
-      {/* Bulk bar */}
-      {sel.size > 0 && (
-        <div className="flex items-center gap-2.5 rounded-[11px] border border-line bg-surface2 px-3.5 py-2.5">
-          <span className="text-[12.5px] font-semibold">{sel.size} selected</span>
-          <div className="relative">
-            <button className="btn btn-soft" disabled={busy} onClick={() => setBulkCat(v => !v)}>
-              <Icon name="pencil" size={12} />
-              Recategorize
-            </button>
-            {bulkCat && (
-              <div
-                className="absolute left-0 top-[110%] z-30 max-h-[260px] min-w-[190px] overflow-y-auto rounded-[10px] p-1.5"
-                style={{background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)'}}>
-                {CAT_LIST.map(c => (
-                  <div
-                    key={c.id}
-                    onClick={() => bulkRecategorize(c.id)}
-                    className="press flex cursor-pointer items-center gap-2 rounded-[7px] px-2 py-[7px] text-[12.5px] hover:bg-surface2">
-                    <CatChip cat={c.id} size={22} r={7} />
-                    {c.label}
-                  </div>
-                ))}
-              </div>
-            )}
+      {activeTag && activeTagTotals && (
+        <div
+          className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-[11px] px-4 py-3"
+          style={{background: 'var(--surface)', border: `1px solid ${tagColorOf(activeTag)}40`}}>
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <TagChip tag={activeTag} size="md" />
+            {activeTag.note && <span className="text-[11.5px] text-ink3">{activeTag.note}</span>}
           </div>
-          <button className="btn btn-danger" onClick={() => setSel(new Set())}>
+          <Stat label="Spent" value={`−${fmtAmount(activeTagTotals.out)}`} color="var(--expense)" />
+          <Stat label="Received" value={`+${fmtAmount(activeTagTotals.in)}`} color="var(--income)" />
+          {activeTagTotals.settled ? (
+            <Pill icon="check" color="var(--income)" bg="rgba(22,163,74,0.12)">
+              Settled
+            </Pill>
+          ) : (
+            <Stat
+              label={activeTagTotals.net < 0 ? 'Still out' : 'Ahead'}
+              value={fmtAmount(Math.abs(activeTagTotals.net))}
+              color={activeTagTotals.net < 0 ? 'var(--expense)' : 'var(--income)'}
+            />
+          )}
+          <span className="text-[11px] text-ink3">
+            All {activeTagTotals.count} tagged rows, whatever the other filters say
+          </span>
+          <div className="flex-1" />
+          <a className="btn" href="/dashboard/tags">
+            <Icon name="tag" size={12} />
+            All tags
+          </a>
+        </div>
+      )}
+
+      {notice && (
+        <div
+          className="flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium"
+          style={{background: 'var(--accent-soft)', color: 'var(--accent-700)'}}>
+          <Icon name="check" size={13} />
+          <span className="flex-1">{notice}</span>
+          <button className="press" onClick={() => setNotice(null)}>
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      )}
+
+      {/* Bulk bar when something is selected, otherwise totals for the filter. Same
+          slot, so the page does not jump, and the numbers always describe exactly
+          the rows an action would touch. */}
+      {sel.size > 0 ? (
+        <div
+          className="sticky top-2 z-20 flex flex-wrap items-center gap-2.5 rounded-[11px] px-3.5 py-2.5"
+          style={{background: 'var(--surface)', border: '1px solid var(--accent)', boxShadow: 'var(--shadow-lg)'}}>
+          <div className="flex flex-col">
+            <span className="text-[12.5px] font-semibold">
+              {sel.size} selected
+              {hiddenSel > 0 && (
+                <span className="font-normal text-ink3"> · {hiddenSel} hidden by filters</span>
+              )}
+            </span>
+            <TotalsLine t={selTotals} />
+          </div>
+          <div className="mx-1 h-8 w-px bg-line" />
+          <Menu
+            open={menu === 'cat'}
+            onClose={closeMenu}
+            button={
+              <button className="btn btn-soft" disabled={busy} onClick={() => setMenu(m => (m === 'cat' ? null : 'cat'))}>
+                <Icon name="pencil" size={12} />
+                Recategorize
+                <Icon name="chevronDown" size={11} />
+              </button>
+            }>
+            {CAT_LIST.map(c => (
+              <MenuItem key={c.id} onClick={() => bulkRecategorize(c.id)}>
+                <CatChip cat={c.id} size={22} r={7} />
+                {c.label}
+              </MenuItem>
+            ))}
+            <label className="mt-1 flex cursor-pointer items-start gap-2 border-t border-line px-2 pb-1 pt-2 text-[11.5px] text-ink2">
+              <input type="checkbox" className="checkbox mt-0.5" checked={teach} onChange={() => setTeach(v => !v)} />
+              <span>Also remember for future SMS from these merchants</span>
+            </label>
+          </Menu>
+          <Menu
+            open={menu === 'type'}
+            onClose={closeMenu}
+            button={
+              <button className="btn" disabled={busy} onClick={() => setMenu(m => (m === 'type' ? null : 'type'))}>
+                <Icon name="swap" size={12} />
+                Set type
+                <Icon name="chevronDown" size={11} />
+              </button>
+            }>
+            <MenuItem onClick={() => bulkSetType('expense')}>
+              <Icon name="upRight" size={14} color="var(--expense)" /> Expense
+            </MenuItem>
+            <MenuItem onClick={() => bulkSetType('income')}>
+              <Icon name="downLeft" size={14} color="var(--income)" /> Income
+            </MenuItem>
+          </Menu>
+          <Menu
+            open={menu === 'tag'}
+            onClose={closeMenu}
+            button={
+              <button className="btn" disabled={busy} onClick={() => setMenu(m => (m === 'tag' ? null : 'tag'))}>
+                <Icon name="tag" size={12} />
+                Tag
+                <Icon name="chevronDown" size={11} />
+              </button>
+            }>
+            <TagPickerList tags={tags} isOn={selTagState} onPick={t => bulkTag(t)} onCreate={bulkCreateTag} />
+          </Menu>
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={selectSameMerchant}
+            title="Add every visible row from the same merchants">
+            <Icon name="users" size={12} />
+            Same merchant
+          </button>
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() => download(toCsv(selRows, accName, tagName), `finxai-selected-${stamp()}.csv`)}>
+            <Icon name="download" size={12} />
+            Export
+          </button>
+          <button className="btn btn-danger" disabled={busy} onClick={bulkDelete}>
+            Delete
+          </button>
+          <div className="flex-1" />
+          {busy && <span className="text-[11.5px] text-ink3">Working…</span>}
+          {allVisibleSelected && filtered.length > visible.length && sel.size < filtered.length && (
+            <button
+              className="press text-[12px] font-semibold"
+              style={{color: 'var(--accent-700)'}}
+              onClick={() => setSel(new Set(filtered.map(t => t.id)))}>
+              Select all {filtered.length.toLocaleString()} matching
+            </button>
+          )}
+          <button className="btn" onClick={() => setSel(new Set())} title="Clear selection (Esc)">
             <Icon name="x" size={12} />
             Clear
           </button>
         </div>
+      ) : (
+        filtered.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-1">
+            <Stat label="Transactions" value={filtered.length.toLocaleString()} />
+            <Stat label="Money out" value={`−${fmtAmount(filteredTotals.out)}`} color="var(--expense)" />
+            <Stat label="Money in" value={`+${fmtAmount(filteredTotals.inn)}`} color="var(--income)" />
+            <Stat
+              label="Net"
+              value={`${filteredTotals.net < 0 ? '−' : '+'}${fmtAmount(Math.abs(filteredTotals.net))}`}
+              color={filteredTotals.net < 0 ? 'var(--expense)' : 'var(--income)'}
+            />
+            {filteredTotals.moved > 0 && <Stat label="Transfers" value={fmtAmount(filteredTotals.moved)} />}
+            <span className="text-[11px] text-ink3">Tip: shift-click a checkbox to select a range</span>
+          </div>
+        )
       )}
 
       {/* Table */}
@@ -435,21 +1020,38 @@ export function TransactionsClient({
             <thead>
               <tr style={{borderBottom: '1px solid var(--border)'}}>
                 <th className="th w-10 pl-4">
+                  {/* Selects what is on screen, not everything the filter matched —
+                      rows past the page cap are invisible, and "Select all N
+                      matching" in the bulk bar makes reaching for them deliberate. */}
                   <input
+                    ref={headerBox}
                     type="checkbox"
                     className="checkbox"
-                    checked={sel.size > 0 && sel.size === filtered.length}
+                    checked={allVisibleSelected}
                     onChange={() =>
-                      setSel(s => (s.size === filtered.length ? new Set() : new Set(filtered.map(t => t.id))))
+                      setSel(s => {
+                        const n = new Set(s);
+                        for (const t of visible) {
+                          if (allVisibleSelected) n.delete(t.id);
+                          else n.add(t.id);
+                        }
+                        return n;
+                      })
                     }
                   />
                 </th>
-                <th className="th">Date</th>
+                <th className="th">
+                  <button className="press uppercase" onClick={() => toggleSort('date')}>
+                    Date{sortMark('date')}
+                  </button>
+                </th>
                 <th className="th">Merchant</th>
                 <th className="th">Category</th>
                 <th className="th">Account</th>
                 <th className="th" style={{textAlign: 'right'}}>
-                  Amount
+                  <button className="press uppercase" onClick={() => toggleSort('amount')}>
+                    Amount{sortMark('amount')}
+                  </button>
                 </th>
                 <th className="th" style={{textAlign: 'center'}}>
                   Confidence
@@ -462,6 +1064,7 @@ export function TransactionsClient({
                 const review = needsReview(t);
                 const parts = splitsByTx.get(t.id) ?? [];
                 const atCursor = i === cursor;
+                const picked = sel.has(t.id);
                 return (
                   <tr
                     key={t.id}
@@ -479,6 +1082,8 @@ export function TransactionsClient({
                       borderBottom: '1px solid var(--border)',
                       background: atCursor
                         ? 'var(--accent-soft)'
+                        : picked
+                        ? 'rgba(22,163,74,0.06)'
                         : review
                         ? 'rgba(217,119,6,0.04)'
                         : 'transparent',
@@ -489,15 +1094,10 @@ export function TransactionsClient({
                       <input
                         type="checkbox"
                         className="checkbox"
-                        checked={sel.has(t.id)}
-                        onChange={() =>
-                          setSel(s => {
-                            const n = new Set(s);
-                            if (n.has(t.id)) n.delete(t.id);
-                            else n.add(t.id);
-                            return n;
-                          })
-                        }
+                        checked={picked}
+                        // onClick, not onChange: only the mouse event carries shiftKey.
+                        onChange={() => {}}
+                        onClick={e => toggleRow(i, e.shiftKey)}
                       />
                     </td>
                     <td className="td text-[12px] text-ink2">
@@ -533,6 +1133,22 @@ export function TransactionsClient({
                               </Pill>
                             )}
                           </div>
+                          {tagsOf(t).length > 0 && (
+                            <div className="my-0.5 flex flex-wrap gap-1">
+                              {tagsOf(t).map(tg => (
+                                <button
+                                  key={tg.id}
+                                  className="press"
+                                  title={`Show only “${tg.name}”`}
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setTagFilter(tg.id);
+                                  }}>
+                                  <TagChip tag={tg} />
+                                </button>
+                              ))}
+                            </div>
+                          )}
                           <div className="text-[10.5px] text-ink3">
                             {t.date_time ? format(new Date(t.date_time), 'HH:mm') : ''}
                             {t.subcategory ? ` · ${t.subcategory}` : ''}
@@ -584,6 +1200,7 @@ export function TransactionsClient({
                 <Kbd>k</Kbd> move
                 <Kbd>↵</Kbd> open
                 <Kbd>x</Kbd> select
+                <Kbd>/</Kbd> search
                 <Kbd>esc</Kbd> close
               </span>
               {limit < filtered.length && (
@@ -610,6 +1227,8 @@ export function TransactionsClient({
           parts={splitsByTx.get(openTxn.id) ?? []}
           accounts={accounts}
           customSubcats={customSubcats}
+          tags={tags}
+          onCreateTag={createTag}
           onClose={() => setOpenId(null)}
           onLocal={patchLocal}
           onSplitsChange={(txId, rows) =>
@@ -690,6 +1309,8 @@ function TxnDrawer({
   parts,
   accounts,
   customSubcats,
+  tags,
+  onCreateTag,
   onClose,
   onLocal,
   onSplitsChange,
@@ -700,6 +1321,8 @@ function TxnDrawer({
   parts: any[];
   accounts: Account[];
   customSubcats: Subcategory[];
+  tags: Tag[];
+  onCreateTag: (name: string) => Promise<Tag>;
   onClose: () => void;
   onLocal: (id: string, patch: Partial<Transaction>) => void;
   onSplitsChange: (txId: string, rows: any[]) => void;
@@ -714,6 +1337,10 @@ function TxnDrawer({
   const [amount, setAmount] = useState(String(Math.round(txn.amount ?? 0)));
   const [accountId, setAccountId] = useState(txn.account_id ?? '');
   const [note, setNote] = useState(txn.note ?? '');
+  const [tagIds, setTagIds] = useState<string[]>(parseTagIds(txn.tag_ids));
+  const [tagMenu, setTagMenu] = useState(false);
+  const closeTagMenu = useCallback(() => setTagMenu(false), []);
+  const tagById = useMemo(() => new Map(tags.map(t => [t.id, t])), [tags]);
   const [splitRows, setSplitRows] = useState<SplitRow[]>(
     parts.map(p => ({
       id: p.id,
@@ -793,6 +1420,12 @@ function TxnDrawer({
         merchant: cleanMerchant || null,
         payee: cleanMerchant || null,
       };
+      // Only written when it changed. Re-sending an unchanged value would overwrite a
+      // tag the phone added since this drawer opened, with nothing to show it happened.
+      const nextTags = serializeTagIds(tagIds);
+      if (nextTags !== serializeTagIds(parseTagIds(txn.tag_ids))) {
+        patch.tag_ids = nextTags;
+      }
       const {error} = await supabase.from('transactions').update(patch).eq('id', txn.id);
       if (error) throw error;
 
@@ -989,6 +1622,49 @@ function TxnDrawer({
             </select>
           </FieldRow>
 
+          {/* Tags sit beside the money fields rather than at the bottom: "who was this
+              for" is decided at the same moment as "what was it". */}
+          <div className="flex items-start justify-between gap-3">
+            <span className="pt-1 text-[12.5px] text-ink2">Tags</span>
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              {tagIds
+                .map(id => tagById.get(id))
+                .filter((t): t is Tag => !!t)
+                .map(t => (
+                  <TagChip key={t.id} tag={t} size="md" onRemove={() => setTagIds(ids => ids.filter(x => x !== t.id))} />
+                ))}
+              <Menu
+                open={tagMenu}
+                onClose={closeTagMenu}
+                align="right"
+                button={
+                  <button
+                    className="press inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[11.5px] font-semibold"
+                    style={{border: '1px dashed var(--border)', color: 'var(--text-2)'}}
+                    onClick={() => setTagMenu(v => !v)}>
+                    <Icon name="plus" size={11} />
+                    Tag
+                  </button>
+                }>
+                <TagPickerList
+                  tags={tags}
+                  isOn={t => tagIds.includes(t.id)}
+                  onPick={t =>
+                    setTagIds(ids => (ids.includes(t.id) ? ids.filter(x => x !== t.id) : [...ids, t.id]))
+                  }
+                  onCreate={async name => {
+                    try {
+                      const t = await onCreateTag(name);
+                      setTagIds(ids => (ids.includes(t.id) ? ids : [...ids, t.id]));
+                    } catch (e) {
+                      setErr(e instanceof Error ? e.message : 'Could not create tag');
+                    }
+                  }}
+                />
+              </Menu>
+            </div>
+          </div>
+
           <FieldRow label="Source">
             <Pill
               icon={txn.source === 'sms' ? 'sparkles' : 'pencil'}
@@ -1134,6 +1810,29 @@ function FieldRow({label, children}: {label: string; children: React.ReactNode})
       <span className="text-[12.5px] text-ink2">{label}</span>
       {children}
     </div>
+  );
+}
+
+function Stat({label, value, color}: {label: string; value: string; color?: string}) {
+  return (
+    <div className="flex items-baseline gap-1.5">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.03em] text-ink3">{label}</span>
+      <span className="tabnum text-[14px] font-bold" style={{color}}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function TotalsLine({t}: {t: ReturnType<typeof totalsOf>}) {
+  return (
+    <span className="tabnum text-[11.5px] text-ink2">
+      {t.out > 0 && <span style={{color: 'var(--expense)'}}>−{fmtAmount(t.out)} out</span>}
+      {t.out > 0 && t.inn > 0 && ' · '}
+      {t.inn > 0 && <span style={{color: 'var(--income)'}}>+{fmtAmount(t.inn)} in</span>}
+      {(t.out > 0 || t.inn > 0) && t.moved > 0 && ' · '}
+      {t.moved > 0 && <span>{fmtAmount(t.moved)} transferred</span>}
+    </span>
   );
 }
 

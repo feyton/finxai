@@ -27,6 +27,9 @@ const FILES = [
   ['shared/balanceReplay.ts', 'apps/web/src/lib/shared/balanceReplay.ts'],
   ['shared/smsDirection.ts', 'apps/web/src/lib/shared/smsDirection.ts'],
   ['shared/smsIds.ts', 'apps/web/src/lib/shared/smsIds.ts'],
+  // Tags: both clients total a tag, and a different rule for transfers on one side
+  // would show the same errand as settled on the phone and owing on the web.
+  ['shared/tags.ts', 'apps/web/src/lib/shared/tags.ts'],
   // The category taxonomy itself, not just the code that resolves it. This was
   // an unguarded hand-copy until 2026-08-30 — the exact shape of the bug the
   // drift test above was written for, one directory over. A subcategory added
