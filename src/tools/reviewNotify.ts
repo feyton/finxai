@@ -180,13 +180,42 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
   if (!recordId) {
     return;
   }
+
+  // Step log + watchdog. A second answer in the same process once stalled with
+  // no trace: the task ran out its 40s, the record stayed pending, and the
+  // notification said "Filing…" until it expired. Every step is logged so a
+  // stall names its step, and the watchdog tells the user well before the task
+  // limit — a silent "Filing…" is the one outcome that must not happen.
+  const t0 = Date.now();
+  let at = 'start';
+  const step = (name: string) => {
+    at = name;
+    console.log(`[Review] ${recordId.slice(0, 8)} ${name} +${Date.now() - t0}ms`);
+  };
+  let finished = false;
+  const watchdog = setTimeout(() => {
+    console.warn(`[Review] ${recordId.slice(0, 8)} stalled at "${at}" after ${Date.now() - t0}ms`);
+    finish('Could not file it — open FinXAI to finish');
+  }, 30_000);
+  function finish(text: string, filed = false) {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    clearTimeout(watchdog);
+    step(`done: ${text}`);
+    settle(recordId, text, filed);
+  }
+
+  step(`start (${payload.kind})`);
   try {
     const {
       data: {session},
     } = await supabase.auth.getSession();
+    step('session');
     const ownerId = session?.user?.id ?? '';
     if (!ownerId) {
-      settle(recordId, 'Sign in to FinXAI to file this');
+      finish('Sign in to FinXAI to file this');
       return;
     }
 
@@ -195,10 +224,11 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
       [recordId, ownerId],
     );
     const pendingRow = rows?._array?.[0];
+    step('row');
     if (!pendingRow) {
       // Answered in the app (or by a re-check) since the question went out —
       // and the transaction keeps the record's id, so a tap still opens it.
-      settle(recordId, 'Already filed', true);
+      finish('Already filed', true);
       return;
     }
     const sms = String(pendingRow.sms ?? '');
@@ -217,7 +247,14 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
         direction: facts.direction,
         balanceAfter: extractBalance(sms),
       });
+      step('promoted');
+      // Answer the moment the record is filed. Everything after this is upkeep —
+      // a stalled answer once left a filed-or-not record behind a "Filing…" that
+      // never resolved. If upkeep stalls now, the user already has the truth: the
+      // balance replays on next app start, and the queue re-check runs there too.
+      finish(`Filed as ${categoryLabel(record)}${placed}`, true);
       await syncAccountBalance(db, accountId);
+      step('rebalanced');
       if (record.merchant) {
         await recordConfirmation(
           db,
@@ -227,12 +264,9 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
           txType === 'transfer' ? '' : record.subcategory ?? '',
         );
       }
-      const more = (await recheckPending(db, ownerId)).promoted.length;
-      settle(
-        recordId,
-        `Filed as ${categoryLabel(record)}${placed}${more ? ` · and ${more} similar` : ''}`,
-        true,
-      );
+      step('learned');
+      await recheckPending(db, ownerId);
+      step('rechecked');
       refreshBalanceWidget();
       return;
     }
@@ -250,6 +284,7 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
       number: a.number ?? '',
     }));
     const rules = await getMerchantRules(db, record.merchant ?? '', ownerId, 20);
+    step('context');
     const parsed = await parseSmsWithAI(
       sms,
       rules,
@@ -264,12 +299,13 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
         userNote: note,
       },
     );
+    step(`classified (${parsed.parseSource})`);
     if (parsed.parseSource !== 'ai') {
       // No model to read the words: filing on the old guess would ignore exactly
       // what the user just told us. Keep it pending, keep the note for the Fix
       // sheet, and say so.
       await keepNote(recordId, note);
-      settle(recordId, 'Saved your note — finish it in FinXAI when online');
+      finish('Saved your note — finish it in FinXAI when online');
       return;
     }
 
@@ -291,7 +327,16 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
         note,
       },
     });
+    step('promoted');
+    const filed = categoryLabel({
+      transaction_type: type,
+      category: parsed.category,
+      subcategory: parsed.subcategory,
+    });
+    // Same as the one-tap path: answer first, upkeep after.
+    finish(`Filed as ${filed}${placed} · “${note.slice(0, 40)}”`, true);
     await syncAccountBalance(db, accountId);
+    step('rebalanced');
     // A confirmation, not a correction: a description is about THIS purchase.
     // The shop you usually buy groceries at can still sell you a charger, so one
     // answer should nudge the merchant's rule, not rewrite it.
@@ -304,15 +349,12 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
         type === 'transfer' ? '' : parsed.subcategory ?? '',
       );
     }
-    const filed = categoryLabel({
-      transaction_type: type,
-      category: parsed.category,
-      subcategory: parsed.subcategory,
-    });
-    settle(recordId, `Filed as ${filed}${placed} · “${note.slice(0, 40)}”`, true);
+    step('learned');
     refreshBalanceWidget();
   } catch (e: any) {
-    console.warn('[Review] answer failed:', e);
-    settle(recordId, 'Could not file it — open FinXAI to finish');
+    // finish() is a no-op once "Filed as …" went out, so an upkeep error after
+    // filing cannot overwrite a true answer with a false "could not file".
+    console.warn(`[Review] ${recordId.slice(0, 8)} failed at "${at}":`, e);
+    finish('Could not file it — open FinXAI to finish');
   }
 }

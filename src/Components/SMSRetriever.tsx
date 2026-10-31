@@ -48,6 +48,7 @@ import {
   backfillMerchantLocations,
   backfillPayCodes,
   purgeAlreadyFiled,
+  recheckPending,
   purgeNonTransactions,
   findAccountForSms,
   persistParsedSms,
@@ -204,6 +205,12 @@ const SMSRetriever: React.FC = () => {
       await purgeNonTransactions(db, userId!);
       // Pending copies of transactions that are already filed (sync leftovers).
       await purgeAlreadyFiled(db, userId!);
+
+      // File whatever the learned rules now answer. Runs after every Confirm/Fix
+      // in the app, but rules also arrive from notification answers (whose
+      // background task can be cut short) and from other devices — so the queue
+      // is re-checked on every start too. Local only, no model calls.
+      await recheckPending(db, userId!);
 
       // Tier 2: give past money-out rows the place their merchant is known
       // for. Local lookup against positions already captured — no GPS, no
