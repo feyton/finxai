@@ -154,6 +154,16 @@ export interface Tag {
   created_at: string | null;
 }
 
+/** v22 — a fact the SMS classifier reads (src/tools/memory.ts on the phone). */
+export interface Memory {
+  id: string;
+  text: string;
+  subject: string | null;
+  source: string | null;
+  owner_id: string;
+  created_at: string | null;
+}
+
 export interface Subcategory {
   id: string;
   category: string; // CategoryId: 'food', 'transport', …

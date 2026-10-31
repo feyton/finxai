@@ -16,6 +16,7 @@ import {AbstractPowerSyncDatabase} from '@powersync/react-native';
 // literals where it is easy to mangle.
 const NL = String.fromCharCode(10);
 import {CATS, CategoryId, fmtAmount, resolveCat} from '../theme';
+import {addMemory} from './memory';
 import {rebalanceAccount} from './balance';
 
 function uuid(): string {
@@ -298,6 +299,38 @@ export const AI_ACTIONS: AiAction[] = [
       return `Scheduled "${input.name}" (RWF ${fmtAmount(input.amount)}, ${input.frequency}).`;
     },
   },
+  {
+    name: 'remember',
+    description:
+      "Remember a durable fact about the user that will help classify their future SMS transactions — who a phone number or name belongs to, what a merchant is, how they want something filed. Use when they say \"remember that…\", \"0788… is my landlord\", \"money to X is always Y\". NOT for one-off details about a single transaction. Store it as one short sentence in their words; keep names and numbers exactly as given.",
+    kind: 'write',
+    input_schema: {
+      type: 'object',
+      properties: {
+        fact: {
+          type: 'string',
+          description: 'One short sentence, e.g. "0788123456 is my landlord — payments to it are rent".',
+        },
+        about: {
+          type: 'string',
+          description:
+            'Optional: the merchant or person name the fact is about, exactly as it appears in their SMS (e.g. "Hope Bread").',
+        },
+      },
+      required: ['fact'],
+    },
+    summary: input => `Remember: "${String(input.fact ?? '').slice(0, 120)}"`,
+    run: async (ctx, input) => {
+      const id = await addMemory(ctx.db, ctx.userId, String(input.fact ?? ''), {
+        subject: input.about ? String(input.about) : null,
+        source: 'coach',
+      });
+      return id
+        ? `Remembered. FinXAI will use this when reading future SMS. (Settings → Memory to review.)`
+        : 'Already remembered (or empty) — nothing new stored.';
+    },
+  },
+
   {
     name: 'add_shopping_items',
     description:

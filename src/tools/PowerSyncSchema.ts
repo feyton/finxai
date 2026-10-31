@@ -333,6 +333,17 @@ const tags = new Table({
   created_at: column.text,
 });
 
+// v22. One fact per row, in the user's words, read by the SMS classifier —
+// see src/tools/memory.ts. `subject` is the normalised counterparty key the
+// fact is about (same key as merchant_rules.pattern), NULL for general facts.
+const memories = new Table({
+  text: column.text,
+  subject: column.text,
+  source: column.text, // 'user' | 'coach'
+  owner_id: column.text,
+  created_at: column.text,
+});
+
 const shared_people = new Table({
   name: column.text,
   role: column.text,
@@ -369,4 +380,5 @@ export const AppSchema = new Schema({
   merchant_rules,
   user_settings,
   tags,
+  memories,
 });

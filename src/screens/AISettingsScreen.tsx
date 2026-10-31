@@ -261,8 +261,10 @@ export default function AISettingsScreen({navigation}: any) {
         <Text style={styles.pickerHint}>
           Tag spending with where it happened, so you can see where your money actually
           goes. Only on money out — income and transfers between your own accounts are
-          never tagged. FinXAI reads the location Android has already cached and never
-          switches on GPS, so this costs no extra battery.
+          never tagged. When a payment arrives, FinXAI only reads the location Android
+          already has. When you answer a question about a payment from a notification,
+          it takes one quick fresh reading — you are holding the phone, usually still
+          where you paid.
         </Text>
         <Pressable
           onPress={handleLocationPress}
@@ -304,6 +306,27 @@ export default function AISettingsScreen({navigation}: any) {
               color={locState === 'always' ? T.accent : T.border2}
               strokeWidth={2.2}
             />
+          </View>
+        </Pressable>
+
+        {/* Memory — facts the classifier reads (src/tools/memory.ts) */}
+        <SectionTitle>Memory</SectionTitle>
+        <Text style={styles.pickerHint}>
+          Facts only you know — who a number belongs to, what a shop is — that the AI
+          reads with every SMS, so it stops asking about them.
+        </Text>
+        <Pressable
+          onPress={() => navigation.navigate('Memory')}
+          style={({pressed}) => [styles.card, styles.choiceCard, {opacity: pressed ? 0.75 : 1}]}>
+          <View style={styles.cardHead}>
+            <View style={[styles.cardIcon, {backgroundColor: T.accent + '22'}]}>
+              <Icon name="Brain" size={16} color={T.accent} strokeWidth={2.2} />
+            </View>
+            <View style={{flex: 1}}>
+              <Text style={styles.cardTitle}>What FinXAI knows about you</Text>
+              <Text style={styles.cardDesc}>See, add or remove facts</Text>
+            </View>
+            <Icon name="ChevronRight" size={18} color={T.text3} strokeWidth={2.2} />
           </View>
         </Pressable>
 

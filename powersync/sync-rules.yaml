@@ -62,6 +62,9 @@ bucket_definitions:
       # v21. Owner only: a shared editor sees tag_ids on shared transactions
       # (the column rides on the row) but not the owner's tag names.
       - SELECT * FROM tags WHERE owner_id::text = bucket.user_id
+      # v22. What the classifier knows about this user. Owner only — a fact
+      # like "this number is my mother" is nobody else's business.
+      - SELECT * FROM memories WHERE owner_id::text = bucket.user_id
       - SELECT * FROM user_settings WHERE owner_id::text = bucket.user_id
       - SELECT * FROM shared_people WHERE owner_id::text = bucket.user_id
 

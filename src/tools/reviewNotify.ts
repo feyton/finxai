@@ -29,6 +29,7 @@ import {
 import {extractBalance, parseSmsWithAI, regexExtract} from './smsParser';
 import {promoteAutoRecord, recheckPending} from './smsIngest';
 import {refreshBalanceWidget} from '../widgets/refreshWidget';
+import {loadMemories} from './memory';
 
 // Never more than this many questions an hour. A burst of uncertain SMS (a
 // bank sending a statement's worth at once) should not turn the phone into a
@@ -297,6 +298,7 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
         rules,
         sender: record.sender ?? '',
         userNote: note,
+        memories: await loadMemories(db, ownerId),
       },
     );
     step(`classified (${parsed.parseSource})`);

@@ -32,6 +32,7 @@ import CategoryStats from './src/screens/CategoryStats';
 import CategoryTransactions from './src/screens/CategoryTransactions';
 import SpendingPlaces from './src/screens/SpendingPlaces';
 import PayMerchant from './src/screens/PayMerchant';
+import MemoryScreen from './src/screens/MemoryScreen';
 import DebtScreen from './src/screens/DebtScreen';
 import DebtDetails from './src/screens/DebtDetails';
 import AddDebt from './src/screens/AddDebt';
@@ -253,6 +254,7 @@ function App(): React.JSX.Element {
                 <Stack.Screen name="Home" component={MyTabs} />
                 <Stack.Screen name="AIChat" component={AIChatScreen} />
                 <Stack.Screen name="AISettings" component={AISettingsScreen} />
+                <Stack.Screen name="Memory" component={MemoryScreen} />
                 <Stack.Screen name="SMSReview" component={SMSReviewScreen} />
                 <Stack.Screen name="Notifications" component={NotificationsScreen} />
                 <Stack.Screen name="CreateRecord" component={CreateRecord} />

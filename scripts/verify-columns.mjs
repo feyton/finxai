@@ -33,6 +33,8 @@ const EXPECTED = [
   // v21 — tags
   ['transactions', 'tag_ids'],
   ['tags', 'name,color,note,archived'],
+  // v22 — memories the classifier reads
+  ['memories', 'text,subject,source'],
 ];
 
 let missing = 0;

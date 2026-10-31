@@ -53,6 +53,7 @@ import {
   findAccountForSms,
   persistParsedSms,
 } from '../tools/smsIngest';
+import {loadMemories} from '../tools/memory';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -229,6 +230,8 @@ const SMSRetriever: React.FC = () => {
       // loop below, keyed on that message's own counterparty.
       const merchantRules = await getMerchantRules(db, '', userId!, 20);
       const merchantChannels = await getMerchantChannels();
+      // Once per run, not per SMS: an inbox sweep classifies hundreds.
+      const memories = await loadMemories(db, userId!);
       const channelRules = await getChannelRules();
 
       const ctxBase: ParseContext = {
@@ -391,6 +394,7 @@ const SMSRetriever: React.FC = () => {
             ? await getMerchantRules(db, names[0], userId!, 20)
             : merchantRules;
           ctx.rules = scopedRules;
+          ctx.memories = memories;
 
           const parsed = await parseSmsWithAI(
             sms.body,

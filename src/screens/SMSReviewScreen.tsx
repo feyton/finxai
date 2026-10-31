@@ -1001,12 +1001,17 @@ export default function SMSReviewScreen({navigation, route}: any) {
 
       {/* Learning nudge */}
       {!isEmpty && (
-        <View style={styles.nudge}>
+        // Leads to the memory, because a fix teaches a merchant's category but
+        // some answers only the user knows ("that number is my landlord") —
+        // those belong in Memory, where the classifier reads them with every SMS.
+        <Pressable
+          onPress={() => navigation.navigate('Memory')}
+          style={({pressed}) => [styles.nudge, {opacity: pressed ? 0.8 : 1}]}>
           <Icon name="Sparkles" size={14} color={T.accent} strokeWidth={2.2} />
           <Text style={styles.nudgeText}>
-            Every fix trains your AI — it won't make the same mistake twice
+            Every fix trains your AI. Tell it what only you know →
           </Text>
-        </View>
+        </Pressable>
       )}
 
       {isEmpty ? (

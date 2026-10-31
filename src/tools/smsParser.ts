@@ -22,6 +22,7 @@ import {
 } from './merchantNormalize';
 import {MerchantRule, ParsedSMS} from './smsTypes';
 import {pickSmsFormat} from './smsFormats';
+import {type MemoryRow, pickMemories} from './memory';
 // Pure rules the web needs too, so they live in shared/ rather than here. Re-exported
 // below so every existing `from './smsParser'` import keeps working unchanged.
 import {extractBalance} from '../../shared/balanceReplay';
@@ -107,6 +108,9 @@ export interface ParseContext {
   // merchant-wide learned rule: the shop you usually buy groceries at can still
   // sell you a phone charger.
   userNote?: string;
+  // Everything the user has told FinXAI (src/tools/memory.ts). The relevant
+  // few are picked per SMS in buildClassification, so callers pass them all.
+  memories?: MemoryRow[];
 }
 
 /** A user note, made safe to quote inside a prompt. */
@@ -1031,11 +1035,22 @@ ${format.guidance}`;
     (deterministic ? `, counterparty="${deterministic.name}"` : '') +
     (deterministic?.code ? `, counterpartyCode=${deterministic.code}` : '');
 
+  const memoryLines = pickMemories(ctx?.memories, raw, [
+    deterministic?.name,
+    ...candidateNames(raw, f, ctx?.sender ?? ''),
+  ])
+    .map(m => `- ${m.replace(/[\r\n]+/g, ' ')}`)
+    .join('\n');
+
   const user = `SMS: ${raw}
 ${ctx?.userName ? `\nAccount holder (the user): ${ctx.userName}` : ''}
 Deterministic facts (already extracted — do not change): ${factLines}
 ${ruleLines ? `\nLearned category rules:\n${ruleLines}` : ''}
 ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}${
+    memoryLines
+      ? `\n\nWhat the account holder has told FinXAI (their own facts — trust them over guesses):\n${memoryLines}`
+      : ''
+  }${
     promptNote(ctx?.userNote)
       ? `\n\nThe account holder described this payment in their own words: "${promptNote(ctx?.userNote)}". Trust it for category and subcategory. The merchant still comes from the SMS.`
       : ''

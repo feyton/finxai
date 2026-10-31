@@ -39,6 +39,7 @@ const TABLES = [
   'accounts',
   'budgets',
   'tags',
+  'memories',
 ];
 
 let leaking = 0;

@@ -34,6 +34,7 @@ import {
 import {ignoredSmsId, rowExists, smsAlreadyRecorded, smsTransactionId} from './txnId';
 import {isUsablePattern, normalizeMerchant} from '../../shared/merchantNormalize';
 import {syncAccountBalance} from './balance';
+import {loadMemories} from './memory';
 
 export interface AccountLike {
   id: string;
@@ -355,7 +356,7 @@ export async function ingestLiveSms(
   const facts = regexExtract(body, ctxBase);
   const names = candidateNames(body, facts, sender);
   const rules = await getMerchantRules(db, names[0] ?? '', ownerId, 20);
-  const ctx: ParseContext = {...ctxBase, rules};
+  const ctx: ParseContext = {...ctxBase, rules, memories: await loadMemories(db, ownerId)};
 
   const parsed = await parseSmsWithAI(
     body,
@@ -694,6 +695,7 @@ export async function reclassifySms(
       currentAccountId: record.account_id,
       rules,
       sender: record.sender ?? '',
+      memories: await loadMemories(db, ownerId),
     },
   );
 
