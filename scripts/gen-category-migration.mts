@@ -207,17 +207,22 @@ UPDATE transactions t
 UPDATE transactions SET category = 'loan_repayment', transaction_type = 'transfer',
        transfer_direction = 'out'
  WHERE sms ~* 'repay' AND sms ~* 'loan' AND sms !~* 'repaid to you';
--- Out of savings: "transferred … from your Mokash account", withdrawals.
+-- EXACT MoKash phrases only. MTN receipts for unrelated payments (Cash Power,
+-- merchants) often end in a MoKash promotion, and the dry run showed a looser
+-- rule ("deposited"/"withdraw" + any mention of MoKash) moving utility bills into
+-- savings. The real templates:
+--   deposit, MoKash side : "You have deposited RWF 1000 into Mokash from your…"
+--   deposit, MoMo side   : "A transaction of 1000 RWF by Mokash Savings Account…"
+--   withdrawal           : "You have transferred RWF 5000 from your Mokash account…"
+-- Out of savings.
 UPDATE transactions SET category = 'from_savings', transaction_type = 'transfer',
        transfer_direction = COALESCE(transfer_direction, CASE WHEN transaction_type = 'income' THEN 'in' ELSE 'out' END)
- WHERE sms ~* 'mokash' AND (sms ~* 'from (your )?mokash' OR sms ~* 'withdr[ae]w')
+ WHERE sms ~* 'from your mokash account'
    AND NOT (sms ~* 'repay' AND sms ~* 'loan');
 -- Into savings: MoKash deposits (either leg), Ejo Heza.
 UPDATE transactions SET category = 'to_savings', transaction_type = 'transfer',
        transfer_direction = COALESCE(transfer_direction, CASE WHEN transaction_type = 'income' THEN 'in' ELSE 'out' END)
- WHERE ((sms ~* 'mokash' AND (sms ~* 'into mokash' OR sms ~* 'deposited' OR sms ~* 'to (your )?mokash'))
-        OR sms ~* 'ejo ?heza')
-   AND NOT (sms ~* 'from (your )?mokash' OR sms ~* 'withdr[ae]w')
+ WHERE (sms ~* 'into mokash' OR sms ~* 'by mokash savings account' OR sms ~* 'ejo ?heza')
    AND NOT (sms ~* 'repay' AND sms ~* 'loan');
 -- A row filed as savings whose SMS never mentions any savings product was v1's
 -- generic "this is a transfer" marker: own money moving, not savings.
@@ -238,12 +243,10 @@ UPDATE auto_records a
 UPDATE auto_records SET category = 'loan_repayment', transaction_type = 'transfer'
  WHERE sms ~* 'repay' AND sms ~* 'loan' AND sms !~* 'repaid to you';
 UPDATE auto_records SET category = 'from_savings', transaction_type = 'transfer'
- WHERE sms ~* 'mokash' AND (sms ~* 'from (your )?mokash' OR sms ~* 'withdr[ae]w')
+ WHERE sms ~* 'from your mokash account'
    AND NOT (sms ~* 'repay' AND sms ~* 'loan');
 UPDATE auto_records SET category = 'to_savings', transaction_type = 'transfer'
- WHERE ((sms ~* 'mokash' AND (sms ~* 'into mokash' OR sms ~* 'deposited' OR sms ~* 'to (your )?mokash'))
-        OR sms ~* 'ejo ?heza')
-   AND NOT (sms ~* 'from (your )?mokash' OR sms ~* 'withdr[ae]w')
+ WHERE (sms ~* 'into mokash' OR sms ~* 'by mokash savings account' OR sms ~* 'ejo ?heza')
    AND NOT (sms ~* 'repay' AND sms ~* 'loan');
 
 -- ── 5. split_details: a split takes its parent's (new) direction ─────────
