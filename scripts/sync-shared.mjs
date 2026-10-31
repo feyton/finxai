@@ -30,6 +30,13 @@ const FILES = [
   // Tags: both clients total a tag, and a different rule for transfers on one side
   // would show the same errand as settled on the phone and owing on the web.
   ['shared/tags.ts', 'apps/web/src/lib/shared/tags.ts'],
+  // Splits: the web drawer must store a split exactly as the phone does (parts
+  // that differ + an explicit rest), or reopening it on the other client shows
+  // the rest as a stray part.
+  ['shared/splits.ts', 'apps/web/src/lib/shared/splits.ts'],
+  // People & places: a person set up on the web must file payments exactly as
+  // the phone's classifier will.
+  ['shared/people.ts', 'apps/web/src/lib/shared/people.ts'],
   // (src/tools/data.json → apps/web/src/lib/subcategories.json used to be copied
   // here. Taxonomy v2 moved subcategories into shared/categories.ts, which the
   // shared/ copy above already carries.)

@@ -21,6 +21,7 @@ import {rebalanceAccount, recordMerchantRule} from '@/lib/reviewActions';
 import {normalizeMerchant} from '@/lib/shared/merchantNormalize';
 import {parseTagIds, serializeTagIds, tagTotals} from '@/lib/shared/tags';
 import {applyTag, ensureTag} from '@/lib/tagActions';
+import {partsFromRows, restOf, splitRowsFor, type SplitPart, type TxForSplit} from '@/lib/shared/splits';
 import {TagChip, TagPickerList, tagColor as tagColorOf} from '@/components/TagChip';
 
 const CAT_LIST = Object.values(CATS);
@@ -242,14 +243,6 @@ function InlineCatSelect({
       )}
     </div>
   );
-}
-
-interface SplitRow {
-  id?: string;
-  category: CategoryId;
-  /** Empty means "not set" — never inherited from the parent transaction. */
-  subcategory: string;
-  amount: number;
 }
 
 export function TransactionsClient({
@@ -1380,13 +1373,13 @@ function TxnDrawer({
   const [tagMenu, setTagMenu] = useState(false);
   const closeTagMenu = useCallback(() => setTagMenu(false), []);
   const tagById = useMemo(() => new Map(tags.map(t => [t.id, t])), [tags]);
-  const [splitRows, setSplitRows] = useState<SplitRow[]>(
-    parts.map(p => ({
-      id: p.id,
-      category: resolveCat(p.category ?? ''),
-      subcategory: p.subcategory ?? '',
-      amount: p.amount ?? 0,
-    })),
+  // Only the parts that DIFFER from the main category — the same model as the
+  // phone's SplitSheet (shared/splits.ts). The rest stays in the main category
+  // and is stored as an explicit row on save, so nobody does the arithmetic.
+  // (The old editor demanded parts that summed exactly; on the phone that is
+  // why nobody split anything.)
+  const [splitRows, setSplitRows] = useState<SplitPart[]>(() =>
+    partsFromRows(txn as unknown as TxForSplit, parts),
   );
   const [busy, setBusy] = useState(false);
 
@@ -1409,13 +1402,15 @@ function TxnDrawer({
   );
   const subcatOptions = useMemo(() => optionsFor(catId), [optionsFor, catId]);
 
-  const splitSum = splitRows.reduce((s, x) => s + x.amount, 0);
+  const splitSum = splitRows.reduce((s, x) => s + Math.round(x.amount || 0), 0);
   const numericAmount = Math.abs(parseInt(amount, 10) || 0);
+  const splitRest = restOf(numericAmount, splitRows);
+  const otherCat = categoriesForType(txType).find(id => id !== catId) ?? catId;
 
   const save = async () => {
     if (numericAmount <= 0) return setErr('Enter a valid amount');
-    if (splitRows.length > 0 && splitSum !== numericAmount) {
-      return setErr(`Split parts must sum to the amount (${fmtAmount(splitSum)} of ${fmtAmount(numericAmount)})`);
+    if (splitSum > numericAmount) {
+      return setErr(`The parts add up to more than the amount (${fmtAmount(splitSum)} of ${fmtAmount(numericAmount)})`);
     }
     setBusy(true);
     setErr(null);
@@ -1469,28 +1464,35 @@ function TxnDrawer({
       const {error} = await supabase.from('transactions').update(patch).eq('id', txn.id);
       if (error) throw error;
 
-      // splits replaced atomically
-      await supabase.from('split_details').delete().eq('transaction_id', txn.id);
-      const newRows = splitRows.map(r => ({
-        id: r.id ?? uuid(),
-        transaction_id: txn.id,
-        amount: r.amount,
-        // The ID, not the label. Every reader COALESCEs this with transactions.category
-        // and runs the result through resolveCat, so storing a label made reporting depend
-        // on fuzzy substring matching to undo it. Rows written earlier still hold labels;
-        // __tests__/categoryRoundTrip.test.ts pins that both spellings resolve to the same
-        // id, so no backfill is needed.
-        category: r.category,
-        // NULL, not ''. Readers do COALESCE(s.subcategory, t.subcategory), and COALESCE
-        // only skips NULL — '' is a value and wins, so writing it erased the parent's
-        // subcategory from reports the moment a transaction was split.
-        subcategory: r.subcategory || null,
-        note: null,
-        owner_id: txn.owner_id,
-      }));
-      if (newRows.length > 0) {
-        const {error: se} = await supabase.from('split_details').insert(newRows);
-        if (se) throw se;
+      // The parts that differ + an explicit rest, built exactly as the phone
+      // builds them (shared/splits.ts): category IDs, NULL — not '' — for no
+      // subcategory (readers COALESCE, and '' would win), each part's label kept
+      // as its note. Rebuilt against the FINAL amount/category/type, so a split
+      // still covers the whole transaction after an edit.
+      const wanted = splitRowsFor(
+        {
+          id: txn.id,
+          amount: numericAmount,
+          category: patch.category ?? null,
+          subcategory: patch.subcategory ?? null,
+          transaction_type: txType,
+          transfer_direction: newDirection,
+          owner_id: txn.owner_id,
+        },
+        txType === 'transfer' ? [] : splitRows,
+      );
+      const sig = (rows: any[]) =>
+        JSON.stringify(rows.map(r => [r.category, r.subcategory || null, Math.round(r.amount ?? 0), r.note || null]));
+      // Rewritten only when it changed: replacing identical rows on every save
+      // churned the split ids for nothing.
+      let newRows: any[] = parts;
+      if (sig(wanted) !== sig(parts)) {
+        await supabase.from('split_details').delete().eq('transaction_id', txn.id);
+        newRows = wanted.map(r => ({...r, id: uuid(), transaction_id: txn.id, owner_id: txn.owner_id}));
+        if (newRows.length > 0) {
+          const {error: se} = await supabase.from('split_details').insert(newRows);
+          if (se) throw se;
+        }
       }
       for (const [accId, dl] of deltas) {
         await rebalanceAccount(supabase, accId, dl);
@@ -1738,22 +1740,22 @@ function TxnDrawer({
                   <button
                     className="press text-[11.5px] font-semibold"
                     style={{color: 'var(--accent-700)'}}
-                    onClick={() =>
-                      setSplitRows([
-                        {category: catId, subcategory, amount: Math.ceil(numericAmount / 2)},
-                        {category: 'other_spending', subcategory: '', amount: Math.floor(numericAmount / 2)},
-                      ])
-                    }>
+                    onClick={() => setSplitRows([{category: otherCat, subcategory: '', amount: 0}])}>
                     + Split
                   </button>
                 )}
               </div>
               {splitRows.length > 0 && (
                 <div className="flex flex-col gap-2">
+                  <div className="text-[11px] text-ink3">
+                    Add only the parts that were something else — the rest stays in{' '}
+                    {CATS[catId]?.label ?? 'the main category'}.
+                  </div>
                   {splitRows.map((s, i) => (
                     <div key={i} className="flex flex-wrap items-center gap-2">
                       <InlineCatSelect
                         value={s.category}
+                        type={txType}
                         onChange={c2 =>
                           setSplitRows(sp =>
                             sp.map((x, xi) =>
@@ -1771,9 +1773,7 @@ function TxnDrawer({
                           value={s.subcategory}
                           onChange={e =>
                             setSplitRows(sp =>
-                              sp.map((x, xi) =>
-                                xi === i ? {...x, subcategory: e.target.value} : x,
-                              ),
+                              sp.map((x, xi) => (xi === i ? {...x, subcategory: e.target.value} : x)),
                             )
                           }>
                           <option value="">— no subcategory —</option>
@@ -1785,9 +1785,20 @@ function TxnDrawer({
                         </select>
                       )}
                       <input
+                        className="input min-w-0 flex-1"
+                        placeholder="What was it? (optional)"
+                        value={s.label ?? ''}
+                        onChange={e =>
+                          setSplitRows(sp =>
+                            sp.map((x, xi) => (xi === i ? {...x, label: e.target.value || undefined} : x)),
+                          )
+                        }
+                      />
+                      <input
                         type="number"
                         className="input w-[100px] text-right"
-                        value={s.amount}
+                        placeholder="0"
+                        value={s.amount || ''}
                         onChange={e =>
                           setSplitRows(sp => sp.map((x, xi) => (xi === i ? {...x, amount: +e.target.value} : x)))
                         }
@@ -1797,19 +1808,24 @@ function TxnDrawer({
                       </button>
                     </div>
                   ))}
-                  <div className="flex items-center justify-between">
-                    <button
-                      className="press text-[11.5px] font-semibold"
-                      style={{color: 'var(--accent-700)'}}
-                      onClick={() => setSplitRows(sp => [...sp, {category: 'shopping', subcategory: '', amount: 0}])}>
-                      + Add part
-                    </button>
+                  <div
+                    className="flex items-center justify-between rounded-[10px] px-3 py-2 text-[12px]"
+                    style={{background: 'var(--surface-2)', border: '1px solid var(--border)'}}>
+                    <span className="text-ink2">
+                      Rest · <span className="font-semibold">{CATS[catId]?.label ?? catId}</span>
+                    </span>
                     <span
-                      className="tabnum text-[11.5px]"
-                      style={{color: splitSum === numericAmount ? 'var(--income)' : 'var(--expense)'}}>
-                      {fmtAmount(splitSum)} of {fmtAmount(numericAmount)} allocated
+                      className="tabnum font-semibold"
+                      style={{color: splitSum > numericAmount ? 'var(--expense)' : 'var(--ink)'}}>
+                      {splitSum > numericAmount ? `${fmtAmount(splitSum - numericAmount)} over` : fmtAmount(splitRest)}
                     </span>
                   </div>
+                  <button
+                    className="press self-start text-[11.5px] font-semibold"
+                    style={{color: 'var(--accent-700)'}}
+                    onClick={() => setSplitRows(sp => [...sp, {category: otherCat, subcategory: '', amount: 0}])}>
+                    + Add part
+                  </button>
                 </div>
               )}
             </div>

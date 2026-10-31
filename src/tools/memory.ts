@@ -16,6 +16,11 @@
 // Stored in the synced `memories` table (migration v22).
 
 import {normalizeMerchant} from '../../shared/merchantNormalize';
+import {phoneTails} from '../../shared/people';
+
+// Moved to shared/people.ts (the web matches phone numbers too); re-exported
+// for the existing importers.
+export {phoneTails};
 
 export interface MemoryRow {
   id: string;
@@ -91,16 +96,6 @@ export async function addMemory(
 
 export async function deleteMemory(db: any, id: string): Promise<void> {
   await db.execute('DELETE FROM memories WHERE id = ?', [id]);
-}
-
-/** Last 9 digits of every phone-like number in a text: "0788 123 456" and "250788123456" agree. */
-export function phoneTails(text: string): Set<string> {
-  const out = new Set<string>();
-  const runs = (text ?? '').replace(/[\s-]/g, '').match(/\d{9,13}/g) ?? [];
-  for (const r of runs) {
-    out.add(r.slice(-9));
-  }
-  return out;
 }
 
 /** Name words long enough to mean something on their own. */

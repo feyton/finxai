@@ -31,6 +31,8 @@ const PAIRS: [string, string][] = [
   ['smsDirection.ts', 'smsDirection.ts'],
   ['smsIds.ts', 'smsIds.ts'],
   ['tags.ts', 'tags.ts'],
+  ['splits.ts', 'splits.ts'],
+  ['people.ts', 'people.ts'],
 ];
 const sourceOf = (f: string) => join(__dirname, '..', 'shared', f);
 const copyOf = (f: string) =>

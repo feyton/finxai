@@ -111,3 +111,21 @@ describe('items from a described payment (classifier reply)', () => {
     ]);
   });
 });
+
+// The web drawer stores splits through this too (shared/splits.ts): if it ever
+// drops the rest row, reports read only the parts and the rest of the money vanishes.
+describe('splitRowsFor', () => {
+  const {splitRowsFor} = require('../shared/splits');
+  it('stores the parts plus the rest in the main category, labels as notes', () => {
+    const rows = splitRowsFor(tx, [{category: 'transport', subcategory: '', amount: 3000, label: 'moto'}]);
+    expect(rows).toEqual([
+      {category: 'transport', subcategory: null, amount: 3000, note: 'moto'},
+      {category: 'groceries', subcategory: null, amount: tx.amount - 3000, note: null},
+    ]);
+    expect(rows.reduce((s: number, r: any) => s + r.amount, 0)).toBe(tx.amount);
+  });
+  it('no differing parts = no split at all', () => {
+    expect(splitRowsFor(tx, [])).toEqual([]);
+    expect(splitRowsFor(tx, [{category: 'groceries', subcategory: '', amount: 1000}])).toEqual([]);
+  });
+});
