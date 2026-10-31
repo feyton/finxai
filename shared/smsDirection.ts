@@ -59,8 +59,11 @@ export function resolveDirection<A extends AccountNumberRef>(
   // Debited account: Y Amount: RWF 45,000 Transaction Charge: RWF 0 ..."
   // The words "Credited"/"Debited" here describe ACCOUNTS, not the user —
   // direction must come from which account is the user's own.
-  const credited = raw.match(/credited\s+account\s*:?\s*([A-Za-z0-9]+)/i)?.[1] ?? null;
-  const debited = raw.match(/debited\s+account\s*:?\s*([A-Za-z0-9]+)/i)?.[1] ?? null;
+  // "account" or "A/C": BK's bill-payment alert ("Bill payment - Wasac Credited
+  // A/C: … Debited A/C: …") uses the short form. Missing it sent that alert to
+  // the generic rule below, which saw "Credited" and filed a WASAC bill as income.
+  const credited = raw.match(/credited\s+(?:account|a\/c)\s*:?\s*([A-Za-z0-9]+)/i)?.[1] ?? null;
+  const debited = raw.match(/debited\s+(?:account|a\/c)\s*:?\s*([A-Za-z0-9]+)/i)?.[1] ?? null;
 
   if (credited || debited) {
     const accounts = ctx?.accounts ?? [];
@@ -88,7 +91,8 @@ export function resolveDirection<A extends AccountNumberRef>(
   // "kubitsa" (Kinyarwanda: to deposit/save) — e.g. "Umaze kubitsa RWF 500
   // kuri Mokash" — money moving IN to the tracked account, same role as
   // the English "deposit"/"received"/"credited" signals.
-  const direction: 'credit' | 'debit' = /received|credited|you have received|deposit|kubitsa/i.test(
+  // "uhawe" (you were given) — e.g. "Uhawe inyungu ya RWF 71", MoKash interest.
+  const direction: 'credit' | 'debit' = /received|credited|you have received|deposit|kubitsa|uhawe/i.test(
     raw,
   )
     ? 'credit'

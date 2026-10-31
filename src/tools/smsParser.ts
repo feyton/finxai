@@ -385,7 +385,7 @@ function extractFees(raw: string): number {
 // filtering, each transfer would create 2-3 duplicate records on top of the
 // real one — these must never become transactions on their own.
 export function isTransferStatusOnly(raw: string): boolean {
-  return /transaction\s+ref\s*:\s*\S+\s+of\s+RWF[\d,.\s]+from\s+A\/c\s*[\d*]+\s+to\s+A\/c\s*([\d*]+)\s+on\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+is\s+(?:completed|your request is being processing)/i.test(
+  return /transaction\s+ref\s*:\s*\S+\s+of\s+RWF[\d,.\s]+from\s+A\/c\s*[\d*]+\s+to\s+A\/c\s*([\d*]+)\s+on\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+is\s+(?:completed|your request is being process(?:ing|ed))/i.test(
     raw,
   );
 }
@@ -409,7 +409,7 @@ export function isTransferStatusOnly(raw: string): boolean {
 // wohererejwe (you were sent), wakiriye (you received), umaze kwishyura (you
 // have paid), byagenze neza / byakunze (it went through) — and Equity's card spend is a bare "Auth for card … Amt: RWF".
 const MONEY_VERB_RE =
-  /\b(?:received|sent|paid|transferred|deposited|withdrawn|withdrew|debited|credited|deducted|charged|repaid|completed|purchased|bought|activated|recharged|topped\s+up|successful(?:ly)?|payment\s+of|transaction\s+of|deposit\s+of|auth(?:ori[sz]ation)?\s+for\s+card|woherereje|wohererejwe|wakiriye|umaze\s+kwishyura|wishyuye|byagenze\s+neza|byakunze)\b/i;
+  /\b(?:received|sent|paid|transferred|deposited|withdrawn|withdrew|debited|credited|deducted|charged|repaid|completed|purchased|bought|activated|recharged|topped\s+up|successful(?:ly)?|payment\s+of|transaction\s+of|deposit\s+of|auth(?:ori[sz]ation)?\s+for\s+card|woherereje|wohererejwe|wakiriye|umaze\s+kwishyura|wishyuye|byagenze\s+neza|byakunze|umaze\s+kubitsa|umaze\s+kohereza|uhawe)\b/i;
 // No leading \b: Cogebanque writes "BankRef: 2302…" as one word.
 const TXN_REF_RE =
   /(?:\b|bank)(?:ref(?:erence)?|txn\s*id|transaction\s*id|ft\s*id|financial\s+transaction\s+id)\b\s*(?:no\.?|number)?\s*[:#.]?\s*[A-Z0-9]{4,}/i;
@@ -477,7 +477,7 @@ export function maskedSuffixMatches(a: string, b: string): boolean {
 // this date is D/M/YYYY, not M/D/YYYY.
 export function extractTransferHint(raw: string): TransferHint | null {
   const m = raw.match(
-    /of\s+RWF\s*([\d,.]+)\s+from\s+A\/c\s*([\d*]+)\s+to\s+A\/c\s*([\d*]+)\s+on\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+is\s+(?:completed|your request is being processing)/i,
+    /of\s+RWF\s*([\d,.]+)\s+from\s+A\/c\s*([\d*]+)\s+to\s+A\/c\s*([\d*]+)\s+on\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+is\s+(?:completed|your request is being process(?:ing|ed))/i,
   );
   if (!m) {
     return null;
@@ -766,8 +766,15 @@ function regexClassify(
   if (facts.transferAccount) {category = 'own_transfer';}
   // Into or out of savings is in the WORDS, not the leg: a deposit lands on the
   // tracked MoKash account as a credit and is still To Savings.
+  // Kinyarwanda templates too (a second user's phone gets them): "Umaze kubitsa
+  // … kuri Mokash" = deposit, "Umaze kohereza … kuva kuri konti Mokash" = out of
+  // MoKash, "Uhawe inyungu ya RWF 71" = interest paid.
   else if (/mokash/.test(hay)) {
-    category = /from (?:your )?mokash|withdr[ae]w/.test(hay) ? 'from_savings' : 'to_savings';
+    category = /inyungu|interest/.test(hay)
+      ? 'interest'
+      : /from (?:your )?mokash|kuva kuri konti mokash|withdr[ae]w/.test(hay)
+      ? 'from_savings'
+      : 'to_savings';
   }
   else if (/airtime|bundle|mtn(?!\s*mobile\s*money)|airtel/.test(hay)) {category = 'airtime';}
   else if (/power|electric|token|wasac|water/.test(hay)) {category = 'utilities';}
@@ -849,7 +856,9 @@ export function classificationSchema(
 // or the counterparty name overlapping the user's own name.
 export function detectTransfer(raw: string, userName?: string): boolean {
   const s = raw.toLowerCase();
-  if (/mokash/.test(s)) {return true;}
+  // MoKash deposits/withdrawals move your own money — but interest it PAYS you
+  // ("Uhawe inyungu…", "interest") is income, not a transfer.
+  if (/mokash/.test(s) && !/inyungu|interest/.test(s)) {return true;}
   if (/fund-?transfer|own number|to my (?:momo|bank|number)|self/.test(s)) {return true;}
   if (userName) {
     const tokens = userName

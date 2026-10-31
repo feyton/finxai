@@ -142,3 +142,36 @@ describe('the classifier enforces direction on every path', () => {
     expect(p.category).toBe('to_savings');
   });
 });
+
+// Found reading real rows on 2026-10-31 (invented text below, same templates).
+describe('templates the v23 review uncovered', () => {
+  it('a BPR "request is being processed" status message is not a transaction', () => {
+    const {isTransferStatusOnly} = require('../src/tools/smsParser');
+    expect(
+      isTransferStatusOnly(
+        'Dear TEST USER, Transaction Ref: 1234567 of RWF 80,000.00 from A/c 4*****1000 to A/c 0*****2000 on 18/10/2026 is Your request is being processed, confirmation will be sent to you shortly',
+      ),
+    ).toBe(true);
+  });
+
+  it('Kinyarwanda MoKash: deposit, withdrawal and interest are recognised', () => {
+    const {notATransaction} = require('../src/tools/smsParser');
+    const dep = "Y'ello. Umaze kubitsa RWF 500 kuri Mokash kuva kuri konti yawe ya Mobile Money. Ubu ufite RWF 3000 kuri Mokash.Ref 1000000001";
+    const out = "Y'ello. Umaze kohereza RWF 4000 kuva kuri konti Mokash tariki 14/10/2026 saa 4:26 PM. Mokash ifiteho amafaranga RWF 500. Ref 1000000002";
+    const interest = 'Mukiliya mwiza, kwizigamira kuri MoKash biguhesha inyungu. Uhawe inyungu ya RWF 71. Ubwizigamire bwawe ni RWF 1,500.';
+    for (const m of [dep, out, interest]) {
+      expect(notATransaction(m)).toBe(false); // the interest one used to be dropped as "no money verb"
+    }
+    expect(parseWithRegex(dep, {}).category).toBe('to_savings');
+    expect(parseWithRegex(out, {}).category).toBe('from_savings');
+    expect(parseWithRegex(interest, {}).category).toBe('interest');
+    // a balance notice is still not a transaction
+    expect(notATransaction("Y'ello. Amafaranga ya Mokash ufite ni RWF, 1279 ya tariki 15/09/2026.")).toBe(true);
+  });
+
+  it('a BK bill payment ("Credited A/C … Debited A/C") is money OUT', () => {
+    const {resolveDirection} = require('../shared/smsDirection');
+    const bill = 'Bill payment - Wasac Credited A/C: 1000000000 Debited A/C: 2000000000 Amount: RWF 5,111 Transaction Charge: RWF 100 Status: COMPLETED';
+    expect(resolveDirection(bill, {}).direction).toBe('debit');
+  });
+});
