@@ -54,6 +54,7 @@ import {
   persistParsedSms,
 } from '../tools/smsIngest';
 import {loadMemories} from '../tools/memory';
+import {loadPeople} from '../tools/people';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -232,6 +233,7 @@ const SMSRetriever: React.FC = () => {
       const merchantChannels = await getMerchantChannels();
       // Once per run, not per SMS: an inbox sweep classifies hundreds.
       const memories = await loadMemories(db, userId!);
+      const people = await loadPeople(db, userId!);
       const channelRules = await getChannelRules();
 
       const ctxBase: ParseContext = {
@@ -395,6 +397,7 @@ const SMSRetriever: React.FC = () => {
             : merchantRules;
           ctx.rules = scopedRules;
           ctx.memories = memories;
+          ctx.people = people;
 
           const parsed = await parseSmsWithAI(
             sms.body,

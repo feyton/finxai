@@ -94,7 +94,7 @@ export async function deleteMemory(db: any, id: string): Promise<void> {
 }
 
 /** Last 9 digits of every phone-like number in a text: "0788 123 456" and "250788123456" agree. */
-function phoneTails(text: string): Set<string> {
+export function phoneTails(text: string): Set<string> {
   const out = new Set<string>();
   const runs = (text ?? '').replace(/[\s-]/g, '').match(/\d{9,13}/g) ?? [];
   for (const r of runs) {

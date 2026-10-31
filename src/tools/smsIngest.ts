@@ -35,6 +35,7 @@ import {ignoredSmsId, rowExists, smsAlreadyRecorded, smsTransactionId} from './t
 import {isUsablePattern, normalizeMerchant} from '../../shared/merchantNormalize';
 import {syncAccountBalance} from './balance';
 import {loadMemories} from './memory';
+import {loadPeople} from './people';
 import {resolveCat, subcategoriesOf} from '../theme';
 import {takePendingNote} from './pendingNotes';
 
@@ -358,7 +359,12 @@ export async function ingestLiveSms(
   const facts = regexExtract(body, ctxBase);
   const names = candidateNames(body, facts, sender);
   const rules = await getMerchantRules(db, names[0] ?? '', ownerId, 20);
-  const ctx: ParseContext = {...ctxBase, rules, memories: await loadMemories(db, ownerId)};
+  const ctx: ParseContext = {
+    ...ctxBase,
+    rules,
+    memories: await loadMemories(db, ownerId),
+    people: await loadPeople(db, ownerId),
+  };
 
   const parsed = await parseSmsWithAI(
     body,
@@ -727,6 +733,7 @@ export async function reclassifySms(
       rules,
       sender: record.sender ?? '',
       memories: await loadMemories(db, ownerId),
+      people: await loadPeople(db, ownerId),
     },
   );
 

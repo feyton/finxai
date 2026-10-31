@@ -23,6 +23,7 @@ import {
 import {MerchantRule, ParsedSMS} from './smsTypes';
 import {pickSmsFormat} from './smsFormats';
 import {type MemoryRow, pickMemories} from './memory';
+import {type Person, matchPerson, personCategory, personContextLine} from './people';
 // Pure rules the web needs too, so they live in shared/ rather than here. Re-exported
 // below so every existing `from './smsParser'` import keeps working unchanged.
 import {extractBalance} from '../../shared/balanceReplay';
@@ -150,6 +151,9 @@ export interface ParseContext {
   // Everything the user has told FinXAI (src/tools/memory.ts). The relevant
   // few are picked per SMS in buildClassification, so callers pass them all.
   memories?: MemoryRow[];
+  // Who the user's counterparties are (src/tools/people.ts). A matched person
+  // with a category for this direction files the SMS with no model call.
+  people?: Person[];
 }
 
 /** A user note, made safe to quote inside a prompt. */
@@ -261,7 +265,7 @@ function num(s: string | undefined): number {
   return Number.isNaN(n) ? 0 : Math.round(n);
 }
 
-// Compares account/phone numbers loosely: 250787241457 ≡ 0787241457 ≡ 787241457.
+// Compares account/phone numbers loosely: 250780000123 ≡ 0780000123 ≡ 780000123.
 // Implementation in shared/smsDirection.ts, alongside the direction rule that needs it.
 export {normalizeAccountNumber};
 
@@ -707,7 +711,7 @@ function regexClassify(
     new RegExp(String.raw`payment\s+of\s+[\d,.]+\s*(?:RWF|FRW)\s+to\s+(.+?)` + NAME_STOP, 'i'),
   );
   // `.+?` is deliberately LAZY: with a greedy `.+` this bound to the LAST
-  // " from " in the message, so "You have received ... from FABRICE ...
+  // " from " in the message, so "You have received ... from JEAN ...
   // Message from sender: ." yielded the merchant "sender:".
   const from = raw.match(
     new RegExp(String.raw`received\s+.+?\bfrom\s+(.+?)` + NAME_STOP, 'i'),
@@ -1035,6 +1039,28 @@ export function buildClassification(
       factsToParsed(f, merchant, 'own_transfer', 0.97, f.channelHint, true, '', 'ai'),
     );
   }
+  // A KNOWN PERSON (People, v24): their relationship decides — "my mother" is
+  // Family Support out and Money from Family in — with no model call. Ahead of
+  // merchant rules: a person is a stronger, user-stated fact than a learned
+  // category, and it knows the direction. The user's own words for THIS payment
+  // (userNote) still win, so a described payment goes to the model.
+  const person = matchPerson(ctx?.people, raw, [deterministic?.name, ...candidateNames(raw, f, ctx?.sender ?? '')]);
+  const byPerson = person ? personCategory(person, f.direction) : null;
+  if (person && byPerson && !promptNote(ctx?.userNote)) {
+    return asPlan(
+      factsToParsed(
+        f,
+        person.name,
+        byPerson.category,
+        0.95,
+        f.channelHint,
+        false, // enforceDirection makes transfer-kind categories (self) transfers
+        byPerson.subcategory,
+        'ai',
+      ),
+    );
+  }
+
   const preRule = findRuleForNames(rules, [
     deterministic?.name,
     ...candidateNames(raw, f, ctx?.sender ?? ''),
@@ -1119,11 +1145,13 @@ ${format.guidance}`;
     (deterministic ? `, counterparty="${deterministic.name}"` : '') +
     (deterministic?.code ? `, counterpartyCode=${deterministic.code}` : '');
 
-  const memoryLines = pickMemories(ctx?.memories, raw, [
+  // A known person whose purpose varies (a friend) is still context.
+  const personLine = person && !byPerson ? personContextLine(person) : '';
+  const memoryLines = [personLine ? `- ${personLine}` : ''].filter(Boolean).concat(pickMemories(ctx?.memories, raw, [
     deterministic?.name,
     ...candidateNames(raw, f, ctx?.sender ?? ''),
   ])
-    .map(m => `- ${m.replace(/[\r\n]+/g, ' ')}`)
+    .map(m => `- ${m.replace(/[\r\n]+/g, ' ')}`))
     .join('\n');
 
   const user = `SMS: ${raw}

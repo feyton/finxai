@@ -65,6 +65,8 @@ bucket_definitions:
       # v22. What the classifier knows about this user. Owner only — a fact
       # like "this number is my mother" is nobody else's business.
       - SELECT * FROM memories WHERE owner_id::text = bucket.user_id
+      # v24. Who the user's counterparties are. Owner only.
+      - SELECT * FROM people WHERE owner_id::text = bucket.user_id
       - SELECT * FROM user_settings WHERE owner_id::text = bucket.user_id
       - SELECT * FROM shared_people WHERE owner_id::text = bucket.user_id
 

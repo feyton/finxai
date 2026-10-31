@@ -116,8 +116,12 @@ export default function MemoryScreen({navigation}: any) {
               </Pressable>
             ))}
             <Text style={styles.emptyHint}>
-              You can also tell the AI Coach: “remember that …”.
+              You can also tell the AI Coach: “remember that …”. For who someone is
+              (mother, landlord…), use People — it files their payments for you.
             </Text>
+            <Pressable onPress={() => navigation.navigate('People')} style={styles.example}>
+              <Text style={[styles.exampleText, {color: T.accent}]}>Open People →</Text>
+            </Pressable>
           </View>
         }
         renderItem={({item}) => (

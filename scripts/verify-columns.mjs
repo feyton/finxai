@@ -35,6 +35,8 @@ const EXPECTED = [
   ['tags', 'name,color,note,archived'],
   // v22 — memories the classifier reads
   ['memories', 'text,subject,source'],
+  // v24 — people
+  ['people', 'kind,name,match_keys,phones,relationship,category_out,category_in,note'],
 ];
 
 let missing = 0;

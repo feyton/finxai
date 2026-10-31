@@ -30,6 +30,7 @@ import {extractBalance, parseSmsWithAI, regexExtract} from './smsParser';
 import {promoteAutoRecord, recheckPending} from './smsIngest';
 import {refreshBalanceWidget} from '../widgets/refreshWidget';
 import {loadMemories} from './memory';
+import {loadPeople} from './people';
 import {keepPendingNote} from './pendingNotes';
 import {saveSplit} from './splits';
 
@@ -281,6 +282,7 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
         sender: record.sender ?? '',
         userNote: note,
         memories: await loadMemories(db, ownerId),
+        people: await loadPeople(db, ownerId),
       },
     );
     step(`classified (${parsed.parseSource})`);

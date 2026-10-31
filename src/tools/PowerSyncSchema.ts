@@ -344,6 +344,21 @@ const memories = new Table({
   created_at: column.text,
 });
 
+// v24. Who a counterparty is — see src/tools/people.ts. match_keys and phones
+// are JSON arrays stored as text.
+const people = new Table({
+  kind: column.text, // 'person' | 'merchant'
+  name: column.text,
+  match_keys: column.text,
+  phones: column.text,
+  relationship: column.text,
+  category_out: column.text,
+  category_in: column.text,
+  note: column.text,
+  owner_id: column.text,
+  created_at: column.text,
+});
+
 const shared_people = new Table({
   name: column.text,
   role: column.text,
@@ -381,4 +396,5 @@ export const AppSchema = new Schema({
   user_settings,
   tags,
   memories,
+  people,
 });

@@ -164,6 +164,21 @@ export interface Memory {
   created_at: string | null;
 }
 
+/** v24 — who a counterparty is (src/tools/people.ts on the phone). */
+export interface Person {
+  id: string;
+  kind: string | null; // 'person' | 'merchant'
+  name: string;
+  match_keys: string | null;
+  phones: string | null;
+  relationship: string | null;
+  category_out: string | null;
+  category_in: string | null;
+  note: string | null;
+  owner_id: string;
+  created_at: string | null;
+}
+
 export interface Subcategory {
   id: string;
   category: string; // CategoryId: 'food', 'transport', …

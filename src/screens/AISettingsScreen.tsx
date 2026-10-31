@@ -330,6 +330,21 @@ export default function AISettingsScreen({navigation}: any) {
           </View>
         </Pressable>
 
+        <Pressable
+          onPress={() => navigation.navigate('People')}
+          style={({pressed}) => [styles.card, styles.choiceCard, {opacity: pressed ? 0.75 : 1}]}>
+          <View style={styles.cardHead}>
+            <View style={[styles.cardIcon, {backgroundColor: T.accent + '22'}]}>
+              <Icon name="Users" size={16} color={T.accent} strokeWidth={2.2} />
+            </View>
+            <View style={{flex: 1}}>
+              <Text style={styles.cardTitle}>People & places</Text>
+              <Text style={styles.cardDesc}>Who you pay, who pays you, and your regular places</Text>
+            </View>
+            <Icon name="ChevronRight" size={18} color={T.text3} strokeWidth={2.2} />
+          </View>
+        </Pressable>
+
         {/* Privacy note */}
         <SectionTitle>Privacy</SectionTitle>
         <View style={styles.card}>
