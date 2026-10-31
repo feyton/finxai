@@ -91,6 +91,29 @@ export async function pendingUploadGap(ownerId: string): Promise<SyncGap> {
     // still catching up on download, which resolves itself.
     const missing = Math.max(0, localCount - count);
 
+    // Name the rows, not just the count. "1 record not backed up" offers Upload
+    // now, which re-sends recent local-only rows — and a local-only row can also
+    // be one the SERVER deliberately deleted (e.g. a duplicate removed by a
+    // migration) that this phone kept. Logging which rows they are is what lets
+    // anyone tell a lost upload from a resurrection before pressing the button.
+    if (missing > 0) {
+      try {
+        const {rows: recent} = await db.execute(
+          'SELECT id, date_time, amount, category, transaction_type, created_at FROM transactions WHERE owner_id = ? ORDER BY created_at DESC LIMIT 400',
+          [ownerId],
+        );
+        const ids = ((recent?._array ?? []) as any[]).map(r => r.id);
+        const {data: present} = await supabase.from('transactions').select('id').in('id', ids);
+        const have = new Set((present ?? []).map((r: any) => r.id));
+        const only = ((recent?._array ?? []) as any[]).filter(r => !have.has(r.id));
+        for (const r of only.slice(0, 10)) {
+          console.warn(
+            `[syncGap] phone-only row ${r.id} ${String(r.date_time).slice(0, 10)} ${r.amount} ${r.transaction_type}/${r.category} created ${String(r.created_at).slice(0, 10)}`,
+          );
+        }
+      } catch {}
+    }
+
     // Balances are checked separately because they drift WITHOUT any row being
     // missing: available_balance is updated in place, so a failed upload leaves
     // the row count identical and only the number wrong. That is precisely the

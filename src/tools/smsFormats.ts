@@ -86,11 +86,15 @@ const MTN: SmsFormat = {
 const BK: SmsFormat = {
   id: 'bk',
   label: 'Bank of Kigali (transfer alert)',
-  matches: (_sender, body) => /credited\s+account|debited\s+account/i.test(body),
+  matches: (_sender, body) => /(?:credited|debited)\s+(?:account|a\/c)/i.test(body),
   extractCounterparty(body) {
-    const name = firstMatch(body, [
-      /^\s*(?:TRANSFER|BILL\s*PAYMENT|PAYMENT)\s*-\s*([\s\S]*?)\s+(?:credited|debited)\s+account/i,
+    const head = firstMatch(body, [
+      /^\s*(?:TRANSFER|BILL\s*PAYMENT|PAYMENT)\s*-\s*([\s\S]*?)\s+(?:credited|debited)\s+(?:account|a\/c)/i,
     ]);
+    // eKash sends name the PERSON: "TRANSFER - EKASH Beneficiary: Jean TESTER
+    // Credited account: …". The rail prefix made every one look like a company
+    // ("Ekash Beneficiary: …") and hid the name from People.
+    const name = head?.match(/beneficiary\s*:\s*(.+)$/i)?.[1]?.trim() ?? head;
     return name ? {name, code: null} : null;
   },
   guidance: `Bank of Kigali alert format: "TRANSFER - <rail> Credited account: X Debited account: Y Amount: RWF N ...".

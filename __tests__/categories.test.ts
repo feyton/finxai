@@ -175,3 +175,14 @@ describe('templates the v23 review uncovered', () => {
     expect(resolveDirection(bill, {}).direction).toBe('debit');
   });
 });
+
+describe('BK eKash transfers name the person', () => {
+  const {pickSmsFormat} = require('../src/tools/smsFormats');
+  const ekash = 'TRANSFER - EKASH Beneficiary: Jean TESTER Credited account: 250780000123 Debited account: 1000000000 Amount:RWF 15000.00 Transaction Charge:RWF 20 Status: COMPLETED';
+  it('the format extractor returns the beneficiary, not "EKASH Beneficiary: …"', () => {
+    expect(pickSmsFormat('BK', ekash).extractCounterparty(ekash)?.name).toBe('Jean TESTER');
+  });
+  it('the regex fallback names them too', () => {
+    expect(parseWithRegex(ekash, {}).merchant).toBe('Jean Tester');
+  });
+});

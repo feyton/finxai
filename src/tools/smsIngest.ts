@@ -778,6 +778,36 @@ export async function reclassifySms(
 }
 
 /**
+ * "Ekash Beneficiary: Jean Tester" → "Jean Tester" on rows stored before
+ * the BK extractor learned to take the name after "Beneficiary:". The prefix made
+ * every eKash payment to a person look like a company and hid it from People.
+ * Idempotent: only rows still carrying the prefix are touched.
+ */
+export async function backfillEkashNames(db: any, ownerId: string): Promise<number> {
+  try {
+    const {rows} = await db.execute(
+      "SELECT id, merchant FROM transactions WHERE owner_id = ? AND merchant LIKE '%Beneficiary:%'",
+      [ownerId],
+    );
+    let n = 0;
+    for (const r of (rows?._array ?? []) as any[]) {
+      const name = String(r.merchant).match(/beneficiary\s*:\s*(.+)$/i)?.[1]?.trim();
+      if (!name) continue;
+      const display = normalizeMerchant(name).display || name;
+      await db.execute('UPDATE transactions SET merchant = ?, payee = ? WHERE id = ?', [display, display, r.id]);
+      n++;
+    }
+    if (n) {
+      console.log(`[Backfill] eKash names tidied on ${n} row(s)`);
+    }
+    return n;
+  } catch (e) {
+    console.warn('[Backfill] eKash names failed:', e);
+    return 0;
+  }
+}
+
+/**
  * Drop review records that are already filed as transactions (same id).
  *
  * See promoteAutoRecord: a pending copy can outlive its own promotion through

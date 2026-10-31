@@ -47,6 +47,7 @@ import {ignoredSmsId} from '../tools/txnId';
 import {
   backfillMerchantLocations,
   backfillPayCodes,
+  backfillEkashNames,
   purgeAlreadyFiled,
   recheckPending,
   purgeNonTransactions,
@@ -207,6 +208,8 @@ const SMSRetriever: React.FC = () => {
       await purgeNonTransactions(db, userId!);
       // Pending copies of transactions that are already filed (sync leftovers).
       await purgeAlreadyFiled(db, userId!);
+      // eKash rows stored with the rail prefix instead of the person's name.
+      await backfillEkashNames(db, userId!);
 
       // File whatever the learned rules now answer. Runs after every Confirm/Fix
       // in the app, but rules also arrive from notification answers (whose

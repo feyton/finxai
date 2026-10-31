@@ -694,7 +694,7 @@ function regexClassify(
   // BK alert header: "TRANSFER - MTN mobile money Credited account: ..." /
   // "Bill payment - Cash Power Electricity Credited account: ..."
   const bkHead = raw.match(
-    /^\s*(?:TRANSFER|BILL\s*PAYMENT|PAYMENT)\s*-\s*([\s\S]*?)\s+(?:credited|debited)\s+account/i,
+    /^\s*(?:TRANSFER|BILL\s*PAYMENT|PAYMENT)\s*-\s*([\s\S]*?)\s+(?:credited|debited)\s+(?:account|a\/c)/i,
   );
   // MTN MoMo's merchant template: "A transaction of 2000 RWF by ComzAfrica
   // Rwanda Limited was completed at ...". There was previously NO pattern for
@@ -743,7 +743,10 @@ function regexClassify(
         ? `To ${facts.transferAccount.name}`
         : `From ${facts.transferAccount.name}`;
   } else if (bkHead) {
-    merchant = bkHead[1].trim();
+    // eKash names the person after "Beneficiary:" — use that, not the rail.
+    const ben = bkHead[1].match(/beneficiary\s*:\s*(.+)$/i)?.[1]?.trim();
+    merchant = ben ?? bkHead[1].trim();
+    fromNameSlot = !!ben;
   } else if (byMerchant) {merchant = byMerchant[1].trim(); fromNameSlot = true;}
   else if (payTo) {merchant = payTo[1].trim(); fromNameSlot = true;}
   else if (from) {merchant = from[1].trim(); fromNameSlot = true;}

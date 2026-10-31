@@ -90,6 +90,8 @@ describe('looksLikePerson', () => {
     ['Simba Supermarket Ltd', false],
     ['Bank Of Kigali', false],
     ['Mokash Loan Account', false],
+    ['Card Purchase', false], // seen on the real phone: the bank's label, not a name
+    ['Ekash Incoming Transfer', false],
   ])('%s → %s', (name, want) => {
     expect(looksLikePerson(name)).toBe(want);
   });
@@ -179,5 +181,21 @@ describe('places (kind = merchant)', () => {
     ];
     const out = await suggestPlaces(fakeDb(rows, []), 'o');
     expect(out.map((p: any) => [p.name, p.count, p.usual])).toEqual([['Test Bakery Ltd', 3, 'groceries']]);
+  });
+});
+
+describe('a name paid through a merchant code is a place, not a person', () => {
+  const {suggestPeople, suggestPlaces} = require('../src/tools/people');
+  const tx = (pay_code: string | null, inbound = false) => ({
+    merchant: 'Valentina', payee: null, pay_code, amount: 1000, category: 'groceries',
+    transaction_type: inbound ? 'income' : 'expense', transfer_direction: null, date_time: '2026-01-01',
+  });
+  const rows = [tx('123456'), tx('123456'), tx('123456')];
+  it('not suggested as a person', async () => {
+    expect(await suggestPeople(fakeDb(rows, []), 'o')).toEqual([]);
+  });
+  it('suggested as a place', async () => {
+    const out = await suggestPlaces(fakeDb(rows, []), 'o');
+    expect(out.map((p: any) => p.name)).toEqual(['Valentina']);
   });
 });

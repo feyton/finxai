@@ -67,6 +67,38 @@ function CategoryChips({
   );
 }
 
+function PlaceCard({s, onPick}: {s: PlaceSuggestion; onPick: (c: CategoryId) => void}) {
+  const [open, setOpen] = useState(!s.usual);
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHead}>
+        <View style={styles.avatar}>
+          <Icon name="ShoppingBag" size={16} color={T.accent} strokeWidth={2.2} />
+        </View>
+        <View style={{flex: 1}}>
+          <Text style={styles.name} numberOfLines={1}>{s.name}</Text>
+          <Text style={styles.meta}>{s.count} payments · {fmtAmount(s.outTotal)} out</Text>
+        </View>
+      </View>
+      {/* Most places are already filed right: confirming that is ONE tap. */}
+      {s.usual && !open && (
+        <View style={styles.confirmRow}>
+          <Pressable onPress={() => onPick(s.usual!)} style={({pressed}) => [styles.confirmBtn, {opacity: pressed ? 0.85 : 1}]}>
+            <Icon name="Check" size={14} color={T.accentInk} strokeWidth={2.6} />
+            <Text style={styles.confirmText} numberOfLines={1}>{CATS[s.usual].label}</Text>
+          </Pressable>
+          <Pressable onPress={() => setOpen(true)} style={styles.changeBtn}>
+            <Text style={styles.changeText}>Change</Text>
+          </Pressable>
+        </View>
+      )}
+      {open && <CategoryChips usual={s.usual} onPick={onPick} />}
+    </View>
+  );
+}
+
+const PAGE = 4;
+
 function filingLine(p: Person): string {
   if (p.kind === 'merchant') {
     return p.categoryOut ? `Filed as ${CATS[p.categoryOut].label}` : 'Ask me each time';
@@ -91,7 +123,7 @@ function RelationshipChips({
         const on = value === r;
         return (
           <Pressable key={r} onPress={() => onPick(r)} style={[styles.chip, on && styles.chipOn]}>
-            <Text style={[styles.chipText, on && {color: T.text}]}>{RELATIONSHIPS[r].label}</Text>
+            <Text style={[styles.chipText, on && {color: T.text}]}>{RELATIONSHIPS[r].short}</Text>
           </Pressable>
         );
       })}
@@ -106,6 +138,8 @@ export default function PeopleScreen({navigation}: any) {
   const [suggestions, setSuggestions] = useState<PersonSuggestion[]>([]);
   const [places, setPlaces] = useState<PlaceSuggestion[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
+  const [morePeople, setMorePeople] = useState(false);
+  const [morePlaces, setMorePlaces] = useState(false);
 
   const {data: rows} = useQuery('SELECT * FROM people WHERE owner_id = ? ORDER BY name', [userId ?? '']);
   const people = ((rows as any[]) ?? []).map(personFromRow);
@@ -176,59 +210,60 @@ export default function PeopleScreen({navigation}: any) {
         contentContainerStyle={[styles.list, {paddingBottom: 24 + insets.bottom}]}
         ListHeaderComponent={
           <>
-          {places.length > 0 && (
-            <View style={{marginBottom: 18}}>
-              <Text style={styles.section}>Your regular places</Text>
-              {places.slice(0, 6).map(s => (
-                <View key={s.key} style={styles.card}>
-                  <View style={styles.cardHead}>
-                    <View style={styles.avatar}>
-                      <Icon name="ShoppingBag" size={16} color={T.accent} strokeWidth={2.2} />
+            {/* People first: identifying them is what files the payments still
+                left in Other. Then places. Four of each, the rest on request. */}
+            {suggestions.length > 0 && (
+              <View style={{marginBottom: 14}}>
+                <Text style={styles.section}>Who is this?</Text>
+                {suggestions.slice(0, morePeople ? 20 : PAGE).map(sg => (
+                  <View key={sg.key} style={styles.card}>
+                    <View style={styles.cardHead}>
+                      <View style={styles.avatar}>
+                        <Icon name="User" size={16} color={T.accent} strokeWidth={2.2} />
+                      </View>
+                      <View style={{flex: 1}}>
+                        <Text style={styles.name} numberOfLines={1}>{sg.name}</Text>
+                        <Text style={styles.meta}>
+                          {sg.count} payments
+                          {sg.outTotal ? ` · ${fmtAmount(sg.outTotal)} out` : ''}
+                          {sg.inTotal ? ` · ${fmtAmount(sg.inTotal)} in` : ''}
+                        </Text>
+                      </View>
                     </View>
-                    <View style={{flex: 1}}>
-                      <Text style={styles.name} numberOfLines={1}>{s.name}</Text>
-                      <Text style={styles.meta}>
-                        {s.count} payments · {fmtAmount(s.outTotal)} out
-                        {s.usual ? ` · usually ${CATS[s.usual].label}` : ''}
-                      </Text>
-                    </View>
+                    <RelationshipChips onPick={rel => identify(sg, rel)} />
                   </View>
-                  <CategoryChips usual={s.usual} onPick={c => identify(s, 'business', c)} />
-                </View>
-              ))}
-            </View>
-          )}
-          {suggestions.length > 0 ? (
-            <View style={{marginBottom: 18}}>
-              <Text style={styles.section}>Who is this?</Text>
-              {suggestions.slice(0, 8).map(s => (
-                <View key={s.key} style={styles.card}>
-                  <View style={styles.cardHead}>
-                    <View style={styles.avatar}>
-                      <Icon name="User" size={16} color={T.accent} strokeWidth={2.2} />
-                    </View>
-                    <View style={{flex: 1}}>
-                      <Text style={styles.name} numberOfLines={1}>{s.name}</Text>
-                      <Text style={styles.meta}>
-                        {s.count} payments
-                        {s.outTotal ? ` · ${fmtAmount(s.outTotal)} out` : ''}
-                        {s.inTotal ? ` · ${fmtAmount(s.inTotal)} in` : ''}
-                      </Text>
-                    </View>
-                  </View>
-                  <RelationshipChips onPick={rel => identify(s, rel)} />
-                </View>
-              ))}
-              {people.length > 0 && <Text style={[styles.section, {marginTop: 10}]}>Known</Text>}
-            </View>
-          ) : people.length === 0 ? (
-            <Text style={styles.empty}>
-              Nobody to ask about yet. As you pay people by MoMo, the ones you deal with most will appear
-              here to identify.
-            </Text>
-          ) : (
-            <Text style={styles.section}>Known</Text>
-          )}
+                ))}
+                {suggestions.length > PAGE && (
+                  <Pressable onPress={() => setMorePeople(v => !v)} style={styles.more}>
+                    <Text style={styles.moreText}>
+                      {morePeople ? 'Show fewer' : `Show ${Math.min(suggestions.length, 20) - PAGE} more`}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
+            {places.length > 0 && (
+              <View style={{marginBottom: 14}}>
+                <Text style={styles.section}>Your regular places</Text>
+                {places.slice(0, morePlaces ? 20 : PAGE).map(pl => (
+                  <PlaceCard key={pl.key} s={pl} onPick={c => identify(pl, 'business', c)} />
+                ))}
+                {places.length > PAGE && (
+                  <Pressable onPress={() => setMorePlaces(v => !v)} style={styles.more}>
+                    <Text style={styles.moreText}>
+                      {morePlaces ? 'Show fewer' : `Show ${Math.min(places.length, 20) - PAGE} more`}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
+            {suggestions.length === 0 && places.length === 0 && people.length === 0 && (
+              <Text style={styles.empty}>
+                Nobody to ask about yet. As you pay people and places by MoMo, the ones you deal
+                with most will appear here.
+              </Text>
+            )}
+            {people.length > 0 && <Text style={styles.section}>Known</Text>}
           </>
         }
         renderItem={({item}) => (
@@ -300,6 +335,23 @@ const styles = StyleSheet.create({
   chip: {paddingHorizontal: 10, paddingVertical: 6, borderRadius: R.pill, backgroundColor: T.surface2, borderWidth: 1, borderColor: T.border},
   chipOn: {borderColor: T.accent, backgroundColor: T.accentSoft},
   chipUsual: {borderColor: T.accent + '66'},
+  confirmRow: {flexDirection: 'row', gap: 8, alignItems: 'center'},
+  confirmBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 38,
+    borderRadius: R.pill,
+    backgroundColor: T.accent,
+    paddingHorizontal: 12,
+  },
+  confirmText: {fontFamily: FONTS.semibold, fontSize: 13, color: T.accentInk},
+  changeBtn: {height: 38, paddingHorizontal: 14, borderRadius: R.pill, borderWidth: 1, borderColor: T.border2, justifyContent: 'center'},
+  changeText: {fontFamily: FONTS.medium, fontSize: 13, color: T.text2},
+  more: {alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 14},
+  moreText: {fontFamily: FONTS.medium, fontSize: 12.5, color: T.accent},
   chipText: {fontFamily: FONTS.medium, fontSize: 12, color: T.text2},
   forget: {alignSelf: 'flex-start', paddingVertical: 4},
   forgetText: {fontFamily: FONTS.medium, fontSize: 12.5, color: T.expense},

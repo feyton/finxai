@@ -138,7 +138,7 @@ export default function SplitSheet({
             Add only the parts that differ — the rest stays in {CATS[main].label}.
           </Text>
 
-          <ScrollView style={{maxHeight: 420}} keyboardShouldPersistTaps="handled">
+          <ScrollView style={{maxHeight: 520}} keyboardShouldPersistTaps="handled">
             {/* The parts so far, then the rest */}
             {parts.map((p, i) => (
               <Pressable
@@ -210,6 +210,15 @@ export default function SplitSheet({
             )}
             {cat && (
               <>
+                <View style={[styles.chips, {marginTop: 12}]}>
+                  {quick.map(q => (
+                    <Pressable key={q.label} onPress={() => setAmount(String(q.value))} style={styles.chip}>
+                      <Text style={styles.chipText}>
+                        {q.label} · {fmtAmount(q.value)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
                 <View style={styles.amountRow}>
                   <Text style={styles.cur}>RWF</Text>
                   <TextInput
@@ -227,27 +236,31 @@ export default function SplitSheet({
                     <Icon name={editing === null ? 'Plus' : 'Check'} size={16} color={T.accentInk} strokeWidth={2.6} />
                   </Pressable>
                 </View>
-                <View style={[styles.chips, {marginTop: 8}]}>
-                  {quick.map(q => (
-                    <Pressable key={q.label} onPress={() => setAmount(String(q.value))} style={styles.chip}>
-                      <Text style={styles.chipText}>
-                        {q.label} · {fmtAmount(q.value)}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
               </>
             )}
           </ScrollView>
 
-          <Pressable
-            onPress={save}
-            disabled={busy}
-            style={({pressed}) => [styles.saveBtn, {opacity: busy ? 0.5 : pressed ? 0.85 : 1}]}>
-            <Text style={styles.saveText}>
-              {parts.length === 0 && !(cat && digits(amount) > 0) ? 'Remove split' : 'Save split'}
-            </Text>
-          </Pressable>
+          {/* Says what will happen: nothing to save yet → nothing to press;
+              an existing split with every part removed → "Remove split". */}
+          {(() => {
+            const pendingPart = !!cat && digits(amount) > 0;
+            const hasWork = parts.length > 0 || pendingPart;
+            const removing = !hasWork && rows.length > 0;
+            const label = hasWork ? 'Save split' : removing ? 'Remove split' : 'Add a part above';
+            const disabled = busy || (!hasWork && !removing);
+            return (
+              <Pressable
+                onPress={save}
+                disabled={disabled}
+                style={({pressed}) => [
+                  styles.saveBtn,
+                  removing && {backgroundColor: T.expense},
+                  {opacity: disabled ? 0.4 : pressed ? 0.85 : 1},
+                ]}>
+                <Text style={styles.saveText}>{label}</Text>
+              </Pressable>
+            );
+          })()}
         </View>
       </View>
     </Modal>

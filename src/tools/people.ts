@@ -24,6 +24,8 @@ export type Relationship =
 
 interface RelationshipDefaults {
   label: string;
+  /** Chip text — short, so eleven chips fit in two rows. */
+  short: string;
   out: CategoryId | null;
   outSub?: string;
   in: CategoryId | null;
@@ -35,17 +37,17 @@ interface RelationshipDefaults {
  * means "the purpose varies": keep asking (a friend may be lunch or a loan).
  */
 export const RELATIONSHIPS: Record<Relationship, RelationshipDefaults> = {
-  self: {label: 'Me (another of my numbers)', out: 'own_transfer', in: 'own_transfer'},
-  spouse: {label: 'Spouse', out: 'family', in: 'family_in'},
-  parent: {label: 'Parent', out: 'family', outSub: 'Parents & relatives', in: 'family_in'},
-  child: {label: 'Child', out: 'family', outSub: 'Children', in: 'family_in'},
-  sibling: {label: 'Brother / sister', out: 'family', outSub: 'Parents & relatives', in: 'family_in'},
-  relative: {label: 'Relative', out: 'family', outSub: 'Parents & relatives', in: 'family_in'},
-  friend: {label: 'Friend', out: null, in: null},
-  landlord: {label: 'Landlord', out: 'housing', outSub: 'Rent', in: null},
-  employer: {label: 'Employer', out: null, in: 'salary'},
-  business: {label: 'Business / service', out: null, in: null},
-  other: {label: 'Other', out: null, in: null},
+  self: {label: 'Me (another of my numbers)', short: 'Me', out: 'own_transfer', in: 'own_transfer'},
+  spouse: {label: 'Spouse', short: 'Spouse', out: 'family', in: 'family_in'},
+  parent: {label: 'Parent', short: 'Parent', out: 'family', outSub: 'Parents & relatives', in: 'family_in'},
+  child: {label: 'Child', short: 'Child', out: 'family', outSub: 'Children', in: 'family_in'},
+  sibling: {label: 'Brother / sister', short: 'Sibling', out: 'family', outSub: 'Parents & relatives', in: 'family_in'},
+  relative: {label: 'Relative', short: 'Relative', out: 'family', outSub: 'Parents & relatives', in: 'family_in'},
+  friend: {label: 'Friend', short: 'Friend', out: null, in: null},
+  landlord: {label: 'Landlord', short: 'Landlord', out: 'housing', outSub: 'Rent', in: null},
+  employer: {label: 'Employer', short: 'Employer', out: null, in: 'salary'},
+  business: {label: 'Business / service', short: 'Business', out: null, in: null},
+  other: {label: 'Other', short: 'Other', out: null, in: null},
 };
 
 export const RELATIONSHIP_ORDER: Relationship[] = [
@@ -207,8 +209,10 @@ export async function deletePerson(db: any, id: string): Promise<void> {
 }
 
 // Words that make a counterparty a business, not a person — never suggested.
+// Bank/MoMo wording too: on the real phone "Card Purchase" was suggested as a
+// person — it is the bank's label for card spending, not a name.
 const BUSINESS_WORDS =
-  /\b(ltd|limited|ltd\.|plc|sarl|company|co\.|supermarket|market|shop|store|bank|pharmacy|hotel|restaurant|cafe|bar|services?|enterprises?|group|rwanda|mtn|airtel|mokash|irembo|wasac|reg|canal|startimes|mobile money|momo)\b/i;
+  /\b(ltd|limited|ltd\.|plc|sarl|company|co\.|supermarket|market|shop|store|bank|pharmacy|hotel|restaurant|cafe|bar|services?|enterprises?|group|rwanda|mtn|airtel|mokash|irembo|wasac|reg|canal|startimes|mobile money|momo|card|purchase|payments?|deposit|incoming|outgoing|charges?|fees?|atm|pos|agent|ekash|transfer|withdrawal|airtime|bundles?|loan|account|insufficient|refund|reversal)\b/i;
 
 /** Does this counterparty name look like a person rather than a business? */
 export function looksLikePerson(name: string): boolean {
@@ -245,9 +249,17 @@ export async function suggestPeople(db: any, ownerId: string, minCount = 2): Pro
   const knownKeys = new Set(people.flatMap(p => p.matchKeys));
   const knownPhones = new Set(people.flatMap(p => p.phones));
   const by = new Map<string, PersonSuggestion>();
+  const merchantKeys = new Set<string>();
   for (const r of (rows?._array ?? []) as any[]) {
     const raw = String(r.merchant || r.payee || '');
     if (!looksLikePerson(raw)) continue;
+    // Paid through a MoMoPay MERCHANT code (4–6 digits, not a phone number) →
+    // a place, whatever its name looks like. A one-word shop name paid through a
+    // merchant code was suggested as a person on the real phone.
+    if (isMerchantCode(r.pay_code)) {
+      merchantKeys.add(normalizeMerchant(raw).key);
+      continue;
+    }
     const key = normalizeMerchant(raw).key;
     if (!key || knownKeys.has(key)) continue;
     const phones = [...phoneTails(String(r.pay_code ?? ''))];
@@ -263,8 +275,13 @@ export async function suggestPeople(db: any, ownerId: string, minCount = 2): Pro
     by.set(key, s);
   }
   return [...by.values()]
-    .filter(s => s.count >= minCount)
+    .filter(s => s.count >= minCount && !merchantKeys.has(s.key))
     .sort((a, b) => b.count - a.count || b.outTotal + b.inTotal - (a.outTotal + a.inTotal));
+}
+
+/** A MoMoPay merchant code (4–6 digits), as opposed to a person's phone. */
+export function isMerchantCode(payCode: string | null | undefined): boolean {
+  return /^\d{4,6}$/.test(String(payCode ?? '').trim());
 }
 
 export interface PlaceSuggestion extends PersonSuggestion {
@@ -290,7 +307,7 @@ export async function suggestPlaces(db: any, ownerId: string, minCount = 3): Pro
   const by = new Map<string, PlaceSuggestion & {cats: Record<string, number>}>();
   for (const r of (rows?._array ?? []) as any[]) {
     const raw = String(r.merchant || r.payee || '');
-    if (!raw || looksLikePerson(raw)) continue;
+    if (!raw || (looksLikePerson(raw) && !isMerchantCode(r.pay_code))) continue;
     const key = normalizeMerchant(raw).key;
     if (!key || key.length < 3 || knownKeys.has(key)) continue;
     const s: PlaceSuggestion & {cats: Record<string, number>} = by.get(key) ?? {

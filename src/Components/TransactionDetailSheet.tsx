@@ -8,6 +8,7 @@
 // every single tap — that mount-per-tap was the "noticeable lag when
 // opening a transaction" the always-live version fixes.
 import BottomSheet, {BottomSheetScrollView} from '@gorhom/bottom-sheet';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {usePowerSync, useQuery} from '@powersync/react-native';
 import {format} from 'date-fns';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
@@ -73,6 +74,7 @@ function TransactionDetailSheet(
   const sheetRef = useRef<BottomSheet>(null);
   const [selected, setSelected] = useState<any>(null);
   const [splitOpen, setSplitOpen] = useState(false);
+  const insets = useSafeAreaInsets();
   const [retrying, setRetrying] = useState(false);
   const snapPoints = useMemo(() => ['80%', '95%'], []);
   const {userId, name} = useCurrentUser();
@@ -296,7 +298,10 @@ function TransactionDetailSheet(
       // is what made EVERY tap pay a full mount cost: fresh Gesture.Pan(),
       // fresh BottomSheetScrollView layout, fresh icon rendering.
       >
-      <BottomSheetScrollView contentContainerStyle={styles.detail}>
+      {/* Bottom padding clears the tab bar AND the raised AI button: on a real
+          phone Edit / Split / Delete sat under the bar, with Split exactly where
+          the AI button is — tapping Split could open the coach instead. */}
+      <BottomSheetScrollView contentContainerStyle={[styles.detail, {paddingBottom: 28 + 120 + insets.bottom}]}>
         {!tx ? (
           <View style={{height: 1}} />
         ) : (

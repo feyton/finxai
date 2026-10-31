@@ -308,6 +308,24 @@ export default function ProfilePage({navigation}: any) {
             onPress={() => navigation.navigate('Shared')}
           />
           <View style={styles.divider} />
+          {/* Were reachable only from AI Settings — too deep for the screens that
+              decide how most person-to-person money is filed. */}
+          <Row
+            icon="Users"
+            tint={T.accent}
+            title="People & places"
+            sub="Who you pay, who pays you, your regular places"
+            onPress={() => navigation.navigate('People')}
+          />
+          <View style={styles.divider} />
+          <Row
+            icon="Brain"
+            tint={T.accent}
+            title="What FinXAI knows"
+            sub="Facts the AI reads with every SMS"
+            onPress={() => navigation.navigate('Memory')}
+          />
+          <View style={styles.divider} />
           <Row
             icon="Calendar"
             tint={T.warn}
