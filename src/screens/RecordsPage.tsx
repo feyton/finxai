@@ -124,6 +124,9 @@ export default function RecordsPage({navigation, route}: any) {
         t =>
           (t.merchant || t.payee || '').toLowerCase().includes(q) ||
           (t.category || '').toLowerCase().includes(q) ||
+          // Notes hold what the user said a payment was ("fruits 2000 and
+          // vegetables 1000") — exactly what they will search for later.
+          (t.note || '').toLowerCase().includes(q) ||
           (t._tags ?? []).some((tg: TagRow) => (tg.name ?? '').toLowerCase().includes(q)),
       );
     }

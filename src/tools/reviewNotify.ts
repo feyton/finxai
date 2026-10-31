@@ -30,16 +30,13 @@ import {extractBalance, parseSmsWithAI, regexExtract} from './smsParser';
 import {promoteAutoRecord, recheckPending} from './smsIngest';
 import {refreshBalanceWidget} from '../widgets/refreshWidget';
 import {loadMemories} from './memory';
+import {keepPendingNote} from './pendingNotes';
 
 // Never more than this many questions an hour. A burst of uncertain SMS (a
 // bank sending a statement's worth at once) should not turn the phone into a
 // pager; the rest wait in the queue as before.
 const MAX_PER_HOUR = 6;
 const ASKED_KEY = 'finxai.reviewAskedAt';
-// A typed answer that could not be classified (AI unreachable) is kept here and
-// pre-filled into the Fix sheet. auto_records has no `note` column in Postgres,
-// so it cannot ride on the pending row itself.
-const NOTES_KEY = 'finxai.reviewNotes';
 
 function categoryLabel(record: any): string {
   if (record.transaction_type === 'transfer') {
@@ -109,23 +106,8 @@ export function withdrawQuestions(recordIds: string[]): void {
   }
 }
 
-/** A typed answer that is still waiting to be used, for the Fix sheet. */
-export async function pendingNoteFor(recordId: string): Promise<string | null> {
-  try {
-    const map = JSON.parse((await AsyncStorage.getItem(NOTES_KEY)) ?? '{}');
-    return map[recordId] ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function keepNote(recordId: string, note: string): Promise<void> {
-  try {
-    const map = JSON.parse((await AsyncStorage.getItem(NOTES_KEY)) ?? '{}');
-    map[recordId] = note;
-    await AsyncStorage.setItem(NOTES_KEY, JSON.stringify(map));
-  } catch {}
-}
+// Re-exported: the Fix sheet imports it from here.
+export {pendingNoteFor} from './pendingNotes';
 
 export interface ReviewTaskPayload {
   recordId?: string;
@@ -306,7 +288,7 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
       // No model to read the words: filing on the old guess would ignore exactly
       // what the user just told us. Keep it pending, keep the note for the Fix
       // sheet, and say so.
-      await keepNote(recordId, note);
+      await keepPendingNote(recordId, note);
       finish('Saved your note — finish it in FinXAI when online');
       return;
     }

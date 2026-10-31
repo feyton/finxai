@@ -35,6 +35,7 @@ import {ignoredSmsId, rowExists, smsAlreadyRecorded, smsTransactionId} from './t
 import {isUsablePattern, normalizeMerchant} from '../../shared/merchantNormalize';
 import {syncAccountBalance} from './balance';
 import {loadMemories} from './memory';
+import {takePendingNote} from './pendingNotes';
 
 export interface AccountLike {
   id: string;
@@ -437,6 +438,12 @@ export async function promoteAutoRecord(
       : 'expense');
   const accountId = o.accountId || record.account_id;
   const isTransfer = txType === 'transfer';
+  // A description typed into a notification while offline waits on the device
+  // (see pendingNotes). Taken on EVERY promotion path — Confirm, Fix, re-check,
+  // a later notification answer — because reading it only in the Fix sheet let
+  // a plain Confirm drop it.
+  const keptNote = await takePendingNote(record.id);
+  const note = (o.note ?? record.note) || keptNote || null;
 
   // Already filed. Ids are deterministic, so a pending row can share its id with
   // a transaction that already exists — typically a confirm whose INSERT
@@ -449,6 +456,12 @@ export async function promoteAutoRecord(
   // must not overwrite the filed row, which may hold a later edit. A Fix applies
   // what the user chose there, because that is a decision about this payment.
   if (await rowExists(db, 'transactions', record.id)) {
+    if (!args.overrides && keptNote) {
+      await db.execute(
+        'UPDATE transactions SET note = COALESCE(note, ?) WHERE id = ?',
+        [keptNote, record.id],
+      );
+    }
     if (args.overrides) {
       await db.execute(
         `UPDATE transactions
@@ -462,7 +475,7 @@ export async function promoteAutoRecord(
           o.merchant || record.merchant,
           txType,
           accountId,
-          o.note || null,
+          note,
           o.channel ?? record.channel ?? null,
           o.payCode ?? record.pay_code ?? null,
           record.id,
@@ -506,7 +519,7 @@ export async function promoteAutoRecord(
       record.parse_source ?? null,
       // NULL rather than '' when blank, so "has a note" is a simple IS NOT NULL check
       // everywhere downstream.
-      (o.note ?? record.note) || null,
+      note,
       // How it was paid, overridable from the Fix sheet. Same reasoning as the
       // location columns below: this is a property of the payment, so it must
       // survive promotion rather than being re-derived (the SMS is kept, but a
