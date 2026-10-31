@@ -764,7 +764,11 @@ function regexClassify(
   // an unknown purpose is the honest Other for the direction, never Shopping.
   let category: CategoryId = isCredit ? 'other_income' : 'other_spending';
   if (facts.transferAccount) {category = 'own_transfer';}
-  else if (/mokash/.test(hay)) {category = isCredit ? 'from_savings' : 'to_savings';}
+  // Into or out of savings is in the WORDS, not the leg: a deposit lands on the
+  // tracked MoKash account as a credit and is still To Savings.
+  else if (/mokash/.test(hay)) {
+    category = /from (?:your )?mokash|withdr[ae]w/.test(hay) ? 'from_savings' : 'to_savings';
+  }
   else if (/airtime|bundle|mtn(?!\s*mobile\s*money)|airtel/.test(hay)) {category = 'airtime';}
   else if (/power|electric|token|wasac|water/.test(hay)) {category = 'utilities';}
   else if (/rent|house|apartment|kicukiro|nyamirambo/.test(hay)) {category = 'housing';}

@@ -81,7 +81,10 @@ describe('direction-aware reading of stored values (the migration rules)', () =>
 
   it('savings and loans follow the transfer direction', () => {
     expect(resolveCat('savings', 'transfer', 'out')).toBe('to_savings');
-    expect(resolveCat('savings', 'transfer', 'in')).toBe('from_savings');
+    // NOT flipped on an inbound leg: a MoKash deposit lands on the tracked MoKash
+    // account as money IN and is still To Savings.
+    expect(resolveCat('savings', 'transfer', 'in')).toBe('to_savings');
+    expect(resolveCat('From Savings', 'transfer', 'out')).toBe('from_savings');
     expect(resolveCat('debt', 'transfer', 'in')).toBe('loan_received');
     expect(coerceForType('lent_out', 'transfer', 'in')).toBe('repaid_to_me');
   });
@@ -97,6 +100,16 @@ describe('direction-aware reading of stored values (the migration rules)', () =>
   it('loans are stored as transfers so they stay out of income and spending', () => {
     expect(typeForCategory('loan_received')).toBe('transfer');
     expect(typeForCategory('family_in')).toBe('income');
+  });
+});
+
+describe('MoKash: into vs out of savings comes from the words', () => {
+  it('a deposit is To Savings even when it arrives as a credit on the MoKash account', () => {
+    const deposit = "Y'ello. You have deposited RWF 1000 into Mokash from your Mobile Money Account. Your new  Mokash balance is RWF 1500.Ref 10000000001";
+    const p = parseWithRegex(deposit, {accounts: [], currentAccountId: 'mokash'});
+    expect(p.category).toBe('to_savings');
+    const out = "Y'ello. You have transferred RWF 5000 from your Mokash account on 01/01/2026 at 5:32 PM. Mokash balance is RWF 985. Ref 10000000002";
+    expect(parseWithRegex(out, {}).category).toBe('from_savings');
   });
 });
 

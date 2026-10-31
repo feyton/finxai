@@ -239,8 +239,11 @@ export function validForType(id: CategoryId, type: string | null | undefined): b
  * the classifier and the pickers offer — "there is no income called Groceries".
  */
 export function categoriesForDirection(direction: 'in' | 'out'): CategoryId[] {
-  const out: CategoryId[] = ['own_transfer', 'to_savings', 'cash_withdrawal', 'loan_repayment', 'lent_out'];
-  const inn: CategoryId[] = ['own_transfer', 'from_savings', 'loan_received', 'repaid_to_me'];
+  // Both savings categories in BOTH directions: when the savings pocket is itself
+  // a tracked account (MoKash), a deposit arrives there as an INBOUND leg and is
+  // still To Savings. Into-vs-out-of savings is stated by the SMS, not the leg.
+  const out: CategoryId[] = ['own_transfer', 'to_savings', 'from_savings', 'cash_withdrawal', 'loan_repayment', 'lent_out'];
+  const inn: CategoryId[] = ['own_transfer', 'to_savings', 'from_savings', 'loan_received', 'repaid_to_me'];
   return CATEGORY_IDS.filter(id => {
     const k = CATEGORY_META[id].kind;
     if (direction === 'out') {
@@ -366,8 +369,9 @@ export function coerceForType(
     // A transfer's category must also match its direction.
     if (type === 'transfer') {
       const inbound = transferDirection === 'in';
-      if (id === 'to_savings' && inbound) return 'from_savings';
-      if (id === 'from_savings' && !inbound) return 'to_savings';
+      // NOT flipped: to/from savings is a fact about the money (into the pocket
+      // or out of it), true on both legs. Flipping by leg turned every MoKash
+      // deposit — inbound on the tracked MoKash account — into "From Savings".
       if (id === 'loan_received' && !inbound) return 'loan_repayment';
       if (id === 'loan_repayment' && inbound) return 'loan_received';
       if (id === 'lent_out' && inbound) return 'repaid_to_me';
