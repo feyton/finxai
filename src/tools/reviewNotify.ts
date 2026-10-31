@@ -153,6 +153,23 @@ export function withAnswerLocation(record: any, p: ReviewTaskPayload, isMoneyOut
   };
 }
 
+/** The current session, or null if it cannot be had within `ms`. */
+async function sessionWithin(ms: number): Promise<any | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      supabase.auth.getSession().then(r => r.data.session ?? null),
+      new Promise<null>(resolve => {
+        timer = setTimeout(() => resolve(null), ms);
+      }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const settle = (id: string, text: string, filed = false) => {
   try {
     NativeReviewNotifier?.settle(id, text, filed);
@@ -193,22 +210,16 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
 
   step(`start (${payload.kind})`);
   try {
-    const {
-      data: {session},
-    } = await supabase.auth.getSession();
-    step('session');
-    const ownerId = session?.user?.id ?? '';
-    if (!ownerId) {
-      finish('Sign in to FinXAI to file this');
-      return;
-    }
-
-    const {rows} = await db.execute(
-      'SELECT * FROM auto_records WHERE id = ? AND owner_id = ?',
-      [recordId, ownerId],
-    );
+    // NO auth call before the record is read. supabase.auth.getSession() waits
+    // on supabase-js's internal lock, and if a token refresh is in flight (usual
+    // after the app sat in the background) with a stalled request, it can wait
+    // indefinitely — the leading suspect for the 2026-10-19 stall, which ran out
+    // the 40s task with no step logged. The pending row says who owns it, and the
+    // one-tap path is nothing but local writes, so it never needs the session.
+    const {rows} = await db.execute('SELECT * FROM auto_records WHERE id = ?', [recordId]);
     const pendingRow = rows?._array?.[0];
     step('row');
+    const ownerId: string = pendingRow?.owner_id ?? '';
     if (!pendingRow) {
       // Answered in the app (or by a re-check) since the question went out —
       // and the transaction keeps the record's id, so a tap still opens it.
@@ -255,9 +266,18 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
       return;
     }
 
-    // 'describe': classify again with the user's own words as context.
+    // 'describe': classify again with the user's own words as context. This is
+    // the one path that needs the session (an access token for the AI proxy),
+    // so the wait is bounded: on timeout the note is kept, exactly as offline.
     const note = (payload.note ?? '').trim();
-    const meta = session?.user?.user_metadata ?? {};
+    const session = await sessionWithin(8_000);
+    step(session ? 'session' : 'session timed out');
+    if (!session) {
+      await keepPendingNote(recordId, note);
+      finish('Saved your note — finish it in FinXAI');
+      return;
+    }
+    const meta = session.user?.user_metadata ?? {};
     const {rows: acctRows} = await db.execute(
       'SELECT id, name, number FROM accounts WHERE owner_id = ?',
       [ownerId],

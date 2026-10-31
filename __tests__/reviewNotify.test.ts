@@ -22,8 +22,12 @@ jest.mock('../src/tools/database', () => ({
     }),
   },
 }));
+// Swappable per test: the stall suspect is a getSession() that never settles.
+const mockAuth = {
+  getSession: (): Promise<any> => Promise.resolve({data: {session: {user: {id: 'owner-1'}}, access_token: 't'}}),
+};
 jest.mock('../src/tools/supabase', () => ({
-  supabase: {auth: {getSession: async () => ({data: {session: {user: {id: 'owner-1'}}}})}},
+  supabase: {auth: {getSession: () => mockAuth.getSession()}},
 }));
 jest.mock('../src/tools/balance', () => ({
   syncAccountBalance: jest.fn(async () => events.push('rebalance')),
@@ -108,5 +112,38 @@ describe('reviewTaskHandler', () => {
     expect(events).toContain('rebalance');
     expect(events).toContain('recheck');
     expect(events.filter(e => e.startsWith('settle:'))).toHaveLength(1);
+  });
+});
+
+describe('a hung supabase.auth.getSession() cannot stall an answer', () => {
+  const pending = {
+    id: 'r9', owner_id: 'owner-1', amount: 5000, account_id: 'acct-1', category: 'groceries',
+    subcategory: '', transaction_type: 'expense', merchant: 'Test Shop',
+    sms: 'Your payment of 5000 RWF to Test Shop was completed. Balance: 1000 RWF.',
+    date_time: '2026-01-01T10:00:00.000Z',
+  };
+  beforeEach(() => {
+    events.length = 0;
+    mockRows.auto = [pending];
+    mockAuth.getSession = () => new Promise(() => {}); // never settles
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    mockAuth.getSession = () => Promise.resolve({data: {session: {user: {id: 'owner-1'}}}});
+  });
+
+  it('one tap files the record without ever asking for the session', async () => {
+    await reviewTaskHandler({recordId: 'r9', kind: 'confirm'});
+    expect(events[0]).toBe('promote');
+    expect(events[1]).toMatch(/^settle:Filed as /);
+  });
+
+  it('a description keeps the note and finishes after the bounded wait', async () => {
+    jest.useFakeTimers();
+    const done = reviewTaskHandler({recordId: 'r9', kind: 'describe', note: 'bread and milk'});
+    await jest.advanceTimersByTimeAsync(8_100);
+    await done;
+    expect(events).toContain('settle:Saved your note — finish it in FinXAI');
+    expect(events).not.toContain('promote');
   });
 });
