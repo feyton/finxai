@@ -217,7 +217,7 @@ describe('ignoredSmsId', () => {
 describe('findAccountForSms', () => {
   const accounts: AccountLike[] = [
     {id: 'bk-1', name: 'Bank of Kigali', address: 'BK', number: '100161965558'},
-    {id: 'momo-1', name: 'MTN MoMo', address: 'MTN', number: '0787241457'},
+    {id: 'momo-1', name: 'MTN MoMo', address: 'MTN', number: '0780000123'},
   ];
 
   it('matches on sender address', () => {

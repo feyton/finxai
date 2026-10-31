@@ -32,17 +32,17 @@ import {THRESHOLD_AUTO_SAVE} from '../src/tools/smsTypes';
 // was never invoked. See __mocks__/ for the replacement.
 
 const CTX: ParseContext = {
-  userName: 'FABRICE HAFASHIMANA',
+  userName: 'JEAN TESTER',
   accounts: [
     {id: 'bk-1', name: 'Bank of Kigali', number: '100161965558'},
-    {id: 'momo-1', name: 'MTN MoMo', number: '0787241457'},
+    {id: 'momo-1', name: 'MTN MoMo', number: '0780000123'},
     {id: 'mokash-1', name: 'MoKash Savings', number: ''},
   ],
   currentAccountId: 'bk-1',
 };
 
 const BK_TRANSFER_TO_OWN_MOMO =
-  'TRANSFER - MTN mobile money Credited account: 250787241457  Debited account: 100161965558  Amount: RWF 45,000 Transaction Charge: RWF 0 Event #: FTCM26181PVXVS4ND  Status: COMPLETED Date: 6/30/26, 10:01 AM  Channel:MOBILE Available Balance: RWF 393,526 For enquiry call BK: 250788143000 / 4455';
+  'TRANSFER - MTN mobile money Credited account: 250780000123  Debited account: 100161965558  Amount: RWF 45,000 Transaction Charge: RWF 0 Event #: FTCM26181PVXVS4ND  Status: COMPLETED Date: 6/30/26, 10:01 AM  Channel:MOBILE Available Balance: RWF 393,526 For enquiry call BK: 250788143000 / 4455';
 
 const BK_TRANSFER_TO_OTHER =
   'TRANSFER - MTN mobile money Credited account: 250788214515  Debited account: 100161965558  Amount: RWF 100,000 Transaction Charge: RWF 200 Event #: FTCM26182O3D0493G  Status: COMPLETED Date: 7/1/26, 11:35 PM  Channel:MOBILE Available Balance: RWF 266,471 For enquiry call BK: 250788143000 / 4455';
@@ -51,13 +51,13 @@ const BK_BILL_PAYMENT =
   'Bill payment - Cash Power Electricity Credited account: 04199571045 Debited account: 100161965558 Amount: RWF 10,000 Transaction Charge: RWF 0 Event #: FTCM26183ROCF7AKA Status: COMPLETED Date: 7/2/26, 9:24 AM  Channel:MOBILE  Voucher#: TK1:-2576-0359-4291-1321-9178 Available Balance: RWF 237,778 For enquiry call BK: 250788143000 / 4455';
 
 const BK_FAILED =
-  'Dear FABRICE HAFASHIMANA, your transfer to Bank of Kigali of RWF 300000.00,Transaction ID: 202607J7XX4DG6RW has FAILED. Any Queries? call 0788143000 / 4455';
+  'Dear JEAN TESTER, your transfer to Bank of Kigali of RWF 300000.00,Transaction ID: 202607J7XX4DG6RW has FAILED. Any Queries? call 0788143000 / 4455';
 
 describe('normalizeAccountNumber', () => {
   it('equates 2507..., 07..., and bare formats', () => {
-    expect(normalizeAccountNumber('250787241457')).toBe('787241457');
-    expect(normalizeAccountNumber('0787241457')).toBe('787241457');
-    expect(normalizeAccountNumber('787241457')).toBe('787241457');
+    expect(normalizeAccountNumber('250780000123')).toBe('780000123');
+    expect(normalizeAccountNumber('0780000123')).toBe('780000123');
+    expect(normalizeAccountNumber('780000123')).toBe('780000123');
   });
 });
 
@@ -136,10 +136,10 @@ describe('learned transfer rules', () => {
   it('a real-category rule vetoes the name/Mokash heuristics', () => {
     // Counterparty matches the user's name → heuristic would say transfer…
     const raw =
-      'You have received 45000 RWF from FABRICE HAFASHIMANA (*********558). Your new balance: 48,120 RWF.';
+      'You have received 45000 RWF from JEAN TESTER (*********558). Your new balance: 48,120 RWF.';
     const parsed = parseWithRegex(raw, {
-      userName: 'Fabrice Hafashimana',
-      rules: [{pattern: 'fabrice hafashimana', category: 'salary', correction_count: 1, confirmation_count: 0}],
+      userName: 'Jean Tester',
+      rules: [{pattern: 'jean tester', category: 'salary', correction_count: 1, confirmation_count: 0}],
     });
     // …but the user taught us it's income (salary), so NOT a transfer.
     expect(parsed.isTransfer).toBe(false);
@@ -148,7 +148,7 @@ describe('learned transfer rules', () => {
 
   it('account-number proof beats a contrary rule', () => {
     const parsed = parseWithRegex(
-      'TRANSFER - MTN mobile money Credited account: 250787241457  Debited account: 100161965558  Amount: RWF 5,000 Transaction Charge: RWF 0 Event #: FT1 Status: COMPLETED Date: 7/6/26, 7:37 PM Available Balance: RWF 5,397',
+      'TRANSFER - MTN mobile money Credited account: 250780000123  Debited account: 100161965558  Amount: RWF 5,000 Transaction Charge: RWF 0 Event #: FT1 Status: COMPLETED Date: 7/6/26, 7:37 PM Available Balance: RWF 5,397',
       {
         ...CTX,
         rules: [{pattern: 'to mtn momo', category: 'shopping', correction_count: 1, confirmation_count: 0}],
@@ -170,8 +170,8 @@ describe('legacy formats still work', () => {
 
   it('MoMo receive from self is a transfer (credit)', () => {
     const raw =
-      'You have received 45000 RWF from FABRICE HAFASHIMANA (*********558) on your mobile money account. Your new balance: 48,120 RWF.';
-    const parsed = parseWithRegex(raw, {userName: 'Fabrice Hafashimana'});
+      'You have received 45000 RWF from JEAN TESTER (*********558) on your mobile money account. Your new balance: 48,120 RWF.';
+    const parsed = parseWithRegex(raw, {userName: 'Jean Tester'});
     expect(parsed.direction).toBe('credit');
     expect(parsed.isTransfer).toBe(true);
   });
@@ -194,25 +194,25 @@ describe('legacy formats still work', () => {
 //   337,586 −  40,000 (19 JUL debit) − 40  (20+20 charges) = 297,546
 //   297,546 −  30,000 (20 JUL debit) − 40  (20+20 charges) = 267,506
 const BPR_DEBIT =
-  'Dear RUSARO KIZITO ANGE, your account 4******947 has been debited RWF 30,000.00. Ref: FT26201C9DZQ on 20 JUL 2026-19:28:17 at BPR Bank. Transaction Charge: RWF 20.00. Notification Charge: RWF 20.00. Your balance is RWF 267,506.00. For inquiry call 250788140000';
+  'Dear ALICE MARIE TESTER, your account 4******947 has been debited RWF 30,000.00. Ref: FT26201C9DZQ on 20 JUL 2026-19:28:17 at BPR Bank. Transaction Charge: RWF 20.00. Notification Charge: RWF 20.00. Your balance is RWF 267,506.00. For inquiry call 250788140000';
 
 const BPR_DEBIT_ZERO_TXN_CHARGE =
-  'Dear RUSARO KIZITO ANGE, your account 4******947 has been debited RWF 100,000.00. Ref: FT26189JP45Y on 08 JUL 2026-08:34:20 at BPR Bank. Transaction Charge: RWF 0.00. Notification Charge: RWF 20.00. Your balance is RWF 437,626.00. For inquiry call 250788140000';
+  'Dear ALICE MARIE TESTER, your account 4******947 has been debited RWF 100,000.00. Ref: FT26189JP45Y on 08 JUL 2026-08:34:20 at BPR Bank. Transaction Charge: RWF 0.00. Notification Charge: RWF 20.00. Your balance is RWF 437,626.00. For inquiry call 250788140000';
 
 const BPR_CREDIT =
-  'Dear RUSARO KIZITO ANGE, your account 4******947 has been credited RWF 211,933.00. Ref: FT2617626KF3 on 25 JUN 2026-16:04:27 at BPR Bank. Transaction Charge: RWF 500.00. Notification Charge: RWF 20.00. Your balance is RWF 537,646.00. For inquiry call 250788140000';
+  'Dear ALICE MARIE TESTER, your account 4******947 has been credited RWF 211,933.00. Ref: FT2617626KF3 on 25 JUN 2026-16:04:27 at BPR Bank. Transaction Charge: RWF 500.00. Notification Charge: RWF 20.00. Your balance is RWF 537,646.00. For inquiry call 250788140000';
 
 const BPR_STATUS_COMPLETED =
-  'Dear RUSARO KIZITO ANGE, \n\nTransaction Ref: 20144624592 of RWF 30,000.00 from A/c 4*****1947 to A/c 0*****2911 on 20/07/2026 is Completed Bank Ref: 04e5c2f8-d07a-4f46-a183-5e01a5e42b58.';
+  'Dear ALICE MARIE TESTER, \n\nTransaction Ref: 20144624592 of RWF 30,000.00 from A/c 4*****1947 to A/c 0*****2911 on 20/07/2026 is Completed Bank Ref: 04e5c2f8-d07a-4f46-a183-5e01a5e42b58.';
 
 const BPR_STATUS_PROCESSING =
-  'Dear RUSARO KIZITO ANGE, \n\nTransaction Ref: 20144624592 of RWF 30,000.00 from A/c 4*****1947 to A/c 0*****2911 on 20/07/2026 is Your request is being processing, confirmation will be sent to you shortly Bank Ref: 04e5c2f8-d07a-4f46-a183-5e01a5e42b58.';
+  'Dear ALICE MARIE TESTER, \n\nTransaction Ref: 20144624592 of RWF 30,000.00 from A/c 4*****1947 to A/c 0*****2911 on 20/07/2026 is Your request is being processing, confirmation will be sent to you shortly Bank Ref: 04e5c2f8-d07a-4f46-a183-5e01a5e42b58.';
 
 const BPR_CTX: ParseContext = {
-  userName: 'RUSARO KIZITO ANGE',
+  userName: 'ALICE MARIE TESTER',
   accounts: [
     {id: 'bpr-1', name: 'BPR Bank', number: '4001234561947'},
-    {id: 'momo-1', name: 'MTN MoMo', number: '250787241457'},
+    {id: 'momo-1', name: 'MTN MoMo', number: '250780000123'},
   ],
   currentAccountId: 'bpr-1',
 };
@@ -292,8 +292,8 @@ describe('masked-number suffix matching (BPR shows a different trailing length p
   });
 
   it('a destination suffix matches the configured MoMo account by its trailing digits', () => {
-    const momoNorm = normalizeAccountNumber('0787241457'); // → '787241457'
-    expect(maskedSuffixMatches('1457', momoNorm)).toBe(true);
+    const momoNorm = normalizeAccountNumber('0780000123'); // → '780000123'
+    expect(maskedSuffixMatches('0123', momoNorm)).toBe(true);
     expect(maskedSuffixMatches('2911', momoNorm)).toBe(false);
   });
 });
@@ -350,13 +350,13 @@ describe('Kinyarwanda MTN Mokash SMS', () => {
 // sender ("BK BANK") than the original "TRANSFER - ... Credited account:"
 // format. No "Date:" label, no counterparty name; uses "Txn Description".
 const BK_V2_CREDIT =
-  'Dear FABRICE HAFASHIMANA, your account ********5558 has been credited RWF2,073,109. Ref: FTCM26204KMIB5YCF on 23-07-2026 19:05:37. Txn Description: Incoming Trsf frm local banks. Txn Charge: RWF0. Notification Charge: RWF0. Available Balance: RWF2,073,109. For inquiries call BK: 250788143000.';
+  'Dear JEAN TESTER, your account ********5558 has been credited RWF2,073,109. Ref: FTCM26204KMIB5YCF on 23-07-2026 19:05:37. Txn Description: Incoming Trsf frm local banks. Txn Charge: RWF0. Notification Charge: RWF0. Available Balance: RWF2,073,109. For inquiries call BK: 250788143000.';
 
 const BK_V2_DEBIT_EKASH =
-  'Dear FABRICE HAFASHIMANA, your account ********5558 has been debited RWF100,000. Ref: FTCM2620415SGRF2Y on 23-07-2026 19:10:45. Txn Description: EKASH P2P-NEW APP. Txn Charge: RWF20. Notification Charge: RWF0. Available Balance: RWF1,812,490. For inquiries call BK: 250788143000.';
+  'Dear JEAN TESTER, your account ********5558 has been debited RWF100,000. Ref: FTCM2620415SGRF2Y on 23-07-2026 19:10:45. Txn Description: EKASH P2P-NEW APP. Txn Charge: RWF20. Notification Charge: RWF0. Available Balance: RWF1,812,490. For inquiries call BK: 250788143000.';
 
 const BK_V2_CARD_PURCHASE =
-  'Dear FABRICE HAFASHIMANA, your account ********5558 has been debited RWF5,064. Ref: FTCM26204TSGM6FED on 23-07-2026 19:56:04. Txn Description: Card Purchase. Txn Charge: RWF0. Notification Charge: RWF0. Available Balance: RWF1,807,426. For inquiries call BK: 250788143000.';
+  'Dear JEAN TESTER, your account ********5558 has been debited RWF5,064. Ref: FTCM26204TSGM6FED on 23-07-2026 19:56:04. Txn Description: Card Purchase. Txn Charge: RWF0. Notification Charge: RWF0. Available Balance: RWF1,807,426. For inquiries call BK: 250788143000.';
 
 describe('Bank of Kigali — second alert format ("BK BANK" sender)', () => {
   it('reads a credit correctly: amount, balance, date, and a merchant from Txn Description', () => {
@@ -398,12 +398,12 @@ describe('Bank of Kigali — second alert format ("BK BANK" sender)', () => {
     // The account's OWN configured number (unmasked) still matches by suffix.
     expect(maskedSuffixMatches(trailingDigits(ref!), normalizeAccountNumber('100161965558'))).toBe(true);
     // A different account's number does not.
-    expect(maskedSuffixMatches(trailingDigits(ref!), normalizeAccountNumber('0787241457'))).toBe(false);
+    expect(maskedSuffixMatches(trailingDigits(ref!), normalizeAccountNumber('0780000123'))).toBe(false);
   });
 
   it('the same transaction reported by BOTH BK senders shares one txn_ref, so it can be deduplicated', () => {
     const OLD_SENDER_SAME_TXN =
-      'TRANSFER - EKASH Beneficiary: Fabrice HAFASHIMANA Credited account: 250787241457 Debited account: 100161965558 Amount:RWF 100000.00 Transaction Charge:RWF 20 Event #:FTCM2620415SGRF2Y Status: COMPLETED Date: 2026-07-23 19:10:39.43 Channel:MOBILE Available Balance:RWF 1,812,490 For enquiry call BK:250788143000/4455';
+      'TRANSFER - EKASH Beneficiary: Jean TESTER Credited account: 250780000123 Debited account: 100161965558 Amount:RWF 100000.00 Transaction Charge:RWF 20 Event #:FTCM2620415SGRF2Y Status: COMPLETED Date: 2026-07-23 19:10:39.43 Channel:MOBILE Available Balance:RWF 1,812,490 For enquiry call BK:250788143000/4455';
     const a = regexExtract(BK_V2_DEBIT_EKASH);
     const b = regexExtract(OLD_SENDER_SAME_TXN);
     expect(a.txn_ref).toBe('FTCM2620415SGRF2Y');
@@ -445,8 +445,8 @@ describe('counterparty extraction (real inbox samples)', () => {
     ],
     [
       'MTN receive — greedy .+ used to bind the LAST "from", yielding "sender:"',
-      'You have received 105000 RWF from FABRICE HAFASHIMANA (*********915) at 2026-07-29 10:56:04. Message from sender: . Balance:108180 RWF. FT Id: 29505457081.',
-      'Fabrice Hafashimana',
+      'You have received 105000 RWF from JEAN TESTER (*********915) at 2026-07-29 10:56:04. Message from sender: . Balance:108180 RWF. FT Id: 29505457081.',
+      'Jean Tester',
     ],
     [
       'legacy MoMo payment — was silently "SAWA CITI LTD has been completed"',
@@ -469,7 +469,7 @@ describe('counterparty extraction (real inbox samples)', () => {
 
   it('the BK header format still wins over the new MTN pattern, casing preserved', () => {
     const parsed = parseWithRegex(
-      'TRANSFER - MTN mobile money Credited account: 250787241457  Debited account: 100161965558  Amount: RWF 5,000 Transaction Charge: RWF 0 Status: COMPLETED',
+      'TRANSFER - MTN mobile money Credited account: 250780000123  Debited account: 100161965558  Amount: RWF 5,000 Transaction Charge: RWF 0 Status: COMPLETED',
     );
     // A bank DESCRIPTION field, not a counterparty name — passed through as the
     // bank wrote it rather than title-cased.

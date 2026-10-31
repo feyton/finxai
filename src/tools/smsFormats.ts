@@ -69,7 +69,7 @@ const MTN: SmsFormat = {
       new RegExp(String.raw`\btransaction\s+of\s+[\d,.]+\s*(?:RWF|FRW)\s+by\s+(.+?)` + STOP, 'i'),
       // "Your payment of 1,500 RWF to Valentine 002597 was completed"
       new RegExp(String.raw`payment\s+of\s+[\d,.]+\s*(?:RWF|FRW)\s+to\s+(.+?)` + STOP, 'i'),
-      // "You have received 105000 RWF from FABRICE HAFASHIMANA (*****915)"
+      // "You have received 105000 RWF from JEAN TESTER (*****915)"
       new RegExp(String.raw`received\s+.+?\bfrom\s+(.+?)` + STOP, 'i'),
       new RegExp(String.raw`sent\s+to\s+(.+?)` + STOP, 'i'),
     ]);
