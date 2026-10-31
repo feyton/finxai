@@ -31,6 +31,7 @@ import {promoteAutoRecord, recheckPending} from './smsIngest';
 import {refreshBalanceWidget} from '../widgets/refreshWidget';
 import {loadMemories} from './memory';
 import {keepPendingNote} from './pendingNotes';
+import {saveSplit} from './splits';
 
 // Never more than this many questions an hour. A burst of uncertain SMS (a
 // bank sending a statement's worth at once) should not turn the phone into a
@@ -311,13 +312,40 @@ export async function reviewTaskHandler(payload: ReviewTaskPayload): Promise<voi
       },
     });
     step('promoted');
+    // "fruits 2000 and vegetables 1000" → split parts, labelled with what they
+    // were; whatever the items do not cover stays in the filed category.
+    const nItems = parsed.items?.length ?? 0;
+    if (nItems) {
+      await saveSplit(
+        db,
+        {
+          id: recordId,
+          amount: record.amount,
+          category: filedCat,
+          subcategory: filedSub,
+          transaction_type: type,
+          transfer_direction: null,
+          owner_id: ownerId,
+        },
+        parsed.items!.map(it => ({
+          category: it.category,
+          subcategory: it.subcategory,
+          amount: it.amount,
+          label: it.name,
+        })),
+      );
+      step(`split into ${nItems}`);
+    }
     const filed = categoryLabel({
       transaction_type: type,
       category: filedCat,
       subcategory: filedSub,
     });
     // Same as the one-tap path: answer first, upkeep after.
-    finish(`Filed as ${filed}${placed} · “${note.slice(0, 40)}”`, true);
+    finish(
+      `Filed as ${filed}${placed}${nItems ? ` · split into ${nItems} items` : ''} · “${note.slice(0, 40)}”`,
+      true,
+    );
     await syncAccountBalance(db, accountId);
     step('rebalanced');
     // A confirmation, not a correction: a description is about THIS purchase.

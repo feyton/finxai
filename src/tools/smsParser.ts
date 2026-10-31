@@ -820,6 +820,8 @@ function extractJson(text: string): any {
 // `validSubcats.some(...)` check from a filter into an assertion.
 export function classificationSchema(
   direction: 'debit' | 'credit' = 'debit',
+  // When the user described the payment: also ask for the items they listed.
+  withItems = false,
 ): Record<string, unknown> {
   // Only the categories valid for which way the money moved, and only their
   // subcategories. A JSON schema cannot tie a subcategory to the category chosen
@@ -845,6 +847,26 @@ export function classificationSchema(
       subcategory: {type: 'string', enum: allSubcats},
       channel: {type: 'string', enum: CHANNELS.split(', ')},
       confidence: {type: 'number', description: '0..1, how sure about merchant + category.'},
+      ...(withItems
+        ? {
+            items: {
+              type: 'array',
+              description:
+                'Only when the account holder listed items WITH amounts ("fruits 2000 and vegetables 1000"). One entry per item, amounts exactly as they said. Omit otherwise.',
+              items: {
+                type: 'object',
+                properties: {
+                  name: {type: 'string'},
+                  amount: {type: 'number'},
+                  category: {type: 'string', enum: allowed},
+                  subcategory: {type: 'string', enum: allSubcats},
+                },
+                required: ['name', 'amount', 'category'],
+                additionalProperties: false,
+              },
+            },
+          }
+        : {}),
     },
     required: ['merchant', 'category', 'confidence'],
     additionalProperties: false,
@@ -1114,7 +1136,7 @@ ${channelLines ? `\nKnown merchant channels:\n${channelLines}` : ''}${
       : ''
   }${
     promptNote(ctx?.userNote)
-      ? `\n\nThe account holder described this payment in their own words: "${promptNote(ctx?.userNote)}". Trust it for category and subcategory. The merchant still comes from the SMS.`
+      ? `\n\nThe account holder described this payment in their own words: "${promptNote(ctx?.userNote)}". Trust it for category and subcategory. The merchant still comes from the SMS. If they listed items WITH amounts, also return them as items.`
       : ''
   }`;
 
@@ -1223,7 +1245,7 @@ export function applyClassification(
     const isTransfer = resolveTransfer(f, rule, raw, ctx?.userName, j.is_transfer === true);
 
     // Subcategory validity (and direction) is enforced in factsToParsed.
-    return factsToParsed(
+    const parsed = factsToParsed(
       f,
       merchant,
       category,
@@ -1233,6 +1255,26 @@ export function applyClassification(
       subcategory,
       'ai',
     );
+    if (Array.isArray(j.items) && j.items.length && !parsed.isTransfer) {
+      let left = Math.round(f.amount);
+      const items: NonNullable<ParsedSMS['items']> = [];
+      for (const it of j.items) {
+        const amount = Math.min(Math.round(Number(it?.amount) || 0), left);
+        const c = matchCategory(String(it?.category ?? ''));
+        if (!c || amount <= 0 || !String(it?.name ?? '').trim()) {
+          continue;
+        }
+        // Same enforcement as the record itself: valid for the direction, and a
+        // subcategory only if it belongs to the item's final category.
+        const v = enforceDirection(f.direction, c, false, String(it?.subcategory ?? ''));
+        items.push({name: String(it.name).trim().slice(0, 40), amount, category: v.category, subcategory: v.subcategory});
+        left -= amount;
+      }
+      if (items.length) {
+        parsed.items = items;
+      }
+    }
+    return parsed;
   }
 }
 
@@ -1256,7 +1298,7 @@ export async function parseSmsWithAI(
       planned.system,
       planned.user,
       authToken,
-      classificationSchema(planned.facts.direction),
+      classificationSchema(planned.facts.direction, !!promptNote(ctx?.userNote)),
     );
     return applyClassification(reply, planned, raw, rules, ctx);
   } catch (e: any) {

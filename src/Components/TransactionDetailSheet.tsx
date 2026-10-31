@@ -26,6 +26,7 @@ import {reclassifySms} from '../tools/smsIngest';
 import {supabase} from '../tools/supabase';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {appAlert} from './AppDialog';
+import SplitSheet from './SplitSheet';
 import TagPicker, {TagPill} from './TagPicker';
 import {parseTagIds} from '../../shared/tags';
 import {ensureTag, setTransactionTags, type TagRow} from '../tools/tags';
@@ -71,6 +72,7 @@ function TransactionDetailSheet(
   const db = usePowerSync();
   const sheetRef = useRef<BottomSheet>(null);
   const [selected, setSelected] = useState<any>(null);
+  const [splitOpen, setSplitOpen] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const snapPoints = useMemo(() => ['80%', '95%'], []);
   const {userId, name} = useCurrentUser();
@@ -510,9 +512,17 @@ function TransactionDetailSheet(
                       onPress={editSelected}
                       style={({pressed}) => [styles.editBtn, {opacity: pressed ? 0.8 : 1}]}>
                       <Icon name="Pencil" size={15} color={T.accent} strokeWidth={2.2} />
-                      <Text style={styles.editBtnText}>
-                        {isTransfer ? 'Edit' : 'Edit / Split'}
-                      </Text>
+                      <Text style={styles.editBtnText}>Edit</Text>
+                    </Pressable>
+                  )}
+                  {/* Owner only: split rows are owner-only under RLS, so a shared
+                      editor's split would upload, be refused, and vanish. */}
+                  {canEdit && !isTransfer && selected?.owner_id === userId && (
+                    <Pressable
+                      onPress={() => setSplitOpen(true)}
+                      style={({pressed}) => [styles.editBtn, {opacity: pressed ? 0.8 : 1}]}>
+                      <Icon name="Scissors" size={15} color={T.accent} strokeWidth={2.2} />
+                      <Text style={styles.editBtnText}>{splits.length ? 'Edit split' : 'Split'}</Text>
                     </Pressable>
                   )}
                   {canDelete && (
@@ -529,6 +539,12 @@ function TransactionDetailSheet(
           </GestureDetector>
         )}
       </BottomSheetScrollView>
+      <SplitSheet
+        visible={splitOpen}
+        tx={selected}
+        rows={splits}
+        onClose={() => setSplitOpen(false)}
+      />
       <TagPicker
         visible={tagPickerOpen}
         ownerId={userId ?? ''}

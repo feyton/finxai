@@ -31,6 +31,10 @@ export interface ParsedSMS {
   // True when the money moved between the user's OWN accounts (BK↔MoMo,
   // MoMo↔Mokash, self-transfer) — net-zero across net worth, not spend/income.
   isTransfer?: boolean;
+  // Items the account holder listed when describing the payment ("fruits 2000
+  // and vegetables 1000"), each with a category valid for the direction. Only
+  // present on a classification that had a userNote; becomes split parts.
+  items?: {name: string; amount: number; category: CategoryId; subcategory: string}[];
   // 'failed' when the SMS reports a FAILED/REVERSED/DECLINED transaction —
   // such messages must never become records (they go to ignored_sms).
   status?: 'completed' | 'failed';

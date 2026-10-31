@@ -18,6 +18,7 @@ import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {CatChip, Icon} from '../Components/ui';
 import {useCurrentUser} from '../hooks/useCurrentUser';
 import {useSubcategories} from '../hooks/useSubcategories';
+import {partsFromRows, saveSplit} from '../tools/splits';
 import {movementDelta, rebalanceAccount} from '../tools/balance';
 import {
   CATS,
@@ -34,12 +35,6 @@ import {
   resolveCat,
 } from '../theme';
 
-function uuid(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = (Math.random() * 16) | 0;
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  });
-}
 
 // Which way a transaction moves its account. Used only to pick a transfer's
 // direction when one is created by changing the type; the balance arithmetic
@@ -54,12 +49,6 @@ function movementSign(txType: string, transferDirection?: string | null): number
   return -1;
 }
 
-interface SplitRow {
-  category: CategoryId;
-  /** Optional, and empty means "not set" — never inherited from the parent. */
-  subcategory: string;
-  amount: number;
-}
 
 const TYPE_CHOICES = [
   {id: 'expense', label: 'Money out'},
@@ -85,18 +74,6 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  // Split editor
-  const [parts, setParts] = useState<SplitRow[]>(
-    (splits as any[]).map(s => ({
-      category: resolveCat(s.category ?? ''),
-      subcategory: s.subcategory ?? '',
-      amount: s.amount ?? 0,
-    })),
-  );
-  const [partCat, setPartCat] = useState<CategoryId | null>(null);
-  const [partSub, setPartSub] = useState('');
-  const [partAmount, setPartAmount] = useState('');
-
   const isTransfer = txType === 'transfer';
   const subcats = subcatsFor(category);
   // Which way the money moves: fixed by the record (the amount's sign does not
@@ -120,21 +97,6 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
     });
   };
   const numericAmount = Math.abs(parseInt(amount, 10) || 0);
-  const partsTotal = parts.reduce((s, p) => s + p.amount, 0);
-  const remaining = numericAmount - partsTotal;
-
-  const addPart = () => {
-    const amt = parseInt(partAmount.replace(/\D/g, ''), 10) || 0;
-    if (!partCat || amt <= 0) {
-      return;
-    }
-    setParts(prev => [...prev, {category: partCat, subcategory: partSub, amount: amt}]);
-    setPartCat(null);
-    setPartSub('');
-    setPartAmount('');
-    setError('');
-  };
-
   const save = async () => {
     if (numericAmount <= 0) {
       setError('Enter an amount');
@@ -148,14 +110,6 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
         (accountId || tx.account_id) !== tx.account_id)
     ) {
       setError('Only the account owner can change the amount or account.');
-      return;
-    }
-    if (parts.length > 0 && remaining !== 0) {
-      setError(
-        remaining > 0
-          ? `Split parts leave ${fmtAmount(remaining)} RWF unallocated`
-          : `Split parts exceed the amount by ${fmtAmount(-remaining)} RWF`,
-      );
       return;
     }
     setBusy(true);
@@ -208,42 +162,22 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
           tx.id,
         ],
       );
-      // splits replaced atomically
-      await db.execute('DELETE FROM split_details WHERE transaction_id = ?', [tx.id]);
-      for (const p of parts) {
-        await db.execute(
-          'INSERT INTO split_details (id, transaction_id, amount, category, subcategory, note, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [
-            uuid(),
-            tx.id,
-            p.amount,
-            // The ID, not the label. transactions.category stores ids, and every reader
-            // COALESCEs the two columns together, so storing a label here meant the
-            // readers depended on resolveCat's fuzzy substring matching to undo it.
-            // Existing rows still hold labels; __tests__/categoryRoundTrip.test.ts pins
-            // that both spellings resolve to the same id, so no backfill is needed.
-            p.category,
-            // NULL, not ''. Readers do COALESCE(s.subcategory, t.subcategory), and
-            // COALESCE only skips NULL — an empty string is a value and wins, so writing
-            // '' here ERASED the parent's subcategory from reports the moment a
-            // transaction was split.
-            p.subcategory || null,
-            null,
-            // The PARENT TRANSACTION's owner, not the editor's uid (the web
-            // drawer already does this). Split rows live in the transaction
-            // owner's sync bucket; a shared editor writing their own uid here
-            // produced rows the owner never downloaded, sitting alongside the
-            // owner's old rows the editor's DELETE was never allowed to touch.
-            tx.owner_id ?? userId ?? '',
-          ],
-        );
-      }
-      // After the row is written: replay reads it, so settling first would
-      // recompute the old state.
-      if (movedMoney) {
-        for (const [accId, dl] of deltas) {
-          await rebalanceAccount(db, accId, dl);
-        }
+      // Splitting lives in the Split sheet now (src/Components/SplitSheet.tsx).
+      // Saving here keeps the parts that differ and recomputes the rest for the
+      // new amount and category — so changing the amount can never leave a split
+      // that over- or under-covers the transaction, which reports would then
+      // count wrongly.
+      if ((splits as any[]).length) {
+        const before = {...tx, owner_id: tx.owner_id ?? userId ?? ''};
+        const after = {
+          ...before,
+          amount: numericAmount,
+          category: coerceForType(category, txType, transferDirection ?? (inbound ? 'in' : 'out')),
+          subcategory,
+          transaction_type: txType,
+          transfer_direction: transferDirection,
+        };
+        await saveSplit(db, after, txType === 'transfer' ? [] : partsFromRows(before, splits));
       }
       navigation.goBack();
     } catch (e: any) {
@@ -414,132 +348,13 @@ function EditForm({tx, splits, accounts, navigation, canMoveMoney = true}: any) 
           placeholderTextColor={T.text3}
         />
 
-        {/* Split */}
-        {!isTransfer && (
-          <>
-            <View style={styles.splitHead}>
-              <Text style={[styles.label, {marginTop: 0, marginBottom: 0}]}>Split across categories</Text>
-              {parts.length > 0 && (
-                <Text
-                  style={[
-                    styles.remaining,
-                    {color: remaining === 0 ? T.accent : remaining < 0 ? T.expense : T.text2},
-                  ]}>
-                  {remaining === 0
-                    ? 'fully allocated'
-                    : remaining > 0
-                    ? `${fmtAmount(remaining)} left`
-                    : `${fmtAmount(-remaining)} over`}
-                </Text>
-              )}
-            </View>
-            <Text style={styles.hint}>
-              Optional — reports use the parts instead of the single category.
-            </Text>
-
-            {parts.map((p, i) => (
-              <View key={`${p.category}-${p.subcategory}-${i}`} style={styles.splitRow}>
-                <CatChip cat={p.category} size={30} />
-                <View style={{flex: 1, minWidth: 0}}>
-                  <Text style={styles.splitRowLabel} numberOfLines={1}>
-                    {CATS[p.category].label}
-                  </Text>
-                  {p.subcategory ? (
-                    <Text style={styles.splitRowSub} numberOfLines={1}>
-                      {p.subcategory}
-                    </Text>
-                  ) : null}
-                </View>
-                <Text style={styles.splitRowAmt}>{fmtAmount(p.amount)}</Text>
-                <Pressable
-                  onPress={() => setParts(prev => prev.filter((_, j) => j !== i))}
-                  hitSlop={8}>
-                  <Icon name="X" size={15} color={T.text3} strokeWidth={2.2} />
-                </Pressable>
-              </View>
-            ))}
-
-            <View style={styles.wrapRow}>
-              {catChoices.map(id => CATS[id]).map(c => {
-                const on = partCat === c.id;
-                return (
-                  <Pressable
-                    key={c.id}
-                    onPress={() => {
-                      // Changing the part's category invalidates any subcategory already
-                      // picked, since subcategories belong to one category.
-                      setPartCat(on ? null : c.id);
-                      setPartSub('');
-                    }}
-                    style={[
-                      styles.subChip,
-                      on && {borderColor: c.color, backgroundColor: c.color + '14'},
-                    ]}>
-                    <CatChip cat={c.id} size={20} />
-                    <Text
-                      style={[styles.subChipText, on && {color: T.text}]}
-                      numberOfLines={1}>
-                      {c.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            {/* Subcategory for THIS part. Only shown once a category is chosen, because
-                subcategories belong to a category — and only when that category actually
-                has any, so the row never appears empty. */}
-            {partCat && subcatsFor(partCat).length > 0 && (
-              <View style={styles.wrapRow}>
-                {subcatsFor(partCat).map(sc => {
-                  const on = partSub === sc.name;
-                  return (
-                    <Pressable
-                      key={sc.name}
-                      onPress={() => setPartSub(on ? '' : sc.name)}
-                      style={[
-                        styles.subChip,
-                        on && {
-                          borderColor: CATS[partCat].color,
-                          backgroundColor: CATS[partCat].color + '14',
-                        },
-                      ]}>
-                      <Text style={{fontSize: 12}}>{sc.icon}</Text>
-                      <Text
-                        style={[styles.subChipText, on && {color: T.text}]}
-                        numberOfLines={1}>
-                        {sc.name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
-
-            <View style={styles.splitAdderRow}>
-              <TextInput
-                value={partAmount}
-                onChangeText={setPartAmount}
-                keyboardType="numeric"
-                placeholder={
-                  partCat
-                    ? `Amount for ${partSub || CATS[partCat].label}`
-                    : 'Pick a category above'
-                }
-                placeholderTextColor={T.text3}
-                editable={!!partCat}
-                style={[styles.input, {flex: 1, marginBottom: 0}]}
-              />
-              <Pressable
-                onPress={addPart}
-                disabled={!partCat || !partAmount}
-                style={({pressed}) => [
-                  styles.splitAddBtn,
-                  {opacity: !partCat || !partAmount ? 0.4 : pressed ? 0.8 : 1},
-                ]}>
-                <Icon name="Plus" size={16} color={T.accentInk} strokeWidth={2.6} />
-              </Pressable>
-            </View>
-          </>
+        {/* Splitting moved to the Split sheet (transaction detail → Split): the
+            parts that differ, with the rest kept in this category automatically. */}
+        {(splits as any[]).length > 0 && !isTransfer && (
+          <Text style={styles.hint}>
+            Split into {(splits as any[]).length} parts — saving keeps the parts and
+            puts the rest in the category above.
+          </Text>
         )}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -698,39 +513,7 @@ const styles = StyleSheet.create({
   },
   subChipActive: {borderColor: T.accent, backgroundColor: T.accentSoft},
   subChipText: {fontFamily: FONTS.medium, fontSize: 11.5, color: T.text3, maxWidth: 150},
-  splitHead: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    marginTop: 18,
-    marginBottom: 6,
-  },
-  remaining: {fontFamily: FONTS.semibold, fontSize: 11.5},
-  splitRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: T.surface,
-    borderRadius: R.small,
-    borderWidth: 1,
-    borderColor: T.border,
-    paddingHorizontal: 11,
-    paddingVertical: 9,
-    marginBottom: 7,
-  },
   // No longer flex:1 — it now sits inside a flexing column beside the subcategory.
-  splitRowLabel: {fontFamily: FONTS.semibold, fontSize: 12.5, color: T.text},
-  splitRowSub: {fontFamily: FONTS.regular, fontSize: 11, color: T.text2, marginTop: 1},
-  splitRowAmt: {fontFamily: FONTS.bold, fontSize: 12.5, color: T.text},
-  splitAdderRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8},
-  splitAddBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: R.small,
-    backgroundColor: T.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   error: {fontFamily: FONTS.medium, fontSize: 12.5, color: T.expense, textAlign: 'center', marginTop: 10},
   saveBtn: {
     flexDirection: 'row',
